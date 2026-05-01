@@ -1,6 +1,8 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { Sidebar } from '@/components/sidebar';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -8,9 +10,19 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Separator } from '@/components/ui/separator';
-import { Check, X, Loader2 } from 'lucide-react';
+import { Check, X, Loader2, AlertCircle } from 'lucide-react';
+
+interface UserInfo {
+  id: string;
+  phone: string;
+  nickname: string;
+  role: string;
+}
 
 export default function SettingsPage() {
+  const router = useRouter();
+  const [user, setUser] = useState<UserInfo | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
   const [prefix, setPrefix] = useState('QYD');
   const [companyName, setCompanyName] = useState('温州青崖信息科技有限公司');
   const [phone, setPhone] = useState('400-888-8888');
@@ -20,23 +32,31 @@ export default function SettingsPage() {
   const [saveMessage, setSaveMessage] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
   const [verifyResult, setVerifyResult] = useState<{ available: boolean; message: string } | null>(null);
   
-  // 加载已有设置
+  // 检查登录状态
   useEffect(() => {
-    const loadSettings = async () => {
-      try {
-        const response = await fetch('/api/settings/load');
-        const data = await response.json();
-        if (data.success && data.settings) {
-          if (data.settings.order_prefix) setPrefix(data.settings.order_prefix);
-          if (data.settings.company_name) setCompanyName(data.settings.company_name);
-          if (data.settings.company_phone) setPhone(data.settings.company_phone);
-          if (data.settings.company_address) setAddress(data.settings.company_address);
+    const checkAuth = () => {
+      const cookies = document.cookie.split(';');
+      let found = false;
+      for (let cookie of cookies) {
+        const [name, value] = cookie.trim().split('=');
+        if (name === 'user_info') {
+          try {
+            const userInfo = JSON.parse(decodeURIComponent(value));
+            setUser(userInfo);
+            found = true;
+          } catch {
+            setUser(null);
+          }
+          break;
         }
-      } catch (error) {
-        console.error('加载设置失败:', error);
       }
+      if (!found) {
+        setUser(null);
+      }
+      setIsLoading(false);
     };
-    loadSettings();
+    
+    checkAuth();
   }, []);
 
   const handleVerifyPrefix = async () => {
@@ -68,6 +88,11 @@ export default function SettingsPage() {
   };
   
   const handleSaveSettings = async () => {
+    if (!user) {
+      setSaveMessage({ type: 'error', message: '请先登录后再保存设置' });
+      return;
+    }
+    
     setIsSaving(true);
     setSaveMessage(null);
     
@@ -92,6 +117,52 @@ export default function SettingsPage() {
       setIsSaving(false);
     }
   };
+
+  // 加载已有设置
+  useEffect(() => {
+    if (!user) return;
+    
+    const loadSettings = async () => {
+      try {
+        const response = await fetch('/api/settings/load');
+        const data = await response.json();
+        if (data.success && data.settings) {
+          if (data.settings.order_prefix) setPrefix(data.settings.order_prefix);
+          if (data.settings.company_name) setCompanyName(data.settings.company_name);
+          if (data.settings.company_phone) setPhone(data.settings.company_phone);
+          if (data.settings.company_address) setAddress(data.settings.company_address);
+        }
+      } catch (error) {
+        console.error('加载设置失败:', error);
+      }
+    };
+    loadSettings();
+  }, [user]);
+
+  // 未登录提示
+  if (!isLoading && !user) {
+    return (
+      <div className="flex min-h-screen bg-background">
+        <Sidebar />
+        <main className="flex-1 flex items-center justify-center">
+          <Card className="w-full max-w-md">
+            <CardHeader className="text-center">
+              <div className="w-16 h-16 mx-auto mb-4 rounded-full bg-destructive/10 flex items-center justify-center">
+                <AlertCircle className="h-8 w-8 text-destructive" />
+              </div>
+              <CardTitle className="text-2xl">请先登录</CardTitle>
+              <CardDescription>系统设置需要登录后才能访问</CardDescription>
+            </CardHeader>
+            <CardContent className="text-center">
+              <Link href="/login">
+                <Button size="lg" className="w-full">前往登录</Button>
+              </Link>
+            </CardContent>
+          </Card>
+        </main>
+      </div>
+    );
+  }
 
   return (
     <div className="flex min-h-screen bg-background">
