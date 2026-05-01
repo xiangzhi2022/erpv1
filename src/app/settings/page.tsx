@@ -37,7 +37,7 @@ export default function SettingsPage() {
                 <CardContent className="space-y-6">
                   <div className="grid gap-4 md:grid-cols-2">
                     <div className="space-y-2">
-                      <Label>订单前缀</Label>
+                      <Label>订单设置（前缀）</Label>
                       <Input defaultValue="QYD" placeholder="可编辑，如: QYD、ORD" />
                       <p className="text-xs text-muted-foreground">格式: 前缀 + 日期(YYYYMMDD) + 序号(01起)</p>
                       <p className="text-xs text-muted-foreground">示例: QYD2026050101</p>

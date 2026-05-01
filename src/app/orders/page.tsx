@@ -415,7 +415,7 @@ export default function OrdersPage() {
                     <h4 className="font-medium mb-4">录入页面</h4>
                     <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
                       <div className="space-y-2">
-                        <Label>订单前缀</Label>
+                        <Label>订单设置（前缀）</Label>
                         <div className="flex gap-2">
                           <Input 
                             placeholder="前缀" 
