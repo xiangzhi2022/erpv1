@@ -37,7 +37,7 @@ export default function SettingsPage() {
                 <CardContent className="space-y-6">
                   <div className="grid gap-4 md:grid-cols-2">
                     <div className="space-y-2">
-                      <Label>系统名称</Label>
+                      <Label>订单设置</Label>
                       <Input defaultValue="青崖管理系统" />
                     </div>
                     <div className="space-y-2">
