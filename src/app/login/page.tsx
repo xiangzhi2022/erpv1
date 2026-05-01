@@ -6,7 +6,6 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card, CardContent } from '@/components/ui/card';
 import { Checkbox } from '@/components/ui/checkbox';
-import Image from 'next/image';
 import { Cpu, Layers, Zap } from 'lucide-react';
 
 function ParticleBackground() {
@@ -135,22 +134,6 @@ export default function LoginPage() {
       <div className={`w-full max-w-md space-y-8 transition-all duration-1000 ${mounted ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-8'}`}>
         {/* Header */}
         <div className="text-center space-y-4">
-          <div className="relative inline-block">
-            <div className="absolute inset-0 bg-[#0A82DF]/30 rounded-2xl blur-xl animate-pulse" />
-            <div className="relative flex justify-center mb-4">
-              <div className="p-3 rounded-2xl bg-gradient-to-br from-[#0A82DF]/20 to-[#91CD30]/10 border border-[#0A82DF]/30 backdrop-blur-sm">
-                <Image 
-                  src="https://code.coze.cn/api/sandbox/coze_coding/file/proxy?expire_time=-1&file_path=assets%2Flogo.jpg&nonce=958fb68e-cf07-47eb-8eb5-380bcae75427&project_id=7634882122565599238&sign=86ff4c2aee1a6ff4e7485566949c74e31eb2d9fe9e5fdb015db3b2c8001cb7ca"
-                  alt="青崖Logo" 
-                  width={64} 
-                  height={64}
-                  className="object-contain"
-                  priority
-                />
-              </div>
-            </div>
-          </div>
-          
           <div className="space-y-2">
             <h1 className="text-4xl font-bold tracking-tight bg-gradient-to-r from-[#0A82DF] via-white to-[#0A82DF] bg-clip-text text-transparent animate-pulse">
               青崖管理系统
