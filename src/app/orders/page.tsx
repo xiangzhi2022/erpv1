@@ -35,6 +35,30 @@ const poolOrders = [
 export default function OrdersPage() {
   const [dealerName, setDealerName] = useState('');
   const [orderName, setOrderName] = useState('');
+  const [orderPrefix, setOrderPrefix] = useState('QYD');
+  const [generatedOrderNo, setGeneratedOrderNo] = useState('');
+  const [isGenerating, setIsGenerating] = useState(false);
+
+  // 生成订单号
+  const generateOrderNo = async () => {
+    setIsGenerating(true);
+    try {
+      const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+      const response = await fetch(`/api/orders/sequence?prefix=${orderPrefix}&date=${dateStr}`);
+      const data = await response.json();
+      if (data.success) {
+        setGeneratedOrderNo(data.orderNo);
+      } else {
+        // 如果API失败，使用本地计算
+        setGeneratedOrderNo(`${orderPrefix}${dateStr}01`);
+      }
+    } catch {
+      // 离线模式下使用本地计算
+      const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+      setGeneratedOrderNo(`${orderPrefix}${dateStr}01`);
+    }
+    setIsGenerating(false);
+  };
 
   return (
     <div className="flex min-h-screen bg-background">
@@ -389,10 +413,29 @@ export default function OrdersPage() {
 
                   <div className="border rounded-lg p-4 mb-6">
                     <h4 className="font-medium mb-4">录入页面</h4>
-                    <div className="grid gap-4 md:grid-cols-2">
+                    <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+                      <div className="space-y-2">
+                        <Label>订单前缀</Label>
+                        <div className="flex gap-2">
+                          <Input 
+                            placeholder="前缀" 
+                            value={orderPrefix}
+                            onChange={(e) => setOrderPrefix(e.target.value)}
+                            className="w-24"
+                          />
+                          <Button onClick={generateOrderNo} disabled={isGenerating} variant="outline">
+                            {isGenerating ? '生成中...' : '生成订单号'}
+                          </Button>
+                        </div>
+                      </div>
                       <div className="space-y-2">
                         <Label>订单编号</Label>
-                        <Input placeholder="自动生成" disabled />
+                        <Input 
+                          placeholder="点击生成订单号" 
+                          value={generatedOrderNo}
+                          readOnly 
+                          className="bg-muted font-mono"
+                        />
                       </div>
                       <div className="space-y-2">
                         <Label>经销商名称</Label>
