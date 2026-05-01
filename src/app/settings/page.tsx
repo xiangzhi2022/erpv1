@@ -55,11 +55,11 @@ export default function SettingsPage() {
           </div>
 
           <Tabs defaultValue="profile" className="space-y-6">
-            <TabsList className="grid w-full grid-cols-4">
-              <TabsTrigger value="profile">基本信息</TabsTrigger>
-              <TabsTrigger value="users">用户管理</TabsTrigger>
-              <TabsTrigger value="roles">角色权限</TabsTrigger>
-              <TabsTrigger value="system">系统配置</TabsTrigger>
+            <TabsList className="inline-flex h-11 p-1 bg-muted rounded-xl">
+              <TabsTrigger value="profile" className="flex-1 data-[state=active]:bg-background data-[state=active]:shadow-sm rounded-lg">基本信息</TabsTrigger>
+              <TabsTrigger value="users" className="flex-1 data-[state=active]:bg-background data-[state=active]:shadow-sm rounded-lg">用户管理</TabsTrigger>
+              <TabsTrigger value="roles" className="flex-1 data-[state=active]:bg-background data-[state=active]:shadow-sm rounded-lg">角色权限</TabsTrigger>
+              <TabsTrigger value="system" className="flex-1 data-[state=active]:bg-background data-[state=active]:shadow-sm rounded-lg">系统配置</TabsTrigger>
             </TabsList>
 
             <TabsContent value="profile">
