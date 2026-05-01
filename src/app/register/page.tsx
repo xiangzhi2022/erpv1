@@ -6,7 +6,7 @@ import Link from 'next/link';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card, CardContent } from '@/components/ui/card';
-import { Zap, Eye, EyeOff, ArrowLeft, Check, X } from 'lucide-react';
+import { Zap, Eye, EyeOff, ArrowLeft, Check, X, Smartphone, Mail } from 'lucide-react';
 
 function ParticleBackground() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -51,16 +51,17 @@ function ParticleBackground() {
         ctx.fillStyle = `rgba(10, 130, 223, ${p.opacity})`;
         ctx.fill();
 
-        particles.slice(i + 1).forEach((p2) => {
+        particles.forEach((p2, j) => {
+          if (i === j) return;
           const dx = p.x - p2.x;
           const dy = p.y - p2.y;
           const dist = Math.sqrt(dx * dx + dy * dy);
-
-          if (dist < 150) {
+          if (dist < 120) {
             ctx.beginPath();
             ctx.moveTo(p.x, p.y);
             ctx.lineTo(p2.x, p2.y);
-            ctx.strokeStyle = `rgba(10, 130, 223, ${0.1 * (1 - dist / 150)})`;
+            ctx.strokeStyle = `rgba(10, 130, 223, ${0.15 * (1 - dist / 120)})`;
+            ctx.lineWidth = 0.5;
             ctx.stroke();
           }
         });
@@ -81,23 +82,13 @@ function ParticleBackground() {
     return () => window.removeEventListener('resize', handleResize);
   }, []);
 
-  return <canvas ref={canvasRef} className="fixed inset-0 -z-10" />;
+  return <canvas ref={canvasRef} className="absolute inset-0 w-full h-full" />;
 }
 
 function GridBackground() {
   return (
-    <div className="fixed inset-0 -z-10 overflow-hidden">
-      <div className="absolute inset-0 bg-gradient-to-br from-[#001a3d] via-[#002b5c] to-[#001a3d]" />
-      <div 
-        className="absolute inset-0 opacity-20"
-        style={{
-          backgroundImage: `
-            linear-gradient(to right, rgba(10, 130, 223, 0.1) 1px, transparent 1px),
-            linear-gradient(to bottom, rgba(10, 130, 223, 0.1) 1px, transparent 1px)
-          `,
-          backgroundSize: '60px 60px',
-        }}
-      />
+    <div className="absolute inset-0 overflow-hidden">
+      <div className="absolute inset-0 bg-[length:60px_60px] bg-[linear-gradient(rgba(10,130,223,0.05)_1px,transparent_1px),linear-gradient(90deg,rgba(10,130,223,0.05)_1px,transparent_1px)]" />
       <div className="absolute top-1/4 left-1/4 w-96 h-96 bg-[#0A82DF]/20 rounded-full blur-3xl animate-pulse" />
       <div className="absolute bottom-1/4 right-1/4 w-80 h-80 bg-[#91CD30]/10 rounded-full blur-3xl animate-pulse" style={{ animationDelay: '1s' }} />
       <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[600px] h-[600px] bg-[#004DA7]/10 rounded-full blur-3xl" />
@@ -108,20 +99,29 @@ function GridBackground() {
 export default function RegisterPage() {
   const router = useRouter();
   const [formData, setFormData] = useState({
-    username: '',
+    phone: '',
     password: '',
     confirmPassword: '',
-    email: '',
-    phone: '',
+    code: '',
   });
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [mounted, setMounted] = useState(false);
+  const [codeSending, setCodeSending] = useState(false);
+  const [countdown, setCountdown] = useState(0);
+  const [codeSent, setCodeSent] = useState(false);
 
   useEffect(() => {
     setMounted(true);
   }, []);
+
+  useEffect(() => {
+    if (countdown > 0) {
+      const timer = setTimeout(() => setCountdown(countdown - 1), 1000);
+      return () => clearTimeout(timer);
+    }
+  }, [countdown]);
 
   const passwordRequirements = [
     { met: formData.password.length >= 8, text: '至少8个字符' },
@@ -130,8 +130,31 @@ export default function RegisterPage() {
     { met: /[0-9]/.test(formData.password), text: '包含数字' },
   ];
 
+  const handleSendCode = async () => {
+    if (!formData.phone || formData.phone.length !== 11) {
+      alert('请输入正确的11位手机号');
+      return;
+    }
+
+    setCodeSending(true);
+    await new Promise(resolve => setTimeout(resolve, 1000));
+    setCodeSending(false);
+    setCodeSent(true);
+    setCountdown(60);
+  };
+
   const handleRegister = async (e: React.FormEvent) => {
     e.preventDefault();
+    
+    if (!codeSent || !formData.code) {
+      alert('请先获取验证码');
+      return;
+    }
+
+    if (formData.code.length !== 6) {
+      alert('请输入6位验证码');
+      return;
+    }
     
     if (formData.password !== formData.confirmPassword) {
       alert('两次输入的密码不一致');
@@ -164,7 +187,7 @@ export default function RegisterPage() {
           </Link>
           <div className="space-y-2">
             <h1 className="text-4xl font-bold tracking-tight bg-gradient-to-r from-[#0A82DF] via-white to-[#0A82DF] bg-clip-text text-transparent animate-pulse">
-              账号注册
+              手机号注册
             </h1>
             <p className="text-[#91CD30] flex items-center justify-center gap-2">
               <Zap className="h-4 w-4" />
@@ -181,56 +204,51 @@ export default function RegisterPage() {
           
           <CardContent className="relative pt-8 pb-6">
             <form onSubmit={handleRegister} className="space-y-4">
-              {/* Username */}
+              {/* Phone with Code */}
+              <div className="flex gap-2">
+                <div className="relative group flex-1">
+                  <Input
+                    id="phone"
+                    type="tel"
+                    placeholder="请输入手机号"
+                    value={formData.phone}
+                    onChange={(e) => {
+                      const val = e.target.value.replace(/\D/g, '').slice(0, 11);
+                      setFormData({...formData, phone: val});
+                    }}
+                    required
+                    className="h-12 bg-[#002b5c]/50 border-[#0A82DF]/30 focus:border-[#0A82DF] focus:ring-[#0A82DF]/20 pl-11 transition-all duration-300 placeholder:text-[#0A82DF]/50 text-white"
+                  />
+                  <div className="absolute left-4 top-1/2 -translate-y-1/2 text-[#0A82DF]/50 group-focus-within:text-[#0A82DF] transition-colors">
+                    <Smartphone className="h-5 w-5" />
+                  </div>
+                </div>
+                <Button
+                  type="button"
+                  onClick={handleSendCode}
+                  disabled={codeSending || countdown > 0}
+                  className="h-12 px-4 bg-[#002b5c]/80 border border-[#0A82DF]/30 hover:bg-[#0A82DF]/20 text-[#0A82DF] text-sm font-medium whitespace-nowrap transition-all"
+                >
+                  {codeSending ? '发送中...' : countdown > 0 ? `${countdown}秒` : '获取验证码'}
+                </Button>
+              </div>
+
+              {/* Verification Code */}
               <div className="relative group">
                 <Input
-                  id="username"
+                  id="code"
                   type="text"
-                  placeholder="请输入用户名"
-                  value={formData.username}
-                  onChange={(e) => setFormData({...formData, username: e.target.value})}
+                  placeholder="请输入6位验证码"
+                  value={formData.code}
+                  onChange={(e) => {
+                    const val = e.target.value.replace(/\D/g, '').slice(0, 6);
+                    setFormData({...formData, code: val});
+                  }}
                   required
-                  className="h-12 bg-[#002b5c]/50 border-[#0A82DF]/30 focus:border-[#0A82DF] focus:ring-[#0A82DF]/20 pl-11 transition-all duration-300 placeholder:text-[#0A82DF]/50 text-white"
+                  className="h-12 bg-[#002b5c]/50 border-[#0A82DF]/30 focus:border-[#0A82DF] focus:ring-[#0A82DF]/20 pl-11 transition-all duration-300 placeholder:text-[#0A82DF]/50 text-white tracking-widest"
                 />
                 <div className="absolute left-4 top-1/2 -translate-y-1/2 text-[#0A82DF]/50 group-focus-within:text-[#0A82DF] transition-colors">
-                  <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
-                  </svg>
-                </div>
-              </div>
-
-              {/* Email */}
-              <div className="relative group">
-                <Input
-                  id="email"
-                  type="email"
-                  placeholder="请输入邮箱"
-                  value={formData.email}
-                  onChange={(e) => setFormData({...formData, email: e.target.value})}
-                  required
-                  className="h-12 bg-[#002b5c]/50 border-[#0A82DF]/30 focus:border-[#0A82DF] focus:ring-[#0A82DF]/20 pl-11 transition-all duration-300 placeholder:text-[#0A82DF]/50 text-white"
-                />
-                <div className="absolute left-4 top-1/2 -translate-y-1/2 text-[#0A82DF]/50 group-focus-within:text-[#0A82DF] transition-colors">
-                  <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
-                  </svg>
-                </div>
-              </div>
-
-              {/* Phone */}
-              <div className="relative group">
-                <Input
-                  id="phone"
-                  type="tel"
-                  placeholder="请输入手机号（选填）"
-                  value={formData.phone}
-                  onChange={(e) => setFormData({...formData, phone: e.target.value})}
-                  className="h-12 bg-[#002b5c]/50 border-[#0A82DF]/30 focus:border-[#0A82DF] focus:ring-[#0A82DF]/20 pl-11 transition-all duration-300 placeholder:text-[#0A82DF]/50 text-white"
-                />
-                <div className="absolute left-4 top-1/2 -translate-y-1/2 text-[#0A82DF]/50 group-focus-within:text-[#0A82DF] transition-colors">
-                  <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z" />
-                  </svg>
+                  <Mail className="h-5 w-5" />
                 </div>
               </div>
 
