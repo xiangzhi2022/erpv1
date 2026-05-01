@@ -6,8 +6,7 @@ import Link from 'next/link';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card, CardContent } from '@/components/ui/card';
-import { Checkbox } from '@/components/ui/checkbox';
-import { Cpu, Layers, Zap, Eye, EyeOff } from 'lucide-react';
+import { Zap, Eye, EyeOff, ArrowLeft, Check, X } from 'lucide-react';
 
 function ParticleBackground() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -106,12 +105,17 @@ function GridBackground() {
   );
 }
 
-export default function LoginPage() {
+export default function RegisterPage() {
   const router = useRouter();
-  const [username, setUsername] = useState('');
-  const [password, setPassword] = useState('');
-  const [rememberMe, setRememberMe] = useState(false);
+  const [formData, setFormData] = useState({
+    username: '',
+    password: '',
+    confirmPassword: '',
+    email: '',
+    phone: '',
+  });
   const [showPassword, setShowPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [mounted, setMounted] = useState(false);
 
@@ -119,11 +123,29 @@ export default function LoginPage() {
     setMounted(true);
   }, []);
 
-  const handleLogin = async (e: React.FormEvent) => {
+  const passwordRequirements = [
+    { met: formData.password.length >= 8, text: '至少8个字符' },
+    { met: /[A-Z]/.test(formData.password), text: '包含大写字母' },
+    { met: /[a-z]/.test(formData.password), text: '包含小写字母' },
+    { met: /[0-9]/.test(formData.password), text: '包含数字' },
+  ];
+
+  const handleRegister = async (e: React.FormEvent) => {
     e.preventDefault();
+    
+    if (formData.password !== formData.confirmPassword) {
+      alert('两次输入的密码不一致');
+      return;
+    }
+    
+    if (!passwordRequirements.every(req => req.met)) {
+      alert('请满足所有密码要求');
+      return;
+    }
+
     setLoading(true);
-    await new Promise(resolve => setTimeout(resolve, 1000));
-    router.push('/dashboard');
+    await new Promise(resolve => setTimeout(resolve, 1500));
+    router.push('/login');
   };
 
   if (!mounted) return null;
@@ -136,50 +158,37 @@ export default function LoginPage() {
       <div className={`w-full max-w-md space-y-8 transition-all duration-1000 ${mounted ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-8'}`}>
         {/* Header */}
         <div className="text-center space-y-4">
+          <Link href="/login" className="inline-flex items-center gap-2 text-[#0A82DF]/70 hover:text-[#0A82DF] transition-colors mb-4">
+            <ArrowLeft className="h-4 w-4" />
+            返回登录
+          </Link>
           <div className="space-y-2">
             <h1 className="text-4xl font-bold tracking-tight bg-gradient-to-r from-[#0A82DF] via-white to-[#0A82DF] bg-clip-text text-transparent animate-pulse">
-              青崖管理系统
+              账号注册
             </h1>
             <p className="text-[#91CD30] flex items-center justify-center gap-2">
               <Zap className="h-4 w-4" />
-              智能制造 · 高效管理
+              加入青崖管理系统
               <Zap className="h-4 w-4" />
             </p>
           </div>
-
-          {/* Tech Icons */}
-          <div className="flex items-center justify-center gap-6 pt-4">
-            <div className="flex items-center gap-2 text-[#0A82DF]/70 text-sm">
-              <Cpu className="h-4 w-4" />
-              <span>AI驱动</span>
-            </div>
-            <div className="w-px h-4 bg-[#0A82DF]/30" />
-            <div className="flex items-center gap-2 text-[#0A82DF]/70 text-sm">
-              <Layers className="h-4 w-4" />
-              <span>云端协同</span>
-            </div>
-            <div className="w-px h-4 bg-[#0A82DF]/30" />
-            <div className="flex items-center gap-2 text-[#0A82DF]/70 text-sm">
-              <Zap className="h-4 w-4" />
-              <span>实时同步</span>
-            </div>
-          </div>
         </div>
 
-        {/* Login Card */}
+        {/* Register Card */}
         <Card className="relative overflow-hidden border-[#0A82DF]/20 bg-[#001a3d]/90 backdrop-blur-xl shadow-2xl shadow-[#0A82DF]/10">
           <div className="absolute inset-0 bg-gradient-to-br from-[#0A82DF]/5 via-transparent to-[#91CD30]/5" />
           <div className="absolute top-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-[#0A82DF]/50 to-transparent" />
           
           <CardContent className="relative pt-8 pb-6">
-            <form onSubmit={handleLogin} className="space-y-5">
+            <form onSubmit={handleRegister} className="space-y-4">
+              {/* Username */}
               <div className="relative group">
                 <Input
                   id="username"
                   type="text"
-                  placeholder="请输入账号"
-                  value={username}
-                  onChange={(e) => setUsername(e.target.value)}
+                  placeholder="请输入用户名"
+                  value={formData.username}
+                  onChange={(e) => setFormData({...formData, username: e.target.value})}
                   required
                   className="h-12 bg-[#002b5c]/50 border-[#0A82DF]/30 focus:border-[#0A82DF] focus:ring-[#0A82DF]/20 pl-11 transition-all duration-300 placeholder:text-[#0A82DF]/50 text-white"
                 />
@@ -190,13 +199,49 @@ export default function LoginPage() {
                 </div>
               </div>
 
+              {/* Email */}
+              <div className="relative group">
+                <Input
+                  id="email"
+                  type="email"
+                  placeholder="请输入邮箱"
+                  value={formData.email}
+                  onChange={(e) => setFormData({...formData, email: e.target.value})}
+                  required
+                  className="h-12 bg-[#002b5c]/50 border-[#0A82DF]/30 focus:border-[#0A82DF] focus:ring-[#0A82DF]/20 pl-11 transition-all duration-300 placeholder:text-[#0A82DF]/50 text-white"
+                />
+                <div className="absolute left-4 top-1/2 -translate-y-1/2 text-[#0A82DF]/50 group-focus-within:text-[#0A82DF] transition-colors">
+                  <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+                  </svg>
+                </div>
+              </div>
+
+              {/* Phone */}
+              <div className="relative group">
+                <Input
+                  id="phone"
+                  type="tel"
+                  placeholder="请输入手机号（选填）"
+                  value={formData.phone}
+                  onChange={(e) => setFormData({...formData, phone: e.target.value})}
+                  className="h-12 bg-[#002b5c]/50 border-[#0A82DF]/30 focus:border-[#0A82DF] focus:ring-[#0A82DF]/20 pl-11 transition-all duration-300 placeholder:text-[#0A82DF]/50 text-white"
+                />
+                <div className="absolute left-4 top-1/2 -translate-y-1/2 text-[#0A82DF]/50 group-focus-within:text-[#0A82DF] transition-colors">
+                  <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z" />
+                  </svg>
+                </div>
+              </div>
+
+              {/* Password */}
               <div className="relative group">
                 <Input
                   id="password"
                   type={showPassword ? 'text' : 'password'}
                   placeholder="请输入密码"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
+                  value={formData.password}
+                  onChange={(e) => setFormData({...formData, password: e.target.value})}
                   required
                   className="h-12 bg-[#002b5c]/50 border-[#0A82DF]/30 focus:border-[#0A82DF] focus:ring-[#0A82DF]/20 pl-11 pr-11 transition-all duration-300 placeholder:text-[#0A82DF]/50 text-white"
                 />
@@ -214,22 +259,49 @@ export default function LoginPage() {
                 </button>
               </div>
 
-              <div className="flex items-center justify-between">
-                <div className="flex items-center space-x-2">
-                  <Checkbox 
-                    id="remember" 
-                    checked={rememberMe}
-                    onCheckedChange={(checked) => setRememberMe(checked as boolean)}
-                    className="border-[#0A82DF]/50 data-[state=checked]:bg-[#0A82DF] data-[state=checked]:border-[#0A82DF]"
-                  />
-                  <label htmlFor="remember" className="text-sm text-[#0A82DF]/70 cursor-pointer hover:text-[#0A82DF] transition-colors">
-                    记住密码
-                  </label>
+              {/* Password Requirements */}
+              {formData.password && (
+                <div className="space-y-1 text-xs">
+                  {passwordRequirements.map((req, index) => (
+                    <div key={index} className={`flex items-center gap-2 ${req.met ? 'text-[#91CD30]' : 'text-[#0A82DF]/50'}`}>
+                      {req.met ? <Check className="h-3 w-3" /> : <X className="h-3 w-3" />}
+                      <span>{req.text}</span>
+                    </div>
+                  ))}
                 </div>
-                <button type="button" className="text-sm text-[#0A82DF]/70 hover:text-[#0A82DF] transition-colors">
-                  忘记密码？
+              )}
+
+              {/* Confirm Password */}
+              <div className="relative group">
+                <Input
+                  id="confirmPassword"
+                  type={showConfirmPassword ? 'text' : 'password'}
+                  placeholder="请确认密码"
+                  value={formData.confirmPassword}
+                  onChange={(e) => setFormData({...formData, confirmPassword: e.target.value})}
+                  required
+                  className="h-12 bg-[#002b5c]/50 border-[#0A82DF]/30 focus:border-[#0A82DF] focus:ring-[#0A82DF]/20 pl-11 pr-11 transition-all duration-300 placeholder:text-[#0A82DF]/50 text-white"
+                />
+                <div className="absolute left-4 top-1/2 -translate-y-1/2 text-[#0A82DF]/50 group-focus-within:text-[#0A82DF] transition-colors pointer-events-none">
+                  <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
+                  </svg>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowConfirmPassword(!showConfirmPassword)}
+                  className="absolute right-4 top-1/2 -translate-y-1/2 text-[#0A82DF]/50 hover:text-[#0A82DF] transition-colors"
+                >
+                  {showConfirmPassword ? <EyeOff className="h-5 w-5" /> : <Eye className="h-5 w-5" />}
                 </button>
               </div>
+
+              {formData.confirmPassword && formData.password !== formData.confirmPassword && (
+                <p className="text-red-400 text-xs flex items-center gap-1">
+                  <X className="h-3 w-3" />
+                  两次输入的密码不一致
+                </p>
+              )}
 
               <Button 
                 type="submit" 
@@ -242,21 +314,15 @@ export default function LoginPage() {
                       <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
                       <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
                     </svg>
-                    登录中...
+                    注册中...
                   </span>
                 ) : (
                   <span className="flex items-center gap-2">
                     <Zap className="h-5 w-5" />
-                    登录
+                    注册
                   </span>
                 )}
               </Button>
-
-              <div className="text-center">
-                <Link href="/register" className="text-sm text-[#0A82DF]/70 hover:text-[#0A82DF] transition-colors">
-                  还没有账号？立即注册
-                </Link>
-              </div>
             </form>
           </CardContent>
         </Card>
