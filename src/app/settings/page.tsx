@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Sidebar } from '@/components/sidebar';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -12,8 +12,32 @@ import { Check, X, Loader2 } from 'lucide-react';
 
 export default function SettingsPage() {
   const [prefix, setPrefix] = useState('QYD');
+  const [companyName, setCompanyName] = useState('温州青崖信息科技有限公司');
+  const [phone, setPhone] = useState('400-888-8888');
+  const [address, setAddress] = useState('某某省某某市某某区某某路88号');
   const [isVerifying, setIsVerifying] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+  const [saveMessage, setSaveMessage] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
   const [verifyResult, setVerifyResult] = useState<{ available: boolean; message: string } | null>(null);
+  
+  // 加载已有设置
+  useEffect(() => {
+    const loadSettings = async () => {
+      try {
+        const response = await fetch('/api/settings/load');
+        const data = await response.json();
+        if (data.success && data.settings) {
+          if (data.settings.order_prefix) setPrefix(data.settings.order_prefix);
+          if (data.settings.company_name) setCompanyName(data.settings.company_name);
+          if (data.settings.company_phone) setPhone(data.settings.company_phone);
+          if (data.settings.company_address) setAddress(data.settings.company_address);
+        }
+      } catch (error) {
+        console.error('加载设置失败:', error);
+      }
+    };
+    loadSettings();
+  }, []);
 
   const handleVerifyPrefix = async () => {
     if (!prefix.trim()) {
@@ -40,6 +64,32 @@ export default function SettingsPage() {
       setVerifyResult({ available: false, message: '验证请求失败' });
     } finally {
       setIsVerifying(false);
+    }
+  };
+  
+  const handleSaveSettings = async () => {
+    setIsSaving(true);
+    setSaveMessage(null);
+    
+    try {
+      const response = await fetch('/api/settings/save', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prefix, companyName, phone, address })
+      });
+      const data = await response.json();
+      
+      if (data.success) {
+        setSaveMessage({ type: 'success', message: '设置保存成功' });
+        // 2秒后清除消息
+        setTimeout(() => setSaveMessage(null), 2000);
+      } else {
+        setSaveMessage({ type: 'error', message: data.error || '保存失败' });
+      }
+    } catch (error) {
+      setSaveMessage({ type: 'error', message: '保存请求失败' });
+    } finally {
+      setIsSaving(false);
     }
   };
 
@@ -112,20 +162,47 @@ export default function SettingsPage() {
                     </div>
                     <div className="space-y-2">
                       <Label>公司名称</Label>
-                      <Input defaultValue="温州青崖信息科技有限公司" />
+                      <Input 
+                        value={companyName} 
+                        onChange={(e) => setCompanyName(e.target.value)} 
+                        placeholder="请输入公司名称" 
+                      />
                     </div>
                     <div className="space-y-2">
                       <Label>联系电话</Label>
-                      <Input defaultValue="400-888-8888" />
+                      <Input 
+                        value={phone} 
+                        onChange={(e) => setPhone(e.target.value)} 
+                        placeholder="请输入联系电话" 
+                      />
                     </div>
                     <div className="space-y-2">
                       <Label>公司地址</Label>
-                      <Input defaultValue="某某省某某市某某区某某路88号" />
+                      <Input 
+                        value={address} 
+                        onChange={(e) => setAddress(e.target.value)} 
+                        placeholder="请输入公司地址" 
+                      />
                     </div>
                   </div>
                   <Separator />
-                  <div className="flex justify-end">
-                    <Button>保存设置</Button>
+                  <div className="flex justify-end items-center gap-4">
+                    {saveMessage && (
+                      <span className={`text-sm ${saveMessage.type === 'success' ? 'text-green-600' : 'text-red-600'}`}>
+                        {saveMessage.type === 'success' && <Check className="h-4 w-4 inline mr-1" />}
+                        {saveMessage.message}
+                      </span>
+                    )}
+                    <Button onClick={handleSaveSettings} disabled={isSaving}>
+                      {isSaving ? (
+                        <>
+                          <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                          保存中...
+                        </>
+                      ) : (
+                        '保存设置'
+                      )}
+                    </Button>
                   </div>
                 </CardContent>
               </Card>
