@@ -1,5 +1,6 @@
 'use client';
 
+import { useState } from 'react';
 import { Sidebar } from '@/components/sidebar';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -7,8 +8,41 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Separator } from '@/components/ui/separator';
+import { Check, X, Loader2 } from 'lucide-react';
 
 export default function SettingsPage() {
+  const [prefix, setPrefix] = useState('QYD');
+  const [isVerifying, setIsVerifying] = useState(false);
+  const [verifyResult, setVerifyResult] = useState<{ available: boolean; message: string } | null>(null);
+
+  const handleVerifyPrefix = async () => {
+    if (!prefix.trim()) {
+      setVerifyResult({ available: false, message: '请输入前缀' });
+      return;
+    }
+    
+    setIsVerifying(true);
+    setVerifyResult(null);
+    
+    try {
+      const response = await fetch(`/api/settings/verify-prefix?prefix=${encodeURIComponent(prefix)}`);
+      const data = await response.json();
+      
+      if (data.success) {
+        setVerifyResult({
+          available: data.available,
+          message: data.message
+        });
+      } else {
+        setVerifyResult({ available: false, message: data.error || '验证失败' });
+      }
+    } catch (error) {
+      setVerifyResult({ available: false, message: '验证请求失败' });
+    } finally {
+      setIsVerifying(false);
+    }
+  };
+
   return (
     <div className="flex min-h-screen bg-background">
       <Sidebar />
@@ -38,7 +72,41 @@ export default function SettingsPage() {
                   <div className="grid gap-4 md:grid-cols-2">
                     <div className="space-y-2">
                       <Label>订单设置（前缀）</Label>
-                      <Input defaultValue="QYD" placeholder="可编辑，如: QYD、ORD" />
+                      <div className="flex gap-2">
+                        <div className="flex-1">
+                          <Input 
+                            value={prefix}
+                            onChange={(e) => {
+                              setPrefix(e.target.value.toUpperCase());
+                              setVerifyResult(null);
+                            }}
+                            placeholder="可编辑，如: QYD、ORD" 
+                            className="font-mono"
+                          />
+                        </div>
+                        <Button 
+                          variant="outline" 
+                          onClick={handleVerifyPrefix}
+                          disabled={isVerifying}
+                          className="whitespace-nowrap"
+                        >
+                          {isVerifying ? (
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                          ) : (
+                            '验证可用'
+                          )}
+                        </Button>
+                      </div>
+                      {verifyResult && (
+                        <div className={`flex items-center gap-2 text-sm ${verifyResult.available ? 'text-green-600' : 'text-red-600'}`}>
+                          {verifyResult.available ? (
+                            <Check className="h-4 w-4" />
+                          ) : (
+                            <X className="h-4 w-4" />
+                          )}
+                          {verifyResult.message}
+                        </div>
+                      )}
                       <p className="text-xs text-muted-foreground">格式: 前缀 + 日期(YYYYMMDD) + 序号(01起)</p>
                       <p className="text-xs text-muted-foreground">示例: QYD2026050101</p>
                     </div>
