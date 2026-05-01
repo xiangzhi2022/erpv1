@@ -1,4 +1,5 @@
 import { getSupabaseClient } from '@/storage/database/supabase-client';
+import { cookies } from 'next/headers';
 
 // 每次请求时创建新的客户端（确保环境变量已加载）
 const getClient = () => getSupabaseClient();
@@ -51,15 +52,26 @@ export async function POST(request: Request) {
       .update({ last_login_at: new Date().toISOString() })
       .eq('id', user.id);
 
+    // 设置登录Cookie
+    const userInfo = {
+      id: user.id,
+      phone: user.phone,
+      nickname: user.nickname,
+      role: user.role
+    };
+
+    const cookieStore = await cookies();
+    cookieStore.set('current_user', JSON.stringify(userInfo), {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'lax',
+      maxAge: 60 * 60 * 24 * 7 // 7天
+    });
+
     // 返回用户信息（不含密码）
     return Response.json({
       success: true,
-      user: {
-        id: user.id,
-        phone: user.phone,
-        nickname: user.nickname,
-        role: user.role
-      }
+      user: userInfo
     });
 
   } catch (err) {
