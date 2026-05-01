@@ -6,7 +6,8 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card, CardContent } from '@/components/ui/card';
 import { Checkbox } from '@/components/ui/checkbox';
-import { Factory, Cpu, Layers, Zap } from 'lucide-react';
+import Image from 'next/image';
+import { Cpu, Layers, Zap } from 'lucide-react';
 
 function ParticleBackground() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -136,8 +137,14 @@ export default function LoginPage() {
           <div className="relative inline-block">
             <div className="absolute inset-0 bg-blue-500/30 rounded-2xl blur-xl animate-pulse" />
             <div className="relative flex justify-center mb-4">
-              <div className="p-4 rounded-2xl bg-gradient-to-br from-blue-500/20 to-slate-500/20 border border-blue-500/30 backdrop-blur-sm">
-                <Factory className="h-14 w-14 text-blue-400" />
+              <div className="p-3 rounded-2xl bg-gradient-to-br from-blue-500/20 to-slate-500/20 border border-blue-500/30 backdrop-blur-sm">
+                <Image 
+                  src="https://coze-coding-project.tos.coze.site/coze_storage_7634891394569633846/image/generate_image_4f91f523-a5ee-4398-9409-14ece2d44ffd.jpeg?sign=1809177312-fcf7daff87-0-54fd4be4bf9107db06d578042a2c344effa00d166a93b3c864ed092ebcb87861" 
+                  alt="青崖Logo" 
+                  width={56} 
+                  height={56}
+                  className="object-contain"
+                />
               </div>
             </div>
           </div>

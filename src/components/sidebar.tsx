@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { cn } from '@/lib/utils';
+import Image from 'next/image';
 import { 
   LayoutDashboard, 
   ClipboardList, 
@@ -11,8 +12,7 @@ import {
   Truck, 
   BarChart3,
   Settings,
-  LogOut,
-  Factory
+  LogOut
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Separator } from '@/components/ui/separator';
@@ -34,8 +34,14 @@ export function Sidebar() {
       {/* Logo */}
       <div className="p-4 border-b border-sidebar-border">
         <div className="flex items-center gap-3">
-          <div className="p-2 rounded-lg bg-primary/10">
-            <Factory className="h-6 w-6 text-primary" />
+          <div className="p-1.5 rounded-lg bg-primary/10">
+            <Image 
+              src="https://coze-coding-project.tos.coze.site/coze_storage_7634891394569633846/image/generate_image_4f91f523-a5ee-4398-9409-14ece2d44ffd.jpeg?sign=1809177312-fcf7daff87-0-54fd4be4bf9107db06d578042a2c344effa00d166a93b3c864ed092ebcb87861" 
+              alt="青崖Logo" 
+              width={32} 
+              height={32}
+              className="object-contain"
+            />
           </div>
           <div>
             <h2 className="font-semibold text-sm">青崖管理系统</h2>
