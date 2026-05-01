@@ -33,20 +33,9 @@ export function Sidebar() {
     <div className="flex flex-col w-64 bg-sidebar border-r border-sidebar-border h-screen">
       {/* Logo */}
       <div className="p-4 border-b border-sidebar-border">
-        <div className="flex items-center gap-3">
-          <div className="p-1.5 rounded-lg bg-[#0A82DF]/10">
-            <Image 
-              src="https://code.coze.cn/api/sandbox/coze_coding/file/proxy?expire_time=-1&file_path=assets%2Flogo.jpg&nonce=958fb68e-cf07-47eb-8eb5-380bcae75427&project_id=7634882122565599238&sign=86ff4c2aee1a6ff4e7485566949c74e31eb2d9fe9e5fdb015db3b2c8001cb7ca"
-              alt="青崖Logo"
-              width={32}
-              height={32}
-              className="object-contain"
-            />
-          </div>
-          <div>
-            <h2 className="font-semibold text-sm">青崖管理系统</h2>
-            <p className="text-xs text-muted-foreground">管理员：daoxi</p>
-          </div>
+        <div>
+          <h2 className="font-semibold text-sm">青崖管理系统</h2>
+          <p className="text-xs text-muted-foreground">管理员：daoxi</p>
         </div>
       </div>
 
