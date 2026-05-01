@@ -132,34 +132,61 @@ export default function LoginPage() {
       <GridBackground />
       <ParticleBackground />
 
-      {/* Logo 左上角 */}
-      <div className="fixed top-6 left-6 z-20">
-        <div className="relative">
-          <div className="absolute -inset-2 bg-[#0A82DF]/20 rounded-xl blur-md animate-pulse" />
-          <div className="relative flex items-center gap-3 bg-[#001a3d]/80 backdrop-blur-sm px-4 py-2.5 rounded-xl border border-[#0A82DF]/30">
-            <Image 
-              src="https://coze-coding-project.tos.coze.site/coze_storage_7634891394569633846/image/generate_image_4f91f523-a5ee-4398-9409-14ece2d44ffd.jpeg?sign=1809177312-fcf7daff87-0-54fd4be4bf9107db06d578042a2c344effa00d166a93b3c864ed092ebcb87861"
-              alt="青崖Logo" 
-              width={40} 
-              height={40}
-              className="object-contain"
-              priority
-            />
-            <div>
-              <h1 className="text-lg font-bold text-white tracking-tight">青崖管理系统</h1>
-              <p className="text-xs text-[#0A82DF]">智能制造 · 高效管理</p>
+      <div className={`w-full max-w-md space-y-8 transition-all duration-1000 ${mounted ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-8'}`}>
+        {/* Header */}
+        <div className="text-center space-y-4">
+          <div className="relative inline-block">
+            <div className="absolute inset-0 bg-[#0A82DF]/30 rounded-2xl blur-xl animate-pulse" />
+            <div className="relative flex justify-center mb-4">
+              <div className="p-3 rounded-2xl bg-gradient-to-br from-[#0A82DF]/20 to-[#91CD30]/10 border border-[#0A82DF]/30 backdrop-blur-sm">
+                <Image 
+                  src="https://code.coze.cn/api/sandbox/coze_coding/file/proxy?expire_time=-1&file_path=assets%2Flogo.jpg&nonce=958fb68e-cf07-47eb-8eb5-380bcae75427&project_id=7634882122565599238&sign=86ff4c2aee1a6ff4e7485566949c74e31eb2d9fe9e5fdb015db3b2c8001cb7ca"
+                  alt="青崖Logo" 
+                  width={64} 
+                  height={64}
+                  className="object-contain"
+                  priority
+                />
+              </div>
+            </div>
+          </div>
+          
+          <div className="space-y-2">
+            <h1 className="text-4xl font-bold tracking-tight bg-gradient-to-r from-[#0A82DF] via-white to-[#0A82DF] bg-clip-text text-transparent animate-pulse">
+              青崖管理系统
+            </h1>
+            <p className="text-[#91CD30] flex items-center justify-center gap-2">
+              <Zap className="h-4 w-4" />
+              智能制造 · 高效管理
+              <Zap className="h-4 w-4" />
+            </p>
+          </div>
+
+          {/* Tech Icons */}
+          <div className="flex items-center justify-center gap-6 pt-4">
+            <div className="flex items-center gap-2 text-[#0A82DF]/70 text-sm">
+              <Cpu className="h-4 w-4" />
+              <span>AI驱动</span>
+            </div>
+            <div className="w-px h-4 bg-[#0A82DF]/30" />
+            <div className="flex items-center gap-2 text-[#0A82DF]/70 text-sm">
+              <Layers className="h-4 w-4" />
+              <span>云端协同</span>
+            </div>
+            <div className="w-px h-4 bg-[#0A82DF]/30" />
+            <div className="flex items-center gap-2 text-[#0A82DF]/70 text-sm">
+              <Zap className="h-4 w-4" />
+              <span>实时同步</span>
             </div>
           </div>
         </div>
-      </div>
 
-      <div className={`w-full max-w-md space-y-8 transition-all duration-1000 ${mounted ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-8'}`}>
         {/* Login Card */}
         <Card className="relative overflow-hidden border-[#0A82DF]/20 bg-[#001a3d]/90 backdrop-blur-xl shadow-2xl shadow-[#0A82DF]/10">
           <div className="absolute inset-0 bg-gradient-to-br from-[#0A82DF]/5 via-transparent to-[#91CD30]/5" />
           <div className="absolute top-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-[#0A82DF]/50 to-transparent" />
           
-          <CardContent className="relative pt-10 pb-8 px-8">
+          <CardContent className="relative pt-8 pb-6">
             <form onSubmit={handleLogin} className="space-y-5">
               <div className="relative group">
                 <Input
