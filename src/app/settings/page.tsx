@@ -9,6 +9,7 @@ import { Label } from '@/components/ui/label';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Separator } from '@/components/ui/separator';
 import { Check, X, Loader2 } from 'lucide-react';
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 
 export default function SettingsPage() {
   const [prefix, setPrefix] = useState('');
@@ -19,6 +20,16 @@ export default function SettingsPage() {
   const [isSaving, setIsSaving] = useState(false);
   const [saveMessage, setSaveMessage] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
   const [verifyResult, setVerifyResult] = useState<{ available: boolean; message: string } | null>(null);
+  
+  // 用户管理相关状态
+  const [users, setUsers] = useState<Array<{id: string; phone: string; nickname: string; role: string; is_active: boolean}>>([]);
+  const [isLoadingUsers, setIsLoadingUsers] = useState(false);
+  const [addUserOpen, setAddUserOpen] = useState(false);
+  const [newUserPhone, setNewUserPhone] = useState('');
+  const [newUserName, setNewUserName] = useState('');
+  const [newUserPassword, setNewUserPassword] = useState('');
+  const [newUserRole, setNewUserRole] = useState('user');
+  const [isAddingUser, setIsAddingUser] = useState(false);
   
   // 加载已有设置
   useEffect(() => {
@@ -37,6 +48,79 @@ export default function SettingsPage() {
       }
     };
     loadSettings();
+  }, []);
+
+  // 获取用户列表
+  const fetchUsers = async () => {
+    setIsLoadingUsers(true);
+    try {
+      const response = await fetch('/api/settings/users');
+      const data = await response.json();
+      if (data.success) {
+        setUsers(data.users);
+      }
+    } catch (error) {
+      console.error('获取用户列表失败:', error);
+    } finally {
+      setIsLoadingUsers(false);
+    }
+  };
+
+  // 添加用户
+  const handleAddUser = async () => {
+    if (!newUserPhone || !newUserPassword) return;
+    
+    setIsAddingUser(true);
+    try {
+      const response = await fetch('/api/settings/users', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          phone: newUserPhone,
+          password: newUserPassword,
+          name: newUserName || newUserPhone,
+          role: newUserRole
+        })
+      });
+      const data = await response.json();
+      if (data.success) {
+        setAddUserOpen(false);
+        setNewUserPhone('');
+        setNewUserName('');
+        setNewUserPassword('');
+        setNewUserRole('user');
+        fetchUsers();
+      } else {
+        alert(data.error || '添加用户失败');
+      }
+    } catch (error) {
+      console.error('添加用户失败:', error);
+      alert('添加用户失败');
+    } finally {
+      setIsAddingUser(false);
+    }
+  };
+
+  // Tab切换时加载用户列表
+  useEffect(() => {
+    const handleTabChange = () => {
+      const activeTab = document.querySelector('[data-state="active"]');
+      if (activeTab?.textContent === '用户管理') {
+        fetchUsers();
+      }
+    };
+    
+    // 监听tabs变化
+    const observer = new MutationObserver(handleTabChange);
+    const tabsList = document.querySelector('[role="tablist"]');
+    if (tabsList) {
+      observer.observe(tabsList, { childList: true, subtree: true });
+    }
+    
+    // 初始检查
+    handleTabChange();
+    
+    return () => observer.disconnect();
   }, []);
 
   const handleVerifyPrefix = async () => {
@@ -216,58 +300,120 @@ export default function SettingsPage() {
                       <CardTitle>用户管理</CardTitle>
                       <CardDescription>管理系统用户账号</CardDescription>
                     </div>
-                    <Button>添加用户</Button>
+                    <Dialog open={addUserOpen} onOpenChange={setAddUserOpen}>
+                      <DialogTrigger asChild>
+                        <Button>添加用户</Button>
+                      </DialogTrigger>
+                      <DialogContent>
+                        <DialogHeader>
+                          <DialogTitle>添加新用户</DialogTitle>
+                          <DialogDescription>填写用户信息创建新账号</DialogDescription>
+                        </DialogHeader>
+                        <div className="space-y-4 py-4">
+                          <div className="space-y-2">
+                            <Label>手机号</Label>
+                            <Input 
+                              placeholder="请输入手机号" 
+                              value={newUserPhone}
+                              onChange={(e) => setNewUserPhone(e.target.value)}
+                            />
+                          </div>
+                          <div className="space-y-2">
+                            <Label>姓名</Label>
+                            <Input 
+                              placeholder="请输入姓名（选填）" 
+                              value={newUserName}
+                              onChange={(e) => setNewUserName(e.target.value)}
+                            />
+                          </div>
+                          <div className="space-y-2">
+                            <Label>密码</Label>
+                            <Input 
+                              type="password"
+                              placeholder="请输入密码" 
+                              value={newUserPassword}
+                              onChange={(e) => setNewUserPassword(e.target.value)}
+                            />
+                          </div>
+                          <div className="space-y-2">
+                            <Label>角色</Label>
+                            <select 
+                              className="w-full h-10 px-3 rounded-md border border-input bg-background text-sm"
+                              value={newUserRole}
+                              onChange={(e) => setNewUserRole(e.target.value)}
+                            >
+                              <option value="user">普通用户</option>
+                              <option value="factory_user">工厂工人</option>
+                              <option value="factory_admin">工厂管理员</option>
+                              <option value="dealer_admin">经销商管理员</option>
+                              <option value="saas_admin">服务商管理员</option>
+                              <option value="super_admin">超级管理员</option>
+                            </select>
+                          </div>
+                        </div>
+                        <DialogFooter>
+                          <Button variant="outline" onClick={() => setAddUserOpen(false)}>取消</Button>
+                          <Button onClick={handleAddUser} disabled={isAddingUser || !newUserPhone || !newUserPassword}>
+                            {isAddingUser ? '添加中...' : '添加'}
+                          </Button>
+                        </DialogFooter>
+                      </DialogContent>
+                    </Dialog>
                   </div>
                 </CardHeader>
                 <CardContent>
-                  <div className="overflow-x-auto">
-                    <table className="w-full">
-                      <thead>
-                        <tr className="border-b">
-                          <th className="text-left py-3 px-4 font-medium">用户名</th>
-                          <th className="text-left py-3 px-4 font-medium">姓名</th>
-                          <th className="text-left py-3 px-4 font-medium">角色</th>
-                          <th className="text-left py-3 px-4 font-medium">状态</th>
-                          <th className="text-left py-3 px-4 font-medium">操作</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        <tr className="border-b">
-                          <td className="py-3 px-4">admin</td>
-                          <td className="py-3 px-4">管理员</td>
-                          <td className="py-3 px-4">超级管理员</td>
-                          <td className="py-3 px-4">
-                            <span className="px-2 py-1 rounded-full text-xs font-medium bg-green-100 text-green-700">启用</span>
-                          </td>
-                          <td className="py-3 px-4">
-                            <Button variant="outline" size="sm">编辑</Button>
-                          </td>
-                        </tr>
-                        <tr className="border-b">
-                          <td className="py-3 px-4">user01</td>
-                          <td className="py-3 px-4">账号1名称</td>
-                          <td className="py-3 px-4">操作员</td>
-                          <td className="py-3 px-4">
-                            <span className="px-2 py-1 rounded-full text-xs font-medium bg-green-100 text-green-700">启用</span>
-                          </td>
-                          <td className="py-3 px-4">
-                            <Button variant="outline" size="sm">编辑</Button>
-                          </td>
-                        </tr>
-                        <tr className="border-b">
-                          <td className="py-3 px-4">user02</td>
-                          <td className="py-3 px-4">账号2名称</td>
-                          <td className="py-3 px-4">审核员</td>
-                          <td className="py-3 px-4">
-                            <span className="px-2 py-1 rounded-full text-xs font-medium bg-green-100 text-green-700">启用</span>
-                          </td>
-                          <td className="py-3 px-4">
-                            <Button variant="outline" size="sm">编辑</Button>
-                          </td>
-                        </tr>
-                      </tbody>
-                    </table>
-                  </div>
+                  {isLoadingUsers ? (
+                    <div className="flex justify-center py-8">
+                      <Loader2 className="h-6 w-6 animate-spin" />
+                    </div>
+                  ) : (
+                    <div className="overflow-x-auto">
+                      <table className="w-full">
+                        <thead>
+                          <tr className="border-b">
+                            <th className="text-left py-3 px-4 font-medium">用户名</th>
+                            <th className="text-left py-3 px-4 font-medium">密码</th>
+                            <th className="text-left py-3 px-4 font-medium">姓名</th>
+                            <th className="text-left py-3 px-4 font-medium">角色</th>
+                            <th className="text-left py-3 px-4 font-medium">状态</th>
+                            <th className="text-left py-3 px-4 font-medium">操作</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {users.length === 0 ? (
+                            <tr>
+                              <td colSpan={6} className="py-8 text-center text-muted-foreground">暂无用户数据</td>
+                            </tr>
+                          ) : (
+                            users.map((user) => (
+                              <tr key={user.id} className="border-b">
+                                <td className="py-3 px-4">{user.phone}</td>
+                                <td className="py-3 px-4">
+                                  <span className="text-muted-foreground">******</span>
+                                </td>
+                                <td className="py-3 px-4">{user.nickname || '-'}</td>
+                                <td className="py-3 px-4">
+                                  {user.role === 'super_admin' ? '超级管理员' :
+                                   user.role === 'saas_admin' ? '服务商管理员' :
+                                   user.role === 'dealer_admin' ? '经销商管理员' :
+                                   user.role === 'factory_admin' ? '工厂管理员' :
+                                   user.role === 'factory_user' ? '工厂工人' : '普通用户'}
+                                </td>
+                                <td className="py-3 px-4">
+                                  <span className={`px-2 py-1 rounded-full text-xs font-medium ${user.is_active ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-700'}`}>
+                                    {user.is_active ? '启用' : '禁用'}
+                                  </span>
+                                </td>
+                                <td className="py-3 px-4">
+                                  <Button variant="outline" size="sm">编辑</Button>
+                                </td>
+                              </tr>
+                            ))
+                          )}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
                 </CardContent>
               </Card>
             </TabsContent>
