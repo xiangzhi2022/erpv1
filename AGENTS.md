@@ -63,3 +63,44 @@
 
 - 模板默认预装核心组件库 `shadcn/ui`，位于`src/components/ui/`目录下
 - Next.js 项目**必须默认**采用 shadcn/ui 组件、风格和规范，**除非用户指定用其他的组件和规范。**
+
+## 青崖全屋定制ERP系统
+
+### 超级管理员登录
+- **用户名**: `daoxi`
+- **密码**: `19840214aA`
+- **角色**: `super_admin`
+
+### 角色权限体系
+| 角色 | 权限等级 | 说明 |
+|------|----------|------|
+| super_admin | 100 | 超级管理员 |
+| saas_admin | 80 | SaaS服务商管理员 |
+| dealer_admin | 60 | 经销商管理员 |
+| factory_admin | 50 | 工厂管理员 |
+| factory_user | 30 | 工厂工人 |
+| user | 10 | 普通用户 |
+
+### 数据库表
+- `users` - 用户表
+- `orders` - 订单表
+- `production_tasks` - 生产任务表
+- `tenants` - 租户表
+- `customers` - 客户表
+- `order_items` - 订单项表
+- `workshops` - 车间表
+
+### API 端点
+- `/api/auth/login` - 登录
+- `/api/auth/logout` - 登出
+- `/api/auth/register` - 注册
+- `/api/dealer/orders` - 经销商订单
+- `/api/factory/orders` - 工厂订单
+- `/api/worker/tasks` - 工人任务
+- `/api/worker/report` - 报工
+
+### 环境变量
+Supabase 连接信息通过 `.env.local` 文件配置：
+- `COZE_SUPABASE_URL` - Supabase URL
+- `COZE_SUPABASE_ANON_KEY` - Anon Key
+- `COZE_SUPABASE_SERVICE_ROLE_KEY` - Service Role Key
