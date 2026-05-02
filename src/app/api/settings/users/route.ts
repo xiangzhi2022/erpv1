@@ -92,3 +92,45 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ success: false, error: '服务器错误' }, { status: 500 });
   }
 }
+
+export async function PUT(request: NextRequest) {
+  try {
+    const currentUser = await getCurrentUser();
+    if (!currentUser) {
+      return NextResponse.json({ success: false, error: '未登录' }, { status: 401 });
+    }
+
+    const { searchParams } = new URL(request.url);
+    const userId = searchParams.get('id');
+    
+    if (!userId) {
+      return NextResponse.json({ success: false, error: '缺少用户ID' }, { status: 400 });
+    }
+
+    const body = await request.json();
+    const supabase = createClient(supabaseUrl, supabaseServiceKey);
+
+    const updateData: Record<string, unknown> = {};
+    if (body.name !== undefined) updateData.name = body.name;
+    if (body.role !== undefined) updateData.role = body.role;
+    if (body.status !== undefined) updateData.status = body.status;
+    if (body.password !== undefined) updateData.password = btoa(body.password);
+    updateData.updated_at = new Date().toISOString();
+
+    const { data, error } = await supabase
+      .from('erp_users')
+      .update(updateData)
+      .eq('id', userId)
+      .select()
+      .single();
+
+    if (error) {
+      return NextResponse.json({ success: false, error: error.message }, { status: 500 });
+    }
+
+    return NextResponse.json({ success: true, user: data });
+  } catch (error) {
+    console.error('更新用户失败:', error);
+    return NextResponse.json({ success: false, error: '服务器错误' }, { status: 500 });
+  }
+}
