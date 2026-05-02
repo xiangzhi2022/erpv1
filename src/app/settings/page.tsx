@@ -10,6 +10,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Separator } from '@/components/ui/separator';
 import { Check, X, Loader2 } from 'lucide-react';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
+import { DraggableDialog } from '@/components/ui/draggable-dialog';
 
 export default function SettingsPage() {
   const [prefix, setPrefix] = useState('');
@@ -105,21 +106,45 @@ export default function SettingsPage() {
     }
   };
 
+  // 切换用户状态
+  const handleToggleStatus = (user: typeof users[0]) => {
+    const newStatus = user.status === 'active' ? 'inactive' : 'active';
+    
+    fetch(`/api/settings/users?id=${user.id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ status: newStatus })
+    })
+    .then(res => res.json())
+    .then(data => {
+      if (data.success) {
+        fetchUsers();
+      } else {
+        alert(data.error || '状态更新失败');
+      }
+    })
+    .catch(error => {
+      console.error('状态更新失败:', error);
+      alert('状态更新失败');
+    });
+  };
+
   // 删除用户
-  const handleDeleteUser = async () => {
+  const handleDeleteUser = () => {
     if (!editingUser) return;
     
-    if (!confirm(`确定要删除用户 "${editingUser.name || editingUser.phone}" 吗？此操作不可恢复。`)) {
+    const confirmed = window.confirm(`确定要删除用户 "${editingUser.name || editingUser.phone}" 吗？此操作不可恢复。`);
+    if (!confirmed) {
       return;
     }
     
     setIsDeleting(true);
-    try {
-      const response = await fetch(`/api/settings/users?id=${editingUser.id}`, {
-        method: 'DELETE',
-        headers: { 'Content-Type': 'application/json' }
-      });
-      const data = await response.json();
+    fetch(`/api/settings/users?id=${editingUser.id}`, {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' }
+    })
+    .then(res => res.json())
+    .then(data => {
       if (data.success) {
         setEditUserOpen(false);
         setEditingUser(null);
@@ -127,12 +152,14 @@ export default function SettingsPage() {
       } else {
         alert(data.error || '删除失败');
       }
-    } catch (error) {
+    })
+    .catch(error => {
       console.error('删除失败:', error);
       alert('删除失败');
-    } finally {
+    })
+    .finally(() => {
       setIsDeleting(false);
-    }
+    });
   };
 
   // 添加用户
@@ -369,142 +396,138 @@ export default function SettingsPage() {
                       <CardTitle>用户管理</CardTitle>
                       <CardDescription>管理系统用户账号</CardDescription>
                     </div>
-                    <Dialog open={addUserOpen} onOpenChange={setAddUserOpen}>
-                      <DialogTrigger asChild>
-                        <Button>添加用户</Button>
-                      </DialogTrigger>
-                      <DialogContent>
-                        <DialogHeader>
-                          <DialogTitle>添加新用户</DialogTitle>
-                          <DialogDescription>填写用户信息创建新账号</DialogDescription>
-                        </DialogHeader>
-                        <div className="space-y-4 py-4">
-                          <div className="space-y-2">
-                            <Label>手机号</Label>
-                            <Input 
-                              placeholder="请输入手机号" 
-                              value={newUserPhone}
-                              onChange={(e) => setNewUserPhone(e.target.value)}
-                            />
-                          </div>
-                          <div className="space-y-2">
-                            <Label>姓名</Label>
-                            <Input 
-                              placeholder="请输入姓名（选填）" 
-                              value={newUserName}
-                              onChange={(e) => setNewUserName(e.target.value)}
-                            />
-                          </div>
-                          <div className="space-y-2">
-                            <Label>密码</Label>
-                            <Input 
-                              type="password"
-                              placeholder="请输入密码" 
-                              value={newUserPassword}
-                              onChange={(e) => setNewUserPassword(e.target.value)}
-                            />
-                          </div>
-                          <div className="space-y-2">
-                            <Label>角色</Label>
-                            <select 
-                              className="w-full h-10 px-3 rounded-md border border-input bg-background text-sm"
-                              value={newUserRole}
-                              onChange={(e) => setNewUserRole(e.target.value)}
-                            >
-                              <option value="订单管理">1 订单管理</option>
-                              <option value="木工">2 木工</option>
-                              <option value="打磨">3 打磨</option>
-                              <option value="贴皮">4 贴皮</option>
-                              <option value="喷漆">5 喷漆</option>
-                              <option value="质检">6 质检</option>
-                              <option value="打包发货">7 打包发货</option>
-                              <option value="行政">8 行政</option>
-                              <option value="财务">9 财务</option>
-                              <option value="销售">10 销售</option>
-                              <option value="仓库">11 仓库</option>
-                              <option value="普工">12 普工</option>
-                            </select>
-                          </div>
+                    <Button onClick={() => setAddUserOpen(true)}>添加用户</Button>
+                    <DraggableDialog 
+                      open={addUserOpen} 
+                      onOpenChange={setAddUserOpen}
+                      title="添加新用户"
+                      description="填写用户信息创建新账号"
+                    >
+                      <div className="space-y-4">
+                        <div className="space-y-2">
+                          <Label>手机号</Label>
+                          <Input 
+                            placeholder="请输入手机号" 
+                            value={newUserPhone}
+                            onChange={(e) => setNewUserPhone(e.target.value)}
+                          />
                         </div>
-                        <DialogFooter>
-                          <Button variant="outline" onClick={() => setAddUserOpen(false)}>取消</Button>
-                          <Button onClick={handleAddUser} disabled={isAddingUser || !newUserPhone || !newUserPassword}>
-                            {isAddingUser ? '添加中...' : '添加'}
-                          </Button>
-                        </DialogFooter>
-                      </DialogContent>
-                    </Dialog>
+                        <div className="space-y-2">
+                          <Label>姓名</Label>
+                          <Input 
+                            placeholder="请输入姓名（选填）" 
+                            value={newUserName}
+                            onChange={(e) => setNewUserName(e.target.value)}
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <Label>密码</Label>
+                          <Input 
+                            type="password"
+                            placeholder="请输入密码" 
+                            value={newUserPassword}
+                            onChange={(e) => setNewUserPassword(e.target.value)}
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <Label>角色</Label>
+                          <select 
+                            className="w-full h-10 px-3 rounded-md border border-input bg-background text-sm"
+                            value={newUserRole}
+                            onChange={(e) => setNewUserRole(e.target.value)}
+                          >
+                            <option value="订单管理">1 订单管理</option>
+                            <option value="木工">2 木工</option>
+                            <option value="打磨">3 打磨</option>
+                            <option value="贴皮">4 贴皮</option>
+                            <option value="喷漆">5 喷漆</option>
+                            <option value="质检">6 质检</option>
+                            <option value="打包发货">7 打包发货</option>
+                            <option value="行政">8 行政</option>
+                            <option value="财务">9 财务</option>
+                            <option value="销售">10 销售</option>
+                            <option value="仓库">11 仓库</option>
+                            <option value="普工">12 普工</option>
+                          </select>
+                        </div>
+                      </div>
+                      <div className="flex justify-end gap-2 mt-6">
+                        <Button variant="outline" onClick={() => setAddUserOpen(false)}>取消</Button>
+                        <Button onClick={handleAddUser} disabled={isAddingUser || !newUserPhone || !newUserPassword}>
+                          {isAddingUser ? '添加中...' : '添加'}
+                        </Button>
+                      </div>
+                    </DraggableDialog>
                     
                     {/* 编辑用户弹窗 */}
-                    <Dialog open={editUserOpen} onOpenChange={setEditUserOpen}>
-                      <DialogContent>
-                        <DialogHeader>
-                          <DialogTitle>编辑用户</DialogTitle>
-                          <DialogDescription>修改用户信息</DialogDescription>
-                        </DialogHeader>
-                        <div className="space-y-4 py-4">
-                          <div className="space-y-2">
-                            <Label>用户名</Label>
-                            <Input value={editingUser?.phone || ''} disabled />
-                          </div>
-                          <div className="space-y-2">
-                            <Label>姓名</Label>
-                            <Input 
-                              placeholder="请输入姓名" 
-                              value={editForm.name}
-                              onChange={(e) => setEditForm({...editForm, name: e.target.value})}
-                            />
-                          </div>
-                          <div className="space-y-2">
-                            <Label>角色</Label>
-                            <select 
-                              className="w-full h-10 px-3 rounded-md border border-input bg-background text-sm"
-                              value={editForm.role}
-                              onChange={(e) => setEditForm({...editForm, role: e.target.value})}
-                            >
-                              <option value="订单管理">1 订单管理</option>
-                              <option value="木工">2 木工</option>
-                              <option value="打磨">3 打磨</option>
-                              <option value="贴皮">4 贴皮</option>
-                              <option value="喷漆">5 喷漆</option>
-                              <option value="质检">6 质检</option>
-                              <option value="打包发货">7 打包发货</option>
-                              <option value="行政">8 行政</option>
-                              <option value="财务">9 财务</option>
-                              <option value="销售">10 销售</option>
-                              <option value="仓库">11 仓库</option>
-                              <option value="普工">12 普工</option>
-                            </select>
-                          </div>
-                          <div className="space-y-2">
-                            <Label>状态</Label>
-                            <select 
-                              className="w-full h-10 px-3 rounded-md border border-input bg-background text-sm"
-                              value={editForm.status}
-                              onChange={(e) => setEditForm({...editForm, status: e.target.value})}
-                            >
-                              <option value="active">启用</option>
-                              <option value="inactive">禁用</option>
-                            </select>
-                          </div>
+                    <DraggableDialog 
+                      open={editUserOpen} 
+                      onOpenChange={setEditUserOpen}
+                      title="编辑用户"
+                      description="修改用户信息"
+                    >
+                      <div className="space-y-4">
+                        <div className="space-y-2">
+                          <Label>用户名</Label>
+                          <Input value={editingUser?.phone || ''} disabled />
                         </div>
-                        <DialogFooter className="justify-between">
-                          <Button 
-                            variant="destructive" 
-                            onClick={handleDeleteUser} 
-                            disabled={isDeleting}
+                        <div className="space-y-2">
+                          <Label>姓名</Label>
+                          <Input 
+                            placeholder="请输入姓名" 
+                            value={editForm.name}
+                            onChange={(e) => setEditForm({...editForm, name: e.target.value})}
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <Label>角色</Label>
+                          <select 
+                            className="w-full h-10 px-3 rounded-md border border-input bg-background text-sm"
+                            value={editForm.role}
+                            onChange={(e) => setEditForm({...editForm, role: e.target.value})}
                           >
-                            {isDeleting ? '删除中...' : '删除'}
+                            <option value="订单管理">1 订单管理</option>
+                            <option value="木工">2 木工</option>
+                            <option value="打磨">3 打磨</option>
+                            <option value="贴皮">4 贴皮</option>
+                            <option value="喷漆">5 喷漆</option>
+                            <option value="质检">6 质检</option>
+                            <option value="打包发货">7 打包发货</option>
+                            <option value="行政">8 行政</option>
+                            <option value="财务">9 财务</option>
+                            <option value="销售">10 销售</option>
+                            <option value="仓库">11 仓库</option>
+                            <option value="普工">12 普工</option>
+                          </select>
+                        </div>
+                        <div className="space-y-2">
+                          <Label>状态</Label>
+                          <select 
+                            className="w-full h-10 px-3 rounded-md border border-input bg-background text-sm"
+                            value={editForm.status}
+                            onChange={(e) => setEditForm({...editForm, status: e.target.value})}
+                          >
+                            <option value="active">启用</option>
+                            <option value="inactive">禁用</option>
+                          </select>
+                        </div>
+                      </div>
+                      <div className="flex justify-between mt-6">
+                        <Button 
+                          variant="destructive" 
+                          onClick={handleDeleteUser} 
+                          disabled={isDeleting}
+                        >
+                          {isDeleting ? '删除中...' : '删除'}
+                        </Button>
+                        <div className="flex gap-2">
+                          <Button variant="outline" onClick={() => setEditUserOpen(false)}>取消</Button>
+                          <Button onClick={handleSaveEdit} disabled={isUpdating}>
+                            {isUpdating ? '保存中...' : '保存'}
                           </Button>
-                          <div className="flex gap-2">
-                            <Button variant="outline" onClick={() => setEditUserOpen(false)}>取消</Button>
-                            <Button onClick={handleSaveEdit} disabled={isUpdating}>
-                              {isUpdating ? '保存中...' : '保存'}
-                            </Button>
-                          </div>
-                        </DialogFooter>
-                      </DialogContent>
-                    </Dialog>
+                        </div>
+                      </div>
+                    </DraggableDialog>
                   </div>
                 </CardHeader>
                 <CardContent>
@@ -540,9 +563,12 @@ export default function SettingsPage() {
                                 <td className="py-3 px-4">{user.name || '-'}</td>
                                 <td className="py-3 px-4">{user.role}</td>
                                 <td className="py-3 px-4">
-                                  <span className={`px-2 py-1 rounded-full text-xs font-medium ${user.status === 'active' ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-700'}`}>
+                                  <button 
+                                    onClick={() => handleToggleStatus(user)}
+                                    className={`px-2 py-1 rounded-full text-xs font-medium cursor-pointer transition-colors ${user.status === 'active' ? 'bg-green-100 text-green-700 hover:bg-green-200' : 'bg-gray-200 text-gray-600 hover:bg-gray-300'}`}
+                                  >
                                     {user.status === 'active' ? '启用' : '禁用'}
-                                  </span>
+                                  </button>
                                 </td>
                                 <td className="py-3 px-4">
                                   <Button variant="outline" size="sm" onClick={() => handleEditUser(user)}>编辑</Button>
