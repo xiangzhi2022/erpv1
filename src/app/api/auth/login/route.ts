@@ -16,12 +16,25 @@ export async function POST(request: Request) {
       );
     }
 
-    // 查询用户
+    // 查询用户（包含租户信息）
     const { data: user, error } = await supabase
       .from('users')
-      .select('id, phone, nickname, role, is_active, password')
+      .select('id, phone, nickname, role, is_active, password, tenant_id')
       .eq('phone', phone)
       .single();
+    
+    // 如果有tenant_id，获取租户信息
+    let tenantInfo = null;
+    if (user?.tenant_id) {
+      const { data: tenant } = await supabase
+        .from('tenants')
+        .select('id, name, code, type')
+        .eq('id', user.tenant_id)
+        .single();
+      if (tenant) {
+        tenantInfo = tenant;
+      }
+    }
 
     if (error || !user) {
       return Response.json(
@@ -52,12 +65,31 @@ export async function POST(request: Request) {
       .update({ last_login_at: new Date().toISOString() })
       .eq('id', user.id);
 
+    // 根据角色获取跳转路径
+    const getDashboardPath = (role: string): string => {
+      switch (role) {
+        case 'super_admin':
+        case 'saas_admin':
+          return '/dashboard';
+        case 'dealer_admin':
+          return '/dealer';
+        case 'factory_admin':
+          return '/factory';
+        case 'factory_user':
+          return '/worker';
+        default:
+          return '/';
+      }
+    };
+
     // 设置登录Cookie
     const userInfo = {
       id: user.id,
       phone: user.phone,
       nickname: user.nickname,
-      role: user.role
+      role: user.role,
+      tenant_id: user.tenant_id,
+      tenant_type: tenantInfo?.type
     };
 
     const cookieStore = await cookies();
@@ -71,7 +103,9 @@ export async function POST(request: Request) {
     // 返回用户信息（不含密码）
     return Response.json({
       success: true,
-      user: userInfo
+      user: userInfo,
+      tenant: tenantInfo,
+      redirect: getDashboardPath(user.role)
     });
 
   } catch (err) {

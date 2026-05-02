@@ -125,4 +125,8 @@ function getSupabaseClient(token?: string): SupabaseClient {
   });
 }
 
-export { loadEnv, getSupabaseCredentials, getSupabaseServiceRoleKey, getSupabaseClient };
+export { loadEnv, getSupabaseCredentials, getSupabaseServiceRoleKey, getSupabaseClient, getSupabaseServiceClient, createClient };
+
+// getSupabaseServiceClient 是 getSupabaseClient 的别名
+const getSupabaseServiceClient = getSupabaseClient;
+
