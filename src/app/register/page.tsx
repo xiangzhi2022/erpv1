@@ -139,6 +139,11 @@ export default function RegisterPage() {
       return;
     }
     
+    if (!formData.nickname || formData.nickname.trim().length === 0) {
+      setError('请输入公司名称');
+      return;
+    }
+    
     if (formData.password !== formData.confirmPassword) {
       setError('两次输入的密码不一致');
       return;
@@ -229,19 +234,20 @@ export default function RegisterPage() {
                 </div>
               </div>
 
-              {/* Nickname */}
+              {/* Company Name */}
               <div className="relative group">
                 <Input
-                  id="nickname"
+                  id="companyName"
                   type="text"
-                  placeholder="请输入昵称（选填）"
+                  placeholder="请输入公司名称（必填）"
                   value={formData.nickname}
                   onChange={(e) => setFormData({...formData, nickname: e.target.value})}
+                  required
                   className="h-12 bg-[#002b5c]/50 border-[#0A82DF]/30 focus:border-[#0A82DF] focus:ring-[#0A82DF]/20 pl-11 transition-all duration-300 placeholder:text-[#0A82DF]/50 text-white"
                 />
                 <div className="absolute left-4 top-1/2 -translate-y-1/2 text-[#0A82DF]/50 group-focus-within:text-[#0A82DF] transition-colors">
                   <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" />
                   </svg>
                 </div>
               </div>

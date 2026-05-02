@@ -6,18 +6,22 @@ export async function POST(request: NextRequest) {
   try {
     const { phone, password, nickname } = await request.json();
 
-    // 验证手机号
-    if (!phone || !/^1[3-9]\d{9}$/.test(phone)) {
+    // 验证手机号或账号
+    // 支持手机号格式或简单账号（如1234）
+    const isPhone = /^1[3-9]\d{9}$/.test(phone);
+    const isSimpleAccount = /^\d{4,10}$/.test(phone);
+    
+    if (!phone || (!isPhone && !isSimpleAccount)) {
       return NextResponse.json(
-        { success: false, error: '请输入正确的手机号' },
+        { success: false, error: '请输入正确的手机号或账号' },
         { status: 400 }
       );
     }
 
-    // 验证密码
-    if (!password || password.length < 6) {
+    // 验证密码（支持4位或6位以上密码）
+    if (!password || (password.length !== 4 && password.length < 6)) {
       return NextResponse.json(
-        { success: false, error: '密码至少6位' },
+        { success: false, error: '密码必须是4位或至少6位' },
         { status: 400 }
       );
     }
