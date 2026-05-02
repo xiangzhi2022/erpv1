@@ -108,7 +108,7 @@ function GridBackground() {
 
 export default function LoginPage() {
   const router = useRouter();
-  const [email, setEmail] = useState('');
+  const [phone, setPhone] = useState('');
   const [password, setPassword] = useState('');
   const [rememberMe, setRememberMe] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
@@ -129,7 +129,7 @@ export default function LoginPage() {
       const response = await fetch('/api/auth/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, password })
+        body: JSON.stringify({ phone, password })
       });
 
       const result = await response.json();
@@ -197,17 +197,20 @@ export default function LoginPage() {
             <form onSubmit={handleLogin} className="space-y-5">
               <div className="relative group">
                 <Input
-                  id="email"
-                  type="email"
-                  placeholder="请输入邮箱"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
+                  id="phone"
+                  type="tel"
+                  placeholder="请输入手机号"
+                  value={phone}
+                  onChange={(e) => {
+                    const val = e.target.value.replace(/\D/g, '').slice(0, 11);
+                    setPhone(val);
+                  }}
                   required
                   className="h-12 bg-[#002b5c]/50 border-[#0A82DF]/30 focus:border-[#0A82DF] focus:ring-[#0A82DF]/20 pl-11 transition-all duration-300 placeholder:text-[#0A82DF]/50 text-white"
                 />
                 <div className="absolute left-4 top-1/2 -translate-y-1/2 text-[#0A82DF]/50 group-focus-within:text-[#0A82DF] transition-colors">
                   <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z" />
                   </svg>
                 </div>
               </div>

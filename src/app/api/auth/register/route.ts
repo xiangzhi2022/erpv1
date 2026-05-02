@@ -4,12 +4,12 @@ import { randomUUID } from 'crypto';
 
 export async function POST(request: NextRequest) {
   try {
-    const { email, password, nickname } = await request.json();
+    const { phone, password, nickname } = await request.json();
 
-    // 验证邮箱
-    if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    // 验证手机号
+    if (!phone || !/^1[3-9]\d{9}$/.test(phone)) {
       return NextResponse.json(
-        { success: false, error: '请输入正确的邮箱地址' },
+        { success: false, error: '请输入正确的手机号' },
         { status: 400 }
       );
     }
@@ -24,16 +24,16 @@ export async function POST(request: NextRequest) {
 
     const supabase = getSupabaseServiceClient();
 
-    // 检查邮箱是否已注册
+    // 检查手机号是否已注册
     const { data: existingUser } = await supabase
       .from('users')
       .select('id')
-      .eq('phone', email)
+      .eq('phone', phone)
       .single();
 
     if (existingUser) {
       return NextResponse.json(
-        { success: false, error: '该邮箱已注册' },
+        { success: false, error: '该手机号已注册' },
         { status: 400 }
       );
     }
@@ -46,9 +46,9 @@ export async function POST(request: NextRequest) {
       .from('users')
       .insert({
         id: userId,
-        phone: email,
+        phone,
         password,
-        nickname: nickname || `用户${email.split('@')[0]}`,
+        nickname: nickname || `用户${phone.slice(-4)}`,
         role: 'user',
         is_active: true,
       });
@@ -66,8 +66,8 @@ export async function POST(request: NextRequest) {
       message: '注册成功',
       user: {
         id: userId,
-        email,
-        nickname: nickname || `用户${email.split('@')[0]}`,
+        phone,
+        nickname: nickname || `用户${phone.slice(-4)}`,
         role: 'user',
       }
     });
