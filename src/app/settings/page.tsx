@@ -21,6 +21,8 @@ export default function SettingsPage() {
   const [isSaving, setIsSaving] = useState(false);
   const [saveMessage, setSaveMessage] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
   const [verifyResult, setVerifyResult] = useState<{ available: boolean; message: string } | null>(null);
+  const [isAdmin, setIsAdmin] = useState(false);
+  const [prefixes, setPrefixes] = useState<Array<{prefix: string; company_name: string; phone: string; address: string}>>([]);
   
   // 用户管理相关状态
   const [users, setUsers] = useState<Array<{id: string; phone: string; name: string; role: string; department: string; status: string}>>([]);
@@ -43,11 +45,15 @@ export default function SettingsPage() {
       try {
         const response = await fetch('/api/settings/load');
         const data = await response.json();
-        if (data.success && data.settings) {
-          if (data.settings.order_prefix) setPrefix(data.settings.order_prefix);
-          if (data.settings.company_name) setCompanyName(data.settings.company_name);
-          if (data.settings.company_phone) setPhone(data.settings.company_phone);
-          if (data.settings.company_address) setAddress(data.settings.company_address);
+        if (data.success) {
+          if (data.settings) {
+            if (data.settings.order_prefix) setPrefix(data.settings.order_prefix);
+            if (data.settings.company_name) setCompanyName(data.settings.company_name);
+            if (data.settings.company_phone) setPhone(data.settings.company_phone);
+            if (data.settings.company_address) setAddress(data.settings.company_address);
+          }
+          if (data.isAdmin !== undefined) setIsAdmin(data.isAdmin);
+          if (data.prefixes) setPrefixes(data.prefixes);
         }
       } catch (error) {
         console.error('加载设置失败:', error);
@@ -260,7 +266,8 @@ export default function SettingsPage() {
     setSaveMessage(null);
     
     try {
-      const response = await fetch('/api/settings/save', {
+      // 调用新的verify-prefix API保存前缀
+      const response = await fetch('/api/settings/verify-prefix', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ prefix, companyName, phone, address })
@@ -269,6 +276,10 @@ export default function SettingsPage() {
       
       if (data.success) {
         setSaveMessage({ type: 'success', message: '设置保存成功' });
+        // 重新加载前缀列表
+        const loadResponse = await fetch('/api/settings/load');
+        const loadData = await loadResponse.json();
+        if (loadData.prefixes) setPrefixes(loadData.prefixes);
         // 2秒后清除消息
         setTimeout(() => setSaveMessage(null), 2000);
       } else {
@@ -381,7 +392,12 @@ export default function SettingsPage() {
                         {saveMessage.message}
                       </span>
                     )}
-                    <Button onClick={handleSaveSettings} disabled={isSaving || !verifyResult?.available}>
+                    {!isAdmin && (
+                      <span className="text-sm text-muted-foreground">
+                        只有管理员可以修改订单前缀配置
+                      </span>
+                    )}
+                    <Button onClick={handleSaveSettings} disabled={isSaving || !verifyResult?.available || !isAdmin}>
                       {isSaving ? (
                         <>
                           <Loader2 className="h-4 w-4 animate-spin mr-2" />
