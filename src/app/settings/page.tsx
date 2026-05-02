@@ -22,7 +22,7 @@ export default function SettingsPage() {
   const [verifyResult, setVerifyResult] = useState<{ available: boolean; message: string } | null>(null);
   
   // 用户管理相关状态
-  const [users, setUsers] = useState<Array<{id: string; phone: string; nickname: string; role: string; is_active: boolean}>>([]);
+  const [users, setUsers] = useState<Array<{id: string; phone: string; name: string; role: string; department: string; status: string}>>([]);
   const [isLoadingUsers, setIsLoadingUsers] = useState(false);
   const [addUserOpen, setAddUserOpen] = useState(false);
   const [newUserPhone, setNewUserPhone] = useState('');
@@ -342,12 +342,18 @@ export default function SettingsPage() {
                               value={newUserRole}
                               onChange={(e) => setNewUserRole(e.target.value)}
                             >
-                              <option value="user">普通用户</option>
-                              <option value="factory_user">工厂工人</option>
-                              <option value="factory_admin">工厂管理员</option>
-                              <option value="dealer_admin">经销商管理员</option>
-                              <option value="saas_admin">服务商管理员</option>
-                              <option value="super_admin">超级管理员</option>
+                              <option value="订单管理">1 订单管理</option>
+                              <option value="木工">2 木工</option>
+                              <option value="打磨">3 打磨</option>
+                              <option value="贴皮">4 贴皮</option>
+                              <option value="喷漆">5 喷漆</option>
+                              <option value="质检">6 质检</option>
+                              <option value="打包发货">7 打包发货</option>
+                              <option value="行政">8 行政</option>
+                              <option value="财务">9 财务</option>
+                              <option value="销售">10 销售</option>
+                              <option value="仓库">11 仓库</option>
+                              <option value="普工">12 普工</option>
                             </select>
                           </div>
                         </div>
@@ -391,17 +397,11 @@ export default function SettingsPage() {
                                 <td className="py-3 px-4">
                                   <span className="text-muted-foreground">******</span>
                                 </td>
-                                <td className="py-3 px-4">{user.nickname || '-'}</td>
+                                <td className="py-3 px-4">{user.name || '-'}</td>
+                                <td className="py-3 px-4">{user.role}</td>
                                 <td className="py-3 px-4">
-                                  {user.role === 'super_admin' ? '超级管理员' :
-                                   user.role === 'saas_admin' ? '服务商管理员' :
-                                   user.role === 'dealer_admin' ? '经销商管理员' :
-                                   user.role === 'factory_admin' ? '工厂管理员' :
-                                   user.role === 'factory_user' ? '工厂工人' : '普通用户'}
-                                </td>
-                                <td className="py-3 px-4">
-                                  <span className={`px-2 py-1 rounded-full text-xs font-medium ${user.is_active ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-700'}`}>
-                                    {user.is_active ? '启用' : '禁用'}
+                                  <span className={`px-2 py-1 rounded-full text-xs font-medium ${user.status === 'active' ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-700'}`}>
+                                    {user.status === 'active' ? '启用' : '禁用'}
                                   </span>
                                 </td>
                                 <td className="py-3 px-4">
