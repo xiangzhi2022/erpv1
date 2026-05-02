@@ -135,8 +135,10 @@ export default function LoginPage() {
       const result = await response.json();
 
       if (result.success) {
-        // 保存用户信息到 localStorage
-        localStorage.setItem('user', JSON.stringify(result.user));
+        // 保存用户信息到 Cookie（设置7天有效期）
+        const expires = new Date();
+        expires.setDate(expires.getDate() + 7);
+        document.cookie = `erp_user=${encodeURIComponent(JSON.stringify(result.user))};expires=${expires.toUTCString()};path=/;SameSite=Lax`;
         router.push('/dashboard');
       } else {
         setError(result.error || '登录失败');
