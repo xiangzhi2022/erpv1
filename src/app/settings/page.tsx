@@ -34,6 +34,7 @@ export default function SettingsPage() {
   const [editingUser, setEditingUser] = useState<{id: string; phone: string; name: string; role: string; status: string} | null>(null);
   const [editForm, setEditForm] = useState({ name: '', role: '', status: '' });
   const [isUpdating, setIsUpdating] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
   
   // 加载已有设置
   useEffect(() => {
@@ -104,25 +105,33 @@ export default function SettingsPage() {
     }
   };
 
-  // 切换用户状态
-  const handleToggleStatus = async (user: typeof users[0]) => {
-    const newStatus = user.status === 'active' ? 'inactive' : 'active';
+  // 删除用户
+  const handleDeleteUser = async () => {
+    if (!editingUser) return;
     
+    if (!confirm(`确定要删除用户 "${editingUser.name || editingUser.phone}" 吗？此操作不可恢复。`)) {
+      return;
+    }
+    
+    setIsDeleting(true);
     try {
-      const response = await fetch(`/api/settings/users?id=${user.id}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ status: newStatus })
+      const response = await fetch(`/api/settings/users?id=${editingUser.id}`, {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' }
       });
       const data = await response.json();
       if (data.success) {
+        setEditUserOpen(false);
+        setEditingUser(null);
         fetchUsers();
       } else {
-        alert(data.error || '状态更新失败');
+        alert(data.error || '删除失败');
       }
     } catch (error) {
-      console.error('状态更新失败:', error);
-      alert('状态更新失败');
+      console.error('删除失败:', error);
+      alert('删除失败');
+    } finally {
+      setIsDeleting(false);
     }
   };
 
@@ -479,11 +488,20 @@ export default function SettingsPage() {
                             </select>
                           </div>
                         </div>
-                        <DialogFooter>
-                          <Button variant="outline" onClick={() => setEditUserOpen(false)}>取消</Button>
-                          <Button onClick={handleSaveEdit} disabled={isUpdating}>
-                            {isUpdating ? '保存中...' : '保存'}
+                        <DialogFooter className="justify-between">
+                          <Button 
+                            variant="destructive" 
+                            onClick={handleDeleteUser} 
+                            disabled={isDeleting}
+                          >
+                            {isDeleting ? '删除中...' : '删除'}
                           </Button>
+                          <div className="flex gap-2">
+                            <Button variant="outline" onClick={() => setEditUserOpen(false)}>取消</Button>
+                            <Button onClick={handleSaveEdit} disabled={isUpdating}>
+                              {isUpdating ? '保存中...' : '保存'}
+                            </Button>
+                          </div>
                         </DialogFooter>
                       </DialogContent>
                     </Dialog>
@@ -522,12 +540,9 @@ export default function SettingsPage() {
                                 <td className="py-3 px-4">{user.name || '-'}</td>
                                 <td className="py-3 px-4">{user.role}</td>
                                 <td className="py-3 px-4">
-                                  <button 
-                                    onClick={() => handleToggleStatus(user)}
-                                    className={`px-2 py-1 rounded-full text-xs font-medium cursor-pointer transition-colors ${user.status === 'active' ? 'bg-green-100 text-green-700 hover:bg-green-200' : 'bg-gray-200 text-gray-600 hover:bg-gray-300'}`}
-                                  >
+                                  <span className={`px-2 py-1 rounded-full text-xs font-medium ${user.status === 'active' ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-700'}`}>
                                     {user.status === 'active' ? '启用' : '禁用'}
-                                  </button>
+                                  </span>
                                 </td>
                                 <td className="py-3 px-4">
                                   <Button variant="outline" size="sm" onClick={() => handleEditUser(user)}>编辑</Button>

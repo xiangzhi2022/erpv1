@@ -134,3 +134,35 @@ export async function PUT(request: NextRequest) {
     return NextResponse.json({ success: false, error: '服务器错误' }, { status: 500 });
   }
 }
+
+export async function DELETE(request: NextRequest) {
+  try {
+    const currentUser = await getCurrentUser();
+    if (!currentUser) {
+      return NextResponse.json({ success: false, error: '未登录' }, { status: 401 });
+    }
+
+    const { searchParams } = new URL(request.url);
+    const userId = searchParams.get('id');
+    
+    if (!userId) {
+      return NextResponse.json({ success: false, error: '缺少用户ID' }, { status: 400 });
+    }
+
+    const supabase = createClient(supabaseUrl, supabaseServiceKey);
+
+    const { error } = await supabase
+      .from('erp_users')
+      .delete()
+      .eq('id', userId);
+
+    if (error) {
+      return NextResponse.json({ success: false, error: error.message }, { status: 500 });
+    }
+
+    return NextResponse.json({ success: true });
+  } catch (error) {
+    console.error('删除用户失败:', error);
+    return NextResponse.json({ success: false, error: '服务器错误' }, { status: 500 });
+  }
+}
