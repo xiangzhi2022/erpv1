@@ -16,43 +16,40 @@ export async function POST(request: NextRequest) {
     }
     
     const user = JSON.parse(userCookie.value);
+    const now = new Date().toISOString();
     
-    // 保存前缀设置
-    const { error: prefixError } = await supabase
-      .from('user_settings')
-      .upsert({
-        user_id: user.id,
-        setting_key: 'order_prefix',
-        setting_value: prefix,
-        updated_at: new Date().toISOString()
-      }, {
-        onConflict: 'user_id,setting_key'
-      });
-    
-    if (prefixError) {
-      console.error('保存前缀设置失败:', prefixError);
-      return NextResponse.json(
-        { success: false, error: '保存前缀设置失败' },
-        { status: 500 }
-      );
-    }
-    
-    // 保存公司信息
-    const companySettings = [
-      { user_id: user.id, setting_key: 'company_name', setting_value: companyName },
-      { user_id: user.id, setting_key: 'company_phone', setting_value: phone },
-      { user_id: user.id, setting_key: 'company_address', setting_value: address }
+    // 要保存的所有设置
+    const settings = [
+      { setting_key: 'order_prefix', setting_value: prefix || '' },
+      { setting_key: 'company_name', setting_value: companyName || '' },
+      { setting_key: 'company_phone', setting_value: phone || '' },
+      { setting_key: 'company_address', setting_value: address || '' }
     ];
     
-    for (const setting of companySettings) {
+    // 保存每个设置：先删除旧记录，再插入新记录
+    for (const setting of settings) {
+      // 先删除旧记录
       await supabase
         .from('user_settings')
-        .upsert({
-          ...setting,
-          updated_at: new Date().toISOString()
-        }, {
-          onConflict: 'user_id,setting_key'
+        .delete()
+        .eq('user_id', user.id)
+        .eq('setting_key', setting.setting_key);
+      
+      // 插入新记录
+      const { error } = await supabase
+        .from('user_settings')
+        .insert({
+          id: `${user.id}-${setting.setting_key}`,
+          user_id: user.id,
+          setting_key: setting.setting_key,
+          setting_value: setting.setting_value,
+          created_at: now,
+          updated_at: now
         });
+      
+      if (error) {
+        console.error(`保存设置 ${setting.setting_key} 失败:`, error);
+      }
     }
     
     return NextResponse.json({ 
