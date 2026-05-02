@@ -67,7 +67,7 @@
 ## 青崖全屋定制ERP系统
 
 ### 超级管理员登录
-- **用户名**: `daoxi`
+- **邮箱**: `admin@qingya.com`
 - **密码**: `19840214aA`
 - **角色**: `super_admin`
 
@@ -91,9 +91,11 @@
 - `workshops` - 车间表
 
 ### API 端点
-- `/api/auth/login` - 登录
+- `/api/auth/login` - 登录（使用邮箱）
 - `/api/auth/logout` - 登出
-- `/api/auth/register` - 注册
+- `/api/auth/register` - 注册（使用邮箱，无需验证码）
+- `/api/auth/email/send` - 发送邮箱验证码
+- `/api/auth/email/verify` - 验证邮箱验证码
 - `/api/dealer/orders` - 经销商订单
 - `/api/factory/orders` - 工厂订单
 - `/api/worker/tasks` - 工人任务

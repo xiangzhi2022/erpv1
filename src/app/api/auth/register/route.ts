@@ -1,15 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getSupabaseClient } from '@/storage/database/supabase-client';
+import { getSupabaseServiceClient } from '@/storage/database/supabase-client';
 import { randomUUID } from 'crypto';
 
 export async function POST(request: NextRequest) {
   try {
-    const { phone, password } = await request.json();
+    const { email, password, nickname } = await request.json();
 
-    // 验证手机号
-    if (!phone || !/^1[3-9]\d{9}$/.test(phone)) {
+    // 验证邮箱
+    if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
       return NextResponse.json(
-        { success: false, error: '请输入正确的手机号' },
+        { success: false, error: '请输入正确的邮箱地址' },
         { status: 400 }
       );
     }
@@ -22,18 +22,18 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const supabase = getSupabaseClient();
+    const supabase = getSupabaseServiceClient();
 
-    // 检查手机号是否已注册
+    // 检查邮箱是否已注册
     const { data: existingUser } = await supabase
       .from('users')
       .select('id')
-      .eq('phone', phone)
+      .eq('phone', email)
       .single();
 
     if (existingUser) {
       return NextResponse.json(
-        { success: false, error: '该手机号已注册' },
+        { success: false, error: '该邮箱已注册' },
         { status: 400 }
       );
     }
@@ -41,15 +41,16 @@ export async function POST(request: NextRequest) {
     // 生成用户ID
     const userId = randomUUID();
 
-    // 创建用户（直接存储明文密码，实际项目中应加密）
+    // 创建用户
     const { error: insertError } = await supabase
       .from('users')
       .insert({
         id: userId,
-        phone,
+        phone: email,
         password,
-        nickname: `用户${phone.slice(-4)}`,
+        nickname: nickname || `用户${email.split('@')[0]}`,
         role: 'user',
+        is_active: true,
       });
 
     if (insertError) {
@@ -65,8 +66,8 @@ export async function POST(request: NextRequest) {
       message: '注册成功',
       user: {
         id: userId,
-        phone,
-        nickname: `用户${phone.slice(-4)}`,
+        email,
+        nickname: nickname || `用户${email.split('@')[0]}`,
         role: 'user',
       }
     });

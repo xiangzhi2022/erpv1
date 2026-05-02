@@ -6,7 +6,7 @@ import Link from 'next/link';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card, CardContent } from '@/components/ui/card';
-import { Zap, Eye, EyeOff, ArrowLeft, Check, X, Smartphone, Mail } from 'lucide-react';
+import { Zap, Eye, EyeOff, ArrowLeft, Check, X } from 'lucide-react';
 
 function ParticleBackground() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -108,129 +108,68 @@ function GridBackground() {
 export default function RegisterPage() {
   const router = useRouter();
   const [formData, setFormData] = useState({
-    phone: '',
+    email: '',
     password: '',
     confirmPassword: '',
-    code: '',
+    nickname: '',
   });
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [mounted, setMounted] = useState(false);
-  const [codeSending, setCodeSending] = useState(false);
-  const [countdown, setCountdown] = useState(0);
-  const [codeSent, setCodeSent] = useState(false);
+  const [error, setError] = useState('');
 
   useEffect(() => {
     setMounted(true);
   }, []);
 
-  useEffect(() => {
-    if (countdown > 0) {
-      const timer = setTimeout(() => setCountdown(countdown - 1), 1000);
-      return () => clearTimeout(timer);
-    }
-  }, [countdown]);
-
   const passwordRequirements = [
-    { met: formData.password.length >= 8, text: '至少8个字符' },
+    { met: formData.password.length >= 6, text: '至少6个字符' },
     { met: /[A-Z]/.test(formData.password), text: '包含大写字母' },
     { met: /[a-z]/.test(formData.password), text: '包含小写字母' },
     { met: /[0-9]/.test(formData.password), text: '包含数字' },
   ];
 
-  const handleSendCode = async () => {
-    if (!formData.phone || formData.phone.length !== 11) {
-      alert('请输入正确的11位手机号');
-      return;
-    }
-
-    setCodeSending(true);
-    try {
-      const res = await fetch('/api/auth/sms/send', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ phone: formData.phone }),
-      });
-      const data = await res.json();
-      
-      if (data.success) {
-        setCodeSent(true);
-        setCountdown(60);
-        // 开发模式下显示验证码
-        if (data.dev_code) {
-          alert(`【开发模式】验证码: ${data.dev_code}`);
-        } else {
-          alert('验证码已发送，请注意查收');
-        }
-      } else {
-        alert(data.error || '发送失败');
-      }
-    } catch {
-      alert('网络错误，请重试');
-    } finally {
-      setCodeSending(false);
-    }
-  };
-
   const handleRegister = async (e: React.FormEvent) => {
     e.preventDefault();
+    setError('');
     
-    if (!codeSent || !formData.code) {
-      alert('请先获取验证码');
-      return;
-    }
-
-    if (formData.code.length !== 6) {
-      alert('请输入6位验证码');
+    if (!formData.email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(formData.email)) {
+      setError('请输入正确的邮箱地址');
       return;
     }
     
     if (formData.password !== formData.confirmPassword) {
-      alert('两次输入的密码不一致');
+      setError('两次输入的密码不一致');
       return;
     }
     
-    if (!passwordRequirements.every(req => req.met)) {
-      alert('请满足所有密码要求');
+    if (formData.password.length < 6) {
+      setError('密码至少6位');
       return;
     }
 
     setLoading(true);
     try {
-      // 验证验证码
-      const verifyRes = await fetch('/api/auth/sms/verify', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ phone: formData.phone, code: formData.code }),
-      });
-      const verifyData = await verifyRes.json();
-      
-      if (!verifyData.success) {
-        alert(verifyData.error || '验证码错误');
-        setLoading(false);
-        return;
-      }
-
-      // 注册用户
-      const regRes = await fetch('/api/auth/register', {
+      const res = await fetch('/api/auth/register', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          phone: formData.phone,
+          email: formData.email,
           password: formData.password,
+          nickname: formData.nickname || `用户${formData.email.split('@')[0]}`,
         }),
       });
-      const regData = await regRes.json();
+      const data = await res.json();
       
-      if (regData.success) {
+      if (data.success) {
         alert('注册成功！');
         router.push('/login');
       } else {
-        alert(regData.error || '注册失败');
+        setError(data.error || '注册失败');
       }
     } catch {
-      alert('网络错误，请重试');
+      setError('网络错误，请重试');
     } finally {
       setLoading(false);
     }
@@ -269,51 +208,38 @@ export default function RegisterPage() {
           
           <CardContent className="relative pt-8 pb-6">
             <form onSubmit={handleRegister} className="space-y-4">
-              {/* Phone with Code */}
-              <div className="flex gap-2">
-                <div className="relative group flex-1">
-                  <Input
-                    id="phone"
-                    type="tel"
-                    placeholder="请输入手机号"
-                    value={formData.phone}
-                    onChange={(e) => {
-                      const val = e.target.value.replace(/\D/g, '').slice(0, 11);
-                      setFormData({...formData, phone: val});
-                    }}
-                    required
-                    className="h-12 bg-[#002b5c]/50 border-[#0A82DF]/30 focus:border-[#0A82DF] focus:ring-[#0A82DF]/20 pl-11 transition-all duration-300 placeholder:text-[#0A82DF]/50 text-white"
-                  />
-                  <div className="absolute left-4 top-1/2 -translate-y-1/2 text-[#0A82DF]/50 group-focus-within:text-[#0A82DF] transition-colors">
-                    <Smartphone className="h-5 w-5" />
-                  </div>
-                </div>
-                <Button
-                  type="button"
-                  onClick={handleSendCode}
-                  disabled={codeSending || countdown > 0}
-                  className="h-12 px-4 bg-[#002b5c]/80 border border-[#0A82DF]/30 hover:bg-[#0A82DF]/20 text-[#0A82DF] text-sm font-medium whitespace-nowrap transition-all"
-                >
-                  {codeSending ? '发送中...' : countdown > 0 ? `${countdown}秒` : '获取验证码'}
-                </Button>
-              </div>
-
-              {/* Verification Code */}
+              {/* Email */}
               <div className="relative group">
                 <Input
-                  id="code"
-                  type="text"
-                  placeholder="请输入6位验证码"
-                  value={formData.code}
-                  onChange={(e) => {
-                    const val = e.target.value.replace(/\D/g, '').slice(0, 6);
-                    setFormData({...formData, code: val});
-                  }}
+                  id="email"
+                  type="email"
+                  placeholder="请输入邮箱"
+                  value={formData.email}
+                  onChange={(e) => setFormData({...formData, email: e.target.value})}
                   required
-                  className="h-12 bg-[#002b5c]/50 border-[#0A82DF]/30 focus:border-[#0A82DF] focus:ring-[#0A82DF]/20 pl-11 transition-all duration-300 placeholder:text-[#0A82DF]/50 text-white tracking-widest"
+                  className="h-12 bg-[#002b5c]/50 border-[#0A82DF]/30 focus:border-[#0A82DF] focus:ring-[#0A82DF]/20 pl-11 transition-all duration-300 placeholder:text-[#0A82DF]/50 text-white"
                 />
                 <div className="absolute left-4 top-1/2 -translate-y-1/2 text-[#0A82DF]/50 group-focus-within:text-[#0A82DF] transition-colors">
-                  <Mail className="h-5 w-5" />
+                  <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+                  </svg>
+                </div>
+              </div>
+
+              {/* Nickname */}
+              <div className="relative group">
+                <Input
+                  id="nickname"
+                  type="text"
+                  placeholder="请输入昵称（选填）"
+                  value={formData.nickname}
+                  onChange={(e) => setFormData({...formData, nickname: e.target.value})}
+                  className="h-12 bg-[#002b5c]/50 border-[#0A82DF]/30 focus:border-[#0A82DF] focus:ring-[#0A82DF]/20 pl-11 transition-all duration-300 placeholder:text-[#0A82DF]/50 text-white"
+                />
+                <div className="absolute left-4 top-1/2 -translate-y-1/2 text-[#0A82DF]/50 group-focus-within:text-[#0A82DF] transition-colors">
+                  <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+                  </svg>
                 </div>
               </div>
 
@@ -386,6 +312,12 @@ export default function RegisterPage() {
                 </p>
               )}
 
+              {error && (
+                <div className="text-sm text-red-400 bg-red-400/10 border border-red-400/20 rounded-md px-3 py-2">
+                  {error}
+                </div>
+              )}
+
               <Button 
                 type="submit" 
                 className="w-full h-12 text-base font-medium bg-gradient-to-r from-[#004DA7] to-[#0A82DF] hover:from-[#0A82DF] hover:to-[#004DA7] text-white shadow-lg shadow-[#0A82DF]/25 transition-all duration-300 hover:shadow-[#0A82DF]/40 hover:scale-[1.02] active:scale-[0.98]"
@@ -406,6 +338,12 @@ export default function RegisterPage() {
                   </span>
                 )}
               </Button>
+
+              <div className="text-center">
+                <Link href="/login" className="text-sm text-[#0A82DF]/70 hover:text-[#0A82DF] transition-colors">
+                  已有账号？立即登录
+                </Link>
+              </div>
             </form>
           </CardContent>
         </Card>

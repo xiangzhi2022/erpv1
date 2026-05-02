@@ -3,22 +3,22 @@ import { getSupabaseServiceClient } from '@/storage/database/supabase-client';
 
 export async function POST(request: Request) {
   try {
-    const { phone, password } = await request.json();
+    const { email, password } = await request.json();
     
-    if (!phone || !password) {
+    if (!email || !password) {
       return Response.json(
-        { success: false, error: '用户名和密码不能为空' },
+        { success: false, error: '邮箱和密码不能为空' },
         { status: 400 }
       );
     }
 
     const supabase = getSupabaseServiceClient();
 
-    // 查询用户
+    // 查询用户（使用 phone 字段存储邮箱）
     const { data: users, error: userError } = await supabase
       .from('users')
       .select('*')
-      .eq('phone', phone)
+      .eq('phone', email)
       .eq('is_active', true)
       .limit(1);
 
@@ -52,7 +52,7 @@ export async function POST(request: Request) {
     // 构建用户信息
     const userInfo = {
       id: user.id,
-      phone: user.phone,
+      email: user.phone,  // 返回邮箱（存储在 phone 字段）
       nickname: user.nickname,
       role: user.role,
       created_at: user.created_at,
