@@ -68,12 +68,12 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ success: false, error: '该手机号已注册' }, { status: 400 });
     }
 
-    // 创建用户（密码使用btoa简单编码）
+    // 创建用户
     const { data, error } = await supabase
       .from('erp_users')
       .insert({
         phone,
-        password: btoa(password),
+        password: password,
         name: name || phone,
         role: role || '普工',
         status: 'active',
@@ -85,6 +85,17 @@ export async function POST(request: NextRequest) {
     if (error) {
       return NextResponse.json({ success: false, error: error.message }, { status: 500 });
     }
+
+    // 同步到系统用户表（用于登录）
+    await supabase
+      .from('users')
+      .upsert({
+        phone,
+        password: password,
+        nickname: name || phone,
+        role: 'user',
+        is_active: true
+      }, { onConflict: 'phone' });
 
     return NextResponse.json({ success: true, user: data });
   } catch (error) {
@@ -114,7 +125,7 @@ export async function PUT(request: NextRequest) {
     if (body.name !== undefined) updateData.name = body.name;
     if (body.role !== undefined) updateData.role = body.role;
     if (body.status !== undefined) updateData.status = body.status;
-    if (body.password !== undefined) updateData.password = btoa(body.password);
+    if (body.password !== undefined) updateData.password = body.password;
     updateData.updated_at = new Date().toISOString();
 
     const { data, error } = await supabase
@@ -126,6 +137,19 @@ export async function PUT(request: NextRequest) {
 
     if (error) {
       return NextResponse.json({ success: false, error: error.message }, { status: 500 });
+    }
+
+    // 同步更新系统用户表
+    const systemUpdate: Record<string, unknown> = {};
+    if (body.name !== undefined) systemUpdate.nickname = body.name;
+    if (body.password !== undefined) systemUpdate.password = body.password;
+    if (body.status !== undefined) systemUpdate.is_active = body.status === 'active';
+    
+    if (Object.keys(systemUpdate).length > 0) {
+      await supabase
+        .from('users')
+        .update(systemUpdate)
+        .eq('phone', data.phone);
     }
 
     return NextResponse.json({ success: true, user: data });
@@ -151,6 +175,13 @@ export async function DELETE(request: NextRequest) {
 
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
+    // 先获取用户信息
+    const { data: userData } = await supabase
+      .from('erp_users')
+      .select('phone')
+      .eq('id', userId)
+      .single();
+
     const { error } = await supabase
       .from('erp_users')
       .delete()
@@ -158,6 +189,14 @@ export async function DELETE(request: NextRequest) {
 
     if (error) {
       return NextResponse.json({ success: false, error: error.message }, { status: 500 });
+    }
+
+    // 同时删除系统用户表中的记录
+    if (userData?.phone) {
+      await supabase
+        .from('users')
+        .delete()
+        .eq('phone', userData.phone);
     }
 
     return NextResponse.json({ success: true });

@@ -216,7 +216,15 @@ export default function SettingsPage() {
     // 初始检查
     handleTabChange();
     
-    return () => observer.disconnect();
+    // 也直接设置一个定时器确保用户列表被加载
+    const timer = setTimeout(() => {
+      fetchUsers();
+    }, 100);
+    
+    return () => {
+      observer.disconnect();
+      clearTimeout(timer);
+    };
   }, []);
 
   const handleVerifyPrefix = async () => {

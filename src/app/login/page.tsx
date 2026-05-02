@@ -116,8 +116,18 @@ export default function LoginPage() {
   const [mounted, setMounted] = useState(false);
   const [error, setError] = useState('');
 
+  // 读取保存的登录信息
   useEffect(() => {
     setMounted(true);
+    const savedPhone = localStorage.getItem('erp_login_phone');
+    const savedPassword = localStorage.getItem('erp_login_password');
+    const savedRemember = localStorage.getItem('erp_login_remember');
+    
+    if (savedPhone) setPhone(savedPhone);
+    if (savedPassword) setPassword(savedPassword);
+    if (savedRemember === 'true') {
+      setRememberMe(true);
+    }
   }, []);
 
   const handleLogin = async (e: React.FormEvent) => {
@@ -139,6 +149,18 @@ export default function LoginPage() {
         const expires = new Date();
         expires.setDate(expires.getDate() + 7);
         document.cookie = `erp_user=${encodeURIComponent(JSON.stringify(result.user))};expires=${expires.toUTCString()};path=/;SameSite=Lax`;
+        
+        // 记住密码功能
+        if (rememberMe) {
+          localStorage.setItem('erp_login_phone', phone);
+          localStorage.setItem('erp_login_password', password);
+          localStorage.setItem('erp_login_remember', 'true');
+        } else {
+          localStorage.removeItem('erp_login_phone');
+          localStorage.removeItem('erp_login_password');
+          localStorage.setItem('erp_login_remember', 'false');
+        }
+        
         router.push('/dashboard');
       } else {
         setError(result.error || '登录失败');
