@@ -11,10 +11,10 @@ import { Separator } from '@/components/ui/separator';
 import { Check, X, Loader2 } from 'lucide-react';
 
 export default function SettingsPage() {
-  const [prefix, setPrefix] = useState('QYD');
-  const [companyName, setCompanyName] = useState('温州青崖信息科技有限公司');
-  const [phone, setPhone] = useState('400-888-8888');
-  const [address, setAddress] = useState('某某省某某市某某区某某路88号');
+  const [prefix, setPrefix] = useState('');
+  const [companyName, setCompanyName] = useState('');
+  const [phone, setPhone] = useState('');
+  const [address, setAddress] = useState('');
   const [isVerifying, setIsVerifying] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [saveMessage, setSaveMessage] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
@@ -193,7 +193,7 @@ export default function SettingsPage() {
                         {saveMessage.message}
                       </span>
                     )}
-                    <Button onClick={handleSaveSettings} disabled={isSaving}>
+                    <Button onClick={handleSaveSettings} disabled={isSaving || !verifyResult?.available}>
                       {isSaving ? (
                         <>
                           <Loader2 className="h-4 w-4 animate-spin mr-2" />
