@@ -24,8 +24,34 @@ export default function SettingsPage() {
   const [isAdmin, setIsAdmin] = useState(false);
   const [prefixes, setPrefixes] = useState<Array<{prefix: string; company_name: string; phone: string; address: string}>>([]);
   
-  // 工厂岗位角色列表（22个核心岗位）
-  const ERP_ROLES = [
+  const [users, setUsers] = useState<Array<{id: string; phone: string; name: string; role: string; department: string; status: string; tenant_type?: string}>>([]);
+  const [isLoadingUsers, setIsLoadingUsers] = useState(false);
+  const [addUserOpen, setAddUserOpen] = useState(false);
+  const [newUserPhone, setNewUserPhone] = useState('');
+  const [newUserName, setNewUserName] = useState('');
+  const [newUserPassword, setNewUserPassword] = useState('');
+  const [newUserRole, setNewUserRole] = useState('订单管理');
+  const [newUserDept, setNewUserDept] = useState('技术/计划');
+  const [isAddingUser, setIsAddingUser] = useState(false);
+  const [editUserOpen, setEditUserOpen] = useState(false);
+  const [editingUser, setEditingUser] = useState<{id: string; phone: string; name: string; role: string; status: string} | null>(null);
+  const [editForm, setEditForm] = useState({ name: '', role: '', status: '', department: '' });
+  const [isUpdating, setIsUpdating] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [currentTenantType, setCurrentTenantType] = useState<string>('');
+  const [newUserTenantType, setNewUserTenantType] = useState<string>('');
+  const [currentUser, setCurrentUser] = useState<{phone: string; nickname: string; role: string; tenant_type?: string} | null>(null);
+  
+  // 租户类型定义
+  const TENANT_TYPES = [
+    { value: 'official', label: '官方管理', icon: '🔧' },
+    { value: 'manufacturer', label: '生产商', icon: '🏭' },
+    { value: 'dealer', label: '经销商', icon: '🏪' },
+    { value: 'material_supplier', label: '材料商', icon: '📦' },
+  ];
+  
+  // 生产商岗位角色列表（20个核心岗位）
+  const MANUFACTURER_ROLES = [
     { value: '厂长/车间主任', label: '1 厂长/车间主任', dept: '管理层' },
     { value: '订单管理', label: '2 订单管理', dept: '技术/计划' },
     { value: '拆单员', label: '3 拆单员', dept: '技术/计划' },
@@ -48,21 +74,52 @@ export default function SettingsPage() {
     { value: '普工', label: '20 普工', dept: '交付/后勤' },
   ];
   
-  // 用户管理相关状态
-  const [users, setUsers] = useState<Array<{id: string; phone: string; name: string; role: string; department: string; status: string}>>([]);
-  const [isLoadingUsers, setIsLoadingUsers] = useState(false);
-  const [addUserOpen, setAddUserOpen] = useState(false);
-  const [newUserPhone, setNewUserPhone] = useState('');
-  const [newUserName, setNewUserName] = useState('');
-  const [newUserPassword, setNewUserPassword] = useState('');
-  const [newUserRole, setNewUserRole] = useState('订单管理');
-  const [newUserDept, setNewUserDept] = useState('技术/计划');
-  const [isAddingUser, setIsAddingUser] = useState(false);
-  const [editUserOpen, setEditUserOpen] = useState(false);
-  const [editingUser, setEditingUser] = useState<{id: string; phone: string; name: string; role: string; status: string} | null>(null);
-  const [editForm, setEditForm] = useState({ name: '', role: '', status: '', department: '' });
-  const [isUpdating, setIsUpdating] = useState(false);
-  const [isDeleting, setIsDeleting] = useState(false);
+  // 经销商岗位角色
+  const DEALER_ROLES = [
+    { value: '总经理', label: '1 总经理', dept: '管理' },
+    { value: '店长', label: '2 店长', dept: '管理' },
+    { value: '设计师', label: '3 设计师', dept: '设计' },
+    { value: '销售顾问', label: '4 销售顾问', dept: '销售' },
+    { value: '财务', label: '5 财务', dept: '财务' },
+    { value: '客服', label: '6 客服', dept: '客服' },
+    { value: '行政', label: '7 行政', dept: '行政' },
+  ];
+  
+  // 生产商岗位角色（22个）
+  const ERP_ROLES = [
+    { value: '订单管理', label: '1 订单管理', dept: '订单管理' },
+    { value: '跟单员', label: '2 跟单员', dept: '订单管理' },
+    { value: '木工', label: '3 木工', dept: '生产部' },
+    { value: '打磨', label: '4 打磨', dept: '生产部' },
+    { value: '贴皮', label: '5 贴皮', dept: '生产部' },
+    { value: '喷漆', label: '6 喷漆', dept: '生产部' },
+    { value: '质检', label: '7 质检', dept: '生产部' },
+    { value: '打包发货', label: '8 打包发货', dept: '生产部' },
+    { value: '普工', label: '9 普工', dept: '生产部' },
+    { value: '工程监理', label: '10 工程监理', dept: '生产部' },
+    { value: '行政', label: '11 行政', dept: '行政部' },
+    { value: '客服', label: '12 客服', dept: '行政部' },
+    { value: '财务', label: '13 财务', dept: '财务部' },
+    { value: '会计', label: '14 会计', dept: '财务部' },
+    { value: '销售', label: '15 销售', dept: '销售部' },
+    { value: '渠道', label: '16 渠道', dept: '销售部' },
+    { value: '门店', label: '17 门店', dept: '销售部' },
+    { value: '仓库', label: '18 仓库', dept: '仓储部' },
+    { value: '采购', label: '19 采购', dept: '仓储部' },
+    { value: '设计', label: '20 设计', dept: '设计部' },
+    { value: '量尺', label: '21 量尺', dept: '设计部' },
+    { value: '人事', label: '22 人事', dept: '人事部' },
+  ];
+  
+  // 材料商岗位角色
+  const MATERIAL_SUPPLIER_ROLES = [
+    { value: '总经理', label: '1 总经理', dept: '管理' },
+    { value: '销售', label: '2 销售', dept: '销售' },
+    { value: '仓库管理', label: '3 仓库管理', dept: '仓储' },
+    { value: '财务', label: '4 财务', dept: '财务' },
+    { value: '采购', label: '5 采购', dept: '采购' },
+    { value: '客服', label: '6 客服', dept: '客服' },
+  ];
   
   // 加载已有设置
   useEffect(() => {
@@ -454,6 +511,20 @@ export default function SettingsPage() {
                       description="填写用户信息创建新账号"
                     >
                       <div className="space-y-4">
+                        {currentUser?.role === 'super_admin' && (
+                          <div className="space-y-2">
+                            <Label>租户类型</Label>
+                            <select 
+                              className="w-full h-10 px-3 rounded-md border border-input bg-background text-sm"
+                              value={newUserTenantType}
+                              onChange={(e) => setNewUserTenantType(e.target.value)}
+                            >
+                              <option value="manufacturer">生产商</option>
+                              <option value="dealer">经销商</option>
+                              <option value="material_supplier">材料商</option>
+                            </select>
+                          </div>
+                        )}
                         <div className="space-y-2">
                           <Label>手机号</Label>
                           <Input 
