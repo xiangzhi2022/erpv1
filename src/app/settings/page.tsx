@@ -24,6 +24,30 @@ export default function SettingsPage() {
   const [isAdmin, setIsAdmin] = useState(false);
   const [prefixes, setPrefixes] = useState<Array<{prefix: string; company_name: string; phone: string; address: string}>>([]);
   
+  // 工厂岗位角色列表（22个核心岗位）
+  const ERP_ROLES = [
+    { value: '厂长/车间主任', label: '1 厂长/车间主任', dept: '管理层' },
+    { value: '订单管理', label: '2 订单管理', dept: '技术/计划' },
+    { value: '拆单员', label: '3 拆单员', dept: '技术/计划' },
+    { value: 'PMC排产', label: '4 PMC排产', dept: '技术/计划' },
+    { value: '调色师', label: '5 调色师', dept: '技术/计划' },
+    { value: '开料工', label: '6 开料工', dept: '加工段' },
+    { value: '封边工', label: '7 封边工', dept: '加工段' },
+    { value: '排钻/打孔工', label: '8 排钻/打孔工', dept: '加工段' },
+    { value: '打磨/抛光工', label: '9 打磨/抛光工', dept: '涂装段' },
+    { value: '贴皮工', label: '10 贴皮工', dept: '涂装段' },
+    { value: '喷漆工', label: '11 喷漆工', dept: '涂装段' },
+    { value: '质检员', label: '12 质检员', dept: '质量/仓储' },
+    { value: '仓库管理员', label: '13 仓库管理员', dept: '质量/仓储' },
+    { value: '物料员', label: '14 物料员', dept: '质量/仓储' },
+    { value: '打包发货', label: '15 打包发货', dept: '交付/后勤' },
+    { value: '售后客服', label: '16 售后客服', dept: '交付/后勤' },
+    { value: '财务', label: '17 财务', dept: '交付/后勤' },
+    { value: '行政', label: '18 行政', dept: '交付/后勤' },
+    { value: '销售', label: '19 销售', dept: '交付/后勤' },
+    { value: '普工', label: '20 普工', dept: '交付/后勤' },
+  ];
+  
   // 用户管理相关状态
   const [users, setUsers] = useState<Array<{id: string; phone: string; name: string; role: string; department: string; status: string}>>([]);
   const [isLoadingUsers, setIsLoadingUsers] = useState(false);
@@ -32,10 +56,11 @@ export default function SettingsPage() {
   const [newUserName, setNewUserName] = useState('');
   const [newUserPassword, setNewUserPassword] = useState('');
   const [newUserRole, setNewUserRole] = useState('订单管理');
+  const [newUserDept, setNewUserDept] = useState('技术/计划');
   const [isAddingUser, setIsAddingUser] = useState(false);
   const [editUserOpen, setEditUserOpen] = useState(false);
   const [editingUser, setEditingUser] = useState<{id: string; phone: string; name: string; role: string; status: string} | null>(null);
-  const [editForm, setEditForm] = useState({ name: '', role: '', status: '' });
+  const [editForm, setEditForm] = useState({ name: '', role: '', status: '', department: '' });
   const [isUpdating, setIsUpdating] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
   
@@ -81,7 +106,7 @@ export default function SettingsPage() {
   // 打开编辑弹窗
   const handleEditUser = (user: typeof users[0]) => {
     setEditingUser(user);
-    setEditForm({ name: user.name || '', role: user.role, status: user.status });
+    setEditForm({ name: user.name || '', role: user.role, status: user.status, department: user.department || '' });
     setEditUserOpen(true);
   };
 
@@ -181,7 +206,8 @@ export default function SettingsPage() {
           phone: newUserPhone,
           password: newUserPassword,
           name: newUserName || newUserPhone,
-          role: newUserRole
+          role: newUserRole,
+          department: newUserDept
         })
       });
       const data = await response.json();
@@ -458,21 +484,22 @@ export default function SettingsPage() {
                           <select 
                             className="w-full h-10 px-3 rounded-md border border-input bg-background text-sm"
                             value={newUserRole}
-                            onChange={(e) => setNewUserRole(e.target.value)}
+                            onChange={(e) => {
+                              setNewUserRole(e.target.value);
+                              const role = ERP_ROLES.find(r => r.value === e.target.value);
+                              if (role) setNewUserDept(role.dept);
+                            }}
                           >
-                            <option value="订单管理">1 订单管理</option>
-                            <option value="木工">2 木工</option>
-                            <option value="打磨">3 打磨</option>
-                            <option value="贴皮">4 贴皮</option>
-                            <option value="喷漆">5 喷漆</option>
-                            <option value="质检">6 质检</option>
-                            <option value="打包发货">7 打包发货</option>
-                            <option value="行政">8 行政</option>
-                            <option value="财务">9 财务</option>
-                            <option value="销售">10 销售</option>
-                            <option value="仓库">11 仓库</option>
-                            <option value="普工">12 普工</option>
+                            {ERP_ROLES.map(role => (
+                              <option key={role.value} value={role.value}>
+                                {role.label} [{role.dept}]
+                              </option>
+                            ))}
                           </select>
+                        </div>
+                        <div className="space-y-2">
+                          <Label>部门</Label>
+                          <Input value={newUserDept} disabled className="bg-muted" />
                         </div>
                       </div>
                       <div className="flex justify-end gap-2 mt-6">
@@ -510,18 +537,11 @@ export default function SettingsPage() {
                             value={editForm.role}
                             onChange={(e) => setEditForm({...editForm, role: e.target.value})}
                           >
-                            <option value="订单管理">1 订单管理</option>
-                            <option value="木工">2 木工</option>
-                            <option value="打磨">3 打磨</option>
-                            <option value="贴皮">4 贴皮</option>
-                            <option value="喷漆">5 喷漆</option>
-                            <option value="质检">6 质检</option>
-                            <option value="打包发货">7 打包发货</option>
-                            <option value="行政">8 行政</option>
-                            <option value="财务">9 财务</option>
-                            <option value="销售">10 销售</option>
-                            <option value="仓库">11 仓库</option>
-                            <option value="普工">12 普工</option>
+                            {ERP_ROLES.map(role => (
+                              <option key={role.value} value={role.value}>
+                                {role.label} [{role.dept}]
+                              </option>
+                            ))}
                           </select>
                         </div>
                         <div className="space-y-2">
@@ -534,6 +554,17 @@ export default function SettingsPage() {
                             <option value="active">启用</option>
                             <option value="inactive">禁用</option>
                           </select>
+                        </div>
+                        <div className="space-y-2">
+                          <Label>部门</Label>
+                          <Input 
+                            value={(() => {
+                              const role = ERP_ROLES.find(r => r.value === editForm.role);
+                              return role ? role.dept : editForm.department || '-';
+                            })()} 
+                            disabled 
+                            className="bg-muted" 
+                          />
                         </div>
                       </div>
                       <div className="flex justify-between mt-6">
@@ -567,6 +598,7 @@ export default function SettingsPage() {
                             <th className="text-left py-3 px-4 font-medium">用户名</th>
                             <th className="text-left py-3 px-4 font-medium">密码</th>
                             <th className="text-left py-3 px-4 font-medium">姓名</th>
+                            <th className="text-left py-3 px-4 font-medium">部门</th>
                             <th className="text-left py-3 px-4 font-medium">角色</th>
                             <th className="text-left py-3 px-4 font-medium">状态</th>
                             <th className="text-left py-3 px-4 font-medium">操作</th>
@@ -575,7 +607,7 @@ export default function SettingsPage() {
                         <tbody>
                           {users.length === 0 ? (
                             <tr>
-                              <td colSpan={6} className="py-8 text-center text-muted-foreground">暂无用户数据</td>
+                              <td colSpan={7} className="py-8 text-center text-muted-foreground">暂无用户数据</td>
                             </tr>
                           ) : (
                             users.map((user) => (
@@ -585,6 +617,16 @@ export default function SettingsPage() {
                                   <span className="text-muted-foreground">******</span>
                                 </td>
                                 <td className="py-3 px-4">{user.name || '-'}</td>
+                                <td className="py-3 px-4">
+                                  {(() => {
+                                    const role = ERP_ROLES.find(r => r.value === user.role);
+                                    return role ? (
+                                      <span className="px-2 py-1 rounded bg-muted text-xs">{role.dept}</span>
+                                    ) : (
+                                      <span className="text-muted-foreground">-</span>
+                                    );
+                                  })()}
+                                </td>
                                 <td className="py-3 px-4">{user.role}</td>
                                 <td className="py-3 px-4">
                                   <button 
