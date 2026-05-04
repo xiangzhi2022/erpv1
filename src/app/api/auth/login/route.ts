@@ -1,5 +1,15 @@
 import { NextResponse } from 'next/server';
-import { getSupabaseServiceClient } from '@/storage/database/supabase-client';
+import { createClient } from '@supabase/supabase-js';
+
+// 硬编码的 Supabase 配置（不依赖环境变量）
+const supabaseUrl = 'https://cdcnjtgabgjkouavwxsl.supabase.co';
+const supabaseServiceKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNkY25qdGdhYmdqa291YXZ3eHNsIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3Nzg1MjM0MSwiZXhwIjoyMDkzNDI4MzQxfQ.LzvwvnkQx_lIjIjsZd8FxyXRaDwTPyiVELyTEuTacmE';
+
+function getSupabaseServiceClient() {
+  return createClient(supabaseUrl, supabaseServiceKey, {
+    auth: { persistSession: false }
+  });
+}
 
 export async function POST(request: Request) {
   try {
@@ -14,18 +24,12 @@ export async function POST(request: Request) {
 
     const supabase = getSupabaseServiceClient();
 
-    // 调试：检查连接
-    console.log('Supabase URL:', process.env.COZE_SUPABASE_URL);
-    console.log('Phone to find:', phone);
-
-    // 查询用户（适配现有表结构：real_name）
+    // 查询用户
     const { data: users, error: userError } = await supabase
       .from('users')
       .select('*')
       .eq('phone', phone)
       .limit(1);
-
-    console.log('Query result:', { users, userError });
 
     if (userError) {
       console.error('Database error:', userError);
@@ -36,9 +40,8 @@ export async function POST(request: Request) {
     }
 
     if (!users || users.length === 0) {
-      // 用户不存在 - 返回调试信息
       return Response.json(
-        { success: false, error: '用户不存在', debug: { phone, env: process.env.COZE_SUPABASE_URL } },
+        { success: false, error: '用户不存在' },
         { status: 401 }
       );
     }
