@@ -104,3 +104,28 @@ Supabase 连接信息通过 `.env.local` 文件配置：
 - `COZE_SUPABASE_URL` - Supabase URL
 - `COZE_SUPABASE_ANON_KEY` - Anon Key
 - `COZE_SUPABASE_SERVICE_ROLE_KEY` - Service Role Key
+
+### 数据库配置
+**唯一数据库**：Supabase (https://cdcnjtgabgjkouavwxsl.supabase.co)
+
+**数据库工具**：
+```bash
+node scripts/db-tool.js list                          # 列出所有表
+node scripts/db-tool.js select <table>                # 查询表数据
+node scripts/db-tool.js query "SELECT * FROM ..."     # 执行SQL查询
+node scripts/db-tool.js exec "UPDATE ..."              # 执行SQL更新
+```
+
+**数据库表结构**：
+| 表名 | 说明 |
+|------|------|
+| users | 系统用户表（官方管理员） |
+| tenants | 租户表（生产商/经销商/材料商） |
+| tenant_users | 租户用户表 |
+| orders | 订单表 |
+| order_items | 订单项表 |
+| customers | 客户表 |
+| workshops | 车间表 |
+| production_tasks | 生产任务表 |
+| order_prefixes | 订单前缀表 |
+| user_settings | 用户设置表 |
