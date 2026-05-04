@@ -25,7 +25,30 @@ export default function SettingsPage() {
   const [prefixes, setPrefixes] = useState<Array<{prefix: string; company_name: string; phone: string; address: string}>>([]);
   
   const [users, setUsers] = useState<Array<{id: string; phone: string; name: string; role: string; department: string; status: string; tenant_type?: string}>>([]);
+  const [roles, setRoles] = useState<Array<{value: string; label: string; dept: string}>>([]);
   const [isLoadingUsers, setIsLoadingUsers] = useState(false);
+  
+  // 加载角色列表
+  useEffect(() => {
+    const loadRoles = async () => {
+      try {
+        const response = await fetch('/api/settings/roles');
+        const data = await response.json();
+        if (data.success && data.roles) {
+          // 转换为下拉框需要的格式
+          const options = data.roles.map((r: { id: number; role_name: string; dept: string }) => ({
+            value: r.role_name,
+            label: r.role_name,
+            dept: r.dept || ''
+          }));
+          setRoles(options);
+        }
+      } catch (error) {
+        console.error('加载角色列表失败:', error);
+      }
+    };
+    loadRoles();
+  }, []);
   const [addUserOpen, setAddUserOpen] = useState(false);
   const [newUserPhone, setNewUserPhone] = useState('');
   const [newUserName, setNewUserName] = useState('');
@@ -49,32 +72,6 @@ export default function SettingsPage() {
     { value: 'dealer', label: '经销商', icon: '🏪' },
     { value: 'material_supplier', label: '材料商', icon: '📦' },
   ];
-  
-  // 生产商岗位角色列表（20个核心岗位）
-  const MANUFACTURER_ROLES = [
-  ];
-  
-  // 经销商岗位角色
-  const DEALER_ROLES = [
-    { value: '订单管理', label: '1 订单管理', dept: '管理' },
-    { value: '木工', label: '2 木工', dept: '生产' },
-    { value: '打磨', label: '3 打磨', dept: '生产' },
-    { value: '贴皮', label: '4 贴皮', dept: '生产' },
-    { value: '喷漆', label: '5 喷漆', dept: '生产' },
-    { value: '质检', label: '6 质检', dept: '生产' },
-    { value: '打包', label: '7 打包', dept: '生产' },
-    { value: '行政', label: '8 行政', dept: '行政' },
-    { value: '财务', label: '9 财务', dept: '财务' },
-    { value: '销售', label: '10 销售', dept: '销售' },
-    { value: '仓库发货', label: '11 仓库发货', dept: '仓储' },
-    { value: '普工', label: '12 普工', dept: '生产' },
-  ];
-  
-  // 生产商岗位角色
-  const ERP_ROLES = DEALER_ROLES;
-  
-  // 材料商岗位角色
-  const MATERIAL_SUPPLIER_ROLES = DEALER_ROLES;
   
   // 加载已有设置
   useEffect(() => {
@@ -512,11 +509,11 @@ export default function SettingsPage() {
                             value={newUserRole}
                             onChange={(e) => {
                               setNewUserRole(e.target.value);
-                              const role = ERP_ROLES.find(r => r.value === e.target.value);
+                              const role = roles.find(r => r.value === e.target.value);
                               if (role) setNewUserDept(role.dept);
                             }}
                           >
-                            {ERP_ROLES.map(role => (
+                            {roles.map(role => (
                               <option key={role.value} value={role.value}>
                                 {role.label} [{role.dept}]
                               </option>
@@ -563,7 +560,7 @@ export default function SettingsPage() {
                             value={editForm.role}
                             onChange={(e) => setEditForm({...editForm, role: e.target.value})}
                           >
-                            {ERP_ROLES.map(role => (
+                            {roles.map(role => (
                               <option key={role.value} value={role.value}>
                                 {role.label} [{role.dept}]
                               </option>
@@ -585,7 +582,7 @@ export default function SettingsPage() {
                           <Label>部门</Label>
                           <Input 
                             value={(() => {
-                              const role = ERP_ROLES.find(r => r.value === editForm.role);
+                              const role = roles.find(r => r.value === editForm.role);
                               return role ? role.dept : editForm.department || '-';
                             })()} 
                             disabled 
@@ -645,7 +642,7 @@ export default function SettingsPage() {
                                 <td className="py-3 px-4">{user.name || '-'}</td>
                                 <td className="py-3 px-4">
                                   {(() => {
-                                    const role = ERP_ROLES.find(r => r.value === user.role);
+                                    const role = roles.find(r => r.value === user.role);
                                     return role ? (
                                       <span className="px-2 py-1 rounded bg-muted text-xs">{role.dept}</span>
                                     ) : (
