@@ -67,7 +67,7 @@ export default function SettingsPage() {
     { value: '财务', label: '9 财务', dept: '财务' },
     { value: '销售', label: '10 销售', dept: '销售' },
     { value: '仓库发货', label: '11 仓库发货', dept: '仓储' },
-    { value: '普通', label: '12 普通', dept: '其他' },
+    { value: '普工', label: '12 普工', dept: '其他' },
   ];
   
   // 生产商岗位角色
