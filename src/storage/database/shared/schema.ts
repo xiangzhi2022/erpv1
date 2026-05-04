@@ -1,10 +1,11 @@
-import { pgTable, index, unique, pgPolicy, varchar, text, boolean, timestamp, serial, foreignKey, integer, jsonb, check, uuid } from "drizzle-orm/pg-core"
+	// 使用 uuid 类型，让数据库自动生成 ID
+	import { pgTable, index, unique, pgPolicy, varchar, text, boolean, timestamp, serial, foreignKey, integer, jsonb, check, uuid } from "drizzle-orm/pg-core"
 import { sql } from "drizzle-orm"
 
 
 
 export const profiles = pgTable("profiles", {
-	id: varchar({ length: 36 }).primaryKey().notNull(),
+	id: uuid("id").primaryKey().defaultRandom(),
 	phone: varchar({ length: 20 }).notNull(),
 	nickname: varchar({ length: 100 }),
 	avatar: text(),
