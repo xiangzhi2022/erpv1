@@ -1,256 +1,333 @@
-import { sql } from "drizzle-orm";
-import { pgTable, text, varchar, timestamp, boolean, integer, jsonb, index } from "drizzle-orm/pg-core";
-import { createSchemaFactory } from "drizzle-zod";
-import { z } from "zod";
+import { pgTable, index, unique, pgPolicy, varchar, text, boolean, timestamp, serial, foreignKey, integer, jsonb, check, uuid } from "drizzle-orm/pg-core"
+import { sql } from "drizzle-orm"
 
-// ============ 用户资料表 ============
-export const profiles = pgTable(
-  "profiles",
-  {
-    id: varchar("id", { length: 36 }).primaryKey(), // 关联 auth.users.id
-    phone: varchar("phone", { length: 20 }).notNull().unique(),
-    nickname: varchar("nickname", { length: 100 }),
-    avatar: text("avatar"),
-    role: varchar("role", { length: 20 }).notNull().default("user"), // admin, manager, user
-    is_active: boolean("is_active").default(true).notNull(),
-    last_login_at: timestamp("last_login_at", { withTimezone: true }),
-    created_at: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
-    updated_at: timestamp("updated_at", { withTimezone: true }),
-  },
-  (table) => [
-    index("profiles_phone_idx").on(table.phone),
-    index("profiles_role_idx").on(table.role),
-  ]
-);
 
-// ============ 客户表 ============
-export const customers = pgTable(
-  "customers",
-  {
-    id: varchar("id", { length: 36 }).primaryKey().default(sql`gen_random_uuid()`),
-    name: varchar("name", { length: 200 }).notNull(),
-    contact_person: varchar("contact_person", { length: 100 }),
-    phone: varchar("phone", { length: 20 }),
-    address: text("address"),
-    remark: text("remark"),
-    created_by: varchar("created_by", { length: 36 }),
-    created_at: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
-    updated_at: timestamp("updated_at", { withTimezone: true }),
-  },
-  (table) => [
-    index("customers_name_idx").on(table.name),
-    index("customers_phone_idx").on(table.phone),
-  ]
-);
 
-// ============ 订单主表 ============
-export const orders = pgTable(
-  "orders",
-  {
-    id: varchar("id", { length: 36 }).primaryKey().default(sql`gen_random_uuid()`),
-    order_no: varchar("order_no", { length: 50 }).notNull().unique(),
-    customer_id: varchar("customer_id", { length: 36 }).references(() => customers.id),
-    customer_name: varchar("customer_name", { length: 200 }),
-    status: varchar("status", { length: 20 }).notNull().default("pending"), // pending, received, in_production, completed, shipped, returned
-    total_amount: integer("total_amount").default(0), // 金额单位：分
-    delivery_date: timestamp("delivery_date", { withTimezone: true }),
-    remark: text("remark"),
-    received_at: timestamp("received_at", { withTimezone: true }),
-    received_by: varchar("received_by", { length: 36 }),
-    created_by: varchar("created_by", { length: 36 }),
-    created_at: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
-    updated_at: timestamp("updated_at", { withTimezone: true }),
-  },
-  (table) => [
-    index("orders_order_no_idx").on(table.order_no),
-    index("orders_customer_id_idx").on(table.customer_id),
-    index("orders_status_idx").on(table.status),
-    index("orders_created_at_idx").on(table.created_at),
-    index("orders_delivery_date_idx").on(table.delivery_date),
-  ]
-);
+export const profiles = pgTable("profiles", {
+	id: varchar({ length: 36 }).primaryKey().notNull(),
+	phone: varchar({ length: 20 }).notNull(),
+	nickname: varchar({ length: 100 }),
+	avatar: text(),
+	role: varchar({ length: 20 }).default('user').notNull(),
+	isActive: boolean("is_active").default(true).notNull(),
+	lastLoginAt: timestamp("last_login_at", { withTimezone: true, mode: 'string' }),
+	createdAt: timestamp("created_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+	updatedAt: timestamp("updated_at", { withTimezone: true, mode: 'string' }),
+}, (table) => [
+	index("profiles_phone_idx").using("btree", table.phone.asc().nullsLast().op("text_ops")),
+	index("profiles_role_idx").using("btree", table.role.asc().nullsLast().op("text_ops")),
+	unique("profiles_phone_key").on(table.phone),
+	pgPolicy("profiles_all", { as: "permissive", for: "all", to: ["public"], using: sql`(( SELECT auth.role() AS role) = 'authenticated'::text)` }),
+]);
 
-// ============ 订单明细表 ============
-export const order_items = pgTable(
-  "order_items",
-  {
-    id: varchar("id", { length: 36 }).primaryKey().default(sql`gen_random_uuid()`),
-    order_id: varchar("order_id", { length: 36 }).notNull().references(() => orders.id, { onDelete: "cascade" }),
-    product_name: varchar("product_name", { length: 200 }).notNull(),
-    specification: varchar("specification", { length: 500 }),
-    quantity: integer("quantity").notNull().default(1),
-    unit: varchar("unit", { length: 20 }).default("件"),
-    unit_price: integer("unit_price").default(0), // 单价单位：分
-    subtotal: integer("subtotal").default(0), // 小计单位：分
-    workshop_id: varchar("workshop_id", { length: 36 }).references(() => workshops.id),
-    production_status: varchar("production_status", { length: 20 }).default("pending"), // pending, in_progress, completed
-    completed_quantity: integer("completed_quantity").default(0),
-    created_at: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
-    updated_at: timestamp("updated_at", { withTimezone: true }),
-  },
-  (table) => [
-    index("order_items_order_id_idx").on(table.order_id),
-    index("order_items_workshop_id_idx").on(table.workshop_id),
-    index("order_items_production_status_idx").on(table.production_status),
-  ]
-);
+export const healthCheck = pgTable("health_check", {
+	id: serial().notNull(),
+	updatedAt: timestamp("updated_at", { withTimezone: true, mode: 'string' }).defaultNow(),
+});
 
-// ============ 车间表 ============
-export const workshops = pgTable(
-  "workshops",
-  {
-    id: varchar("id", { length: 36 }).primaryKey().default(sql`gen_random_uuid()`),
-    name: varchar("name", { length: 100 }).notNull(),
-    code: varchar("code", { length: 20 }).notNull().unique(),
-    location: varchar("location", { length: 200 }),
-    manager_id: varchar("manager_id", { length: 36 }),
-    status: varchar("status", { length: 20 }).default("active"), // active, inactive
-    remark: text("remark"),
-    created_at: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
-    updated_at: timestamp("updated_at", { withTimezone: true }),
-  },
-  (table) => [
-    index("workshops_code_idx").on(table.code),
-    index("workshops_status_idx").on(table.status),
-  ]
-);
+export const customers = pgTable("customers", {
+	id: varchar({ length: 36 }).default(gen_random_uuid()).primaryKey().notNull(),
+	name: varchar({ length: 200 }).notNull(),
+	contactPerson: varchar("contact_person", { length: 100 }),
+	phone: varchar({ length: 20 }),
+	address: text(),
+	remark: text(),
+	createdBy: varchar("created_by", { length: 36 }),
+	createdAt: timestamp("created_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+	updatedAt: timestamp("updated_at", { withTimezone: true, mode: 'string' }),
+}, (table) => [
+	index("customers_name_idx").using("btree", table.name.asc().nullsLast().op("text_ops")),
+	index("customers_phone_idx").using("btree", table.phone.asc().nullsLast().op("text_ops")),
+	pgPolicy("customers_all", { as: "permissive", for: "all", to: ["public"], using: sql`(( SELECT auth.role() AS role) = 'authenticated'::text)` }),
+]);
 
-// ============ 任务表 ============
-export const tasks = pgTable(
-  "tasks",
-  {
-    id: varchar("id", { length: 36 }).primaryKey().default(sql`gen_random_uuid()`),
-    title: varchar("title", { length: 200 }).notNull(),
-    order_item_id: varchar("order_item_id", { length: 36 }).references(() => order_items.id),
-    workshop_id: varchar("workshop_id", { length: 36 }).references(() => workshops.id),
-    assigned_to: varchar("assigned_to", { length: 36 }),
-    assigned_by: varchar("assigned_by", { length: 36 }),
-    priority: varchar("priority", { length: 10 }).default("normal"), // low, normal, high, urgent
-    status: varchar("status", { length: 20 }).default("pending"), // pending, in_progress, completed, cancelled
-    due_date: timestamp("due_date", { withTimezone: true }),
-    completed_at: timestamp("completed_at", { withTimezone: true }),
-    remark: text("remark"),
-    created_at: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
-    updated_at: timestamp("updated_at", { withTimezone: true }),
-  },
-  (table) => [
-    index("tasks_order_item_id_idx").on(table.order_item_id),
-    index("tasks_workshop_id_idx").on(table.workshop_id),
-    index("tasks_assigned_to_idx").on(table.assigned_to),
-    index("tasks_status_idx").on(table.status),
-    index("tasks_priority_idx").on(table.priority),
-    index("tasks_due_date_idx").on(table.due_date),
-  ]
-);
+export const orders = pgTable("orders", {
+	id: varchar({ length: 36 }).default(gen_random_uuid()).primaryKey().notNull(),
+	orderNo: varchar("order_no", { length: 50 }).notNull(),
+	customerId: varchar("customer_id", { length: 36 }),
+	customerName: varchar("customer_name", { length: 200 }),
+	status: varchar({ length: 20 }).default('pending').notNull(),
+	totalAmount: integer("total_amount").default(0),
+	deliveryDate: timestamp("delivery_date", { withTimezone: true, mode: 'string' }),
+	remark: text(),
+	receivedAt: timestamp("received_at", { withTimezone: true, mode: 'string' }),
+	receivedBy: varchar("received_by", { length: 36 }),
+	createdBy: varchar("created_by", { length: 36 }),
+	createdAt: timestamp("created_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+	updatedAt: timestamp("updated_at", { withTimezone: true, mode: 'string' }),
+}, (table) => [
+	index("orders_created_at_idx").using("btree", table.createdAt.asc().nullsLast().op("timestamptz_ops")),
+	index("orders_customer_id_idx").using("btree", table.customerId.asc().nullsLast().op("text_ops")),
+	index("orders_delivery_date_idx").using("btree", table.deliveryDate.asc().nullsLast().op("timestamptz_ops")),
+	index("orders_order_no_idx").using("btree", table.orderNo.asc().nullsLast().op("text_ops")),
+	index("orders_status_idx").using("btree", table.status.asc().nullsLast().op("text_ops")),
+	foreignKey({
+			columns: [table.customerId],
+			foreignColumns: [customers.id],
+			name: "orders_customer_id_fkey"
+		}),
+	unique("orders_order_no_key").on(table.orderNo),
+	pgPolicy("orders_all", { as: "permissive", for: "all", to: ["public"], using: sql`(( SELECT auth.role() AS role) = 'authenticated'::text)` }),
+]);
 
-// ============ 生产进度表 ============
-export const production_progress = pgTable(
-  "production_progress",
-  {
-    id: varchar("id", { length: 36 }).primaryKey().default(sql`gen_random_uuid()`),
-    order_item_id: varchar("order_item_id", { length: 36 }).notNull().references(() => order_items.id, { onDelete: "cascade" }),
-    workshop_id: varchar("workshop_id", { length: 36 }).references(() => workshops.id),
-    progress: integer("progress").notNull().default(0), // 0-100
-    stage: varchar("stage", { length: 50 }),
-    description: text("description"),
-    operator_id: varchar("operator_id", { length: 36 }),
-    created_at: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
-  },
-  (table) => [
-    index("production_progress_order_item_id_idx").on(table.order_item_id),
-    index("production_progress_workshop_id_idx").on(table.workshop_id),
-    index("production_progress_created_at_idx").on(table.created_at),
-  ]
-);
+export const workshops = pgTable("workshops", {
+	id: varchar({ length: 36 }).default(gen_random_uuid()).primaryKey().notNull(),
+	name: varchar({ length: 100 }).notNull(),
+	code: varchar({ length: 20 }).notNull(),
+	location: varchar({ length: 200 }),
+	managerId: varchar("manager_id", { length: 36 }),
+	status: varchar({ length: 20 }).default('active'),
+	remark: text(),
+	createdAt: timestamp("created_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+	updatedAt: timestamp("updated_at", { withTimezone: true, mode: 'string' }),
+}, (table) => [
+	index("workshops_code_idx").using("btree", table.code.asc().nullsLast().op("text_ops")),
+	index("workshops_status_idx").using("btree", table.status.asc().nullsLast().op("text_ops")),
+	unique("workshops_code_key").on(table.code),
+	pgPolicy("workshops_all", { as: "permissive", for: "all", to: ["public"], using: sql`(( SELECT auth.role() AS role) = 'authenticated'::text)` }),
+]);
 
-// ============ 发货表 ============
-export const shipping = pgTable(
-  "shipping",
-  {
-    id: varchar("id", { length: 36 }).primaryKey().default(sql`gen_random_uuid()`),
-    shipping_no: varchar("shipping_no", { length: 50 }).notNull().unique(),
-    order_id: varchar("order_id", { length: 36 }).references(() => orders.id),
-    customer_id: varchar("customer_id", { length: 36 }).references(() => customers.id),
-    receiver_name: varchar("receiver_name", { length: 100 }),
-    receiver_phone: varchar("receiver_phone", { length: 20 }),
-    receiver_address: text("receiver_address"),
-    logistics_company: varchar("logistics_company", { length: 100 }),
-    tracking_no: varchar("tracking_no", { length: 100 }),
-    status: varchar("status", { length: 20 }).default("pending"), // pending, shipped, in_transit, delivered
-    shipped_at: timestamp("shipped_at", { withTimezone: true }),
-    delivered_at: timestamp("delivered_at", { withTimezone: true }),
-    remark: text("remark"),
-    created_by: varchar("created_by", { length: 36 }),
-    created_at: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
-    updated_at: timestamp("updated_at", { withTimezone: true }),
-  },
-  (table) => [
-    index("shipping_shipping_no_idx").on(table.shipping_no),
-    index("shipping_order_id_idx").on(table.order_id),
-    index("shipping_customer_id_idx").on(table.customer_id),
-    index("shipping_status_idx").on(table.status),
-    index("shipping_tracking_no_idx").on(table.tracking_no),
-  ]
-);
+export const orderItems = pgTable("order_items", {
+	id: varchar({ length: 36 }).default(gen_random_uuid()).primaryKey().notNull(),
+	orderId: varchar("order_id", { length: 36 }).notNull(),
+	productName: varchar("product_name", { length: 200 }).notNull(),
+	specification: varchar({ length: 500 }),
+	quantity: integer().default(1).notNull(),
+	unit: varchar({ length: 20 }).default('件'),
+	unitPrice: integer("unit_price").default(0),
+	subtotal: integer().default(0),
+	workshopId: varchar("workshop_id", { length: 36 }),
+	productionStatus: varchar("production_status", { length: 20 }).default('pending'),
+	completedQuantity: integer("completed_quantity").default(0),
+	createdAt: timestamp("created_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+	updatedAt: timestamp("updated_at", { withTimezone: true, mode: 'string' }),
+}, (table) => [
+	index("order_items_order_id_idx").using("btree", table.orderId.asc().nullsLast().op("text_ops")),
+	index("order_items_production_status_idx").using("btree", table.productionStatus.asc().nullsLast().op("text_ops")),
+	index("order_items_workshop_id_idx").using("btree", table.workshopId.asc().nullsLast().op("text_ops")),
+	foreignKey({
+			columns: [table.orderId],
+			foreignColumns: [orders.id],
+			name: "order_items_order_id_fkey"
+		}).onDelete("cascade"),
+	foreignKey({
+			columns: [table.workshopId],
+			foreignColumns: [workshops.id],
+			name: "order_items_workshop_id_fkey"
+		}),
+	pgPolicy("order_items_all", { as: "permissive", for: "all", to: ["public"], using: sql`(( SELECT auth.role() AS role) = 'authenticated'::text)` }),
+]);
 
-// ============ 操作日志表 ============
-export const operation_logs = pgTable(
-  "operation_logs",
-  {
-    id: varchar("id", { length: 36 }).primaryKey().default(sql`gen_random_uuid()`),
-    operator_id: varchar("operator_id", { length: 36 }),
-    action: varchar("action", { length: 50 }).notNull(),
-    entity_type: varchar("entity_type", { length: 50 }),
-    entity_id: varchar("entity_id", { length: 36 }),
-    detail: jsonb("detail"),
-    ip_address: varchar("ip_address", { length: 50 }),
-    created_at: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
-  },
-  (table) => [
-    index("operation_logs_operator_id_idx").on(table.operator_id),
-    index("operation_logs_action_idx").on(table.action),
-    index("operation_logs_entity_type_idx").on(table.entity_type),
-    index("operation_logs_created_at_idx").on(table.created_at),
-  ]
-);
+export const tasks = pgTable("tasks", {
+	id: varchar({ length: 36 }).default(gen_random_uuid()).primaryKey().notNull(),
+	title: varchar({ length: 200 }).notNull(),
+	orderItemId: varchar("order_item_id", { length: 36 }),
+	workshopId: varchar("workshop_id", { length: 36 }),
+	assignedTo: varchar("assigned_to", { length: 36 }),
+	assignedBy: varchar("assigned_by", { length: 36 }),
+	priority: varchar({ length: 10 }).default('normal'),
+	status: varchar({ length: 20 }).default('pending'),
+	dueDate: timestamp("due_date", { withTimezone: true, mode: 'string' }),
+	completedAt: timestamp("completed_at", { withTimezone: true, mode: 'string' }),
+	remark: text(),
+	createdAt: timestamp("created_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+	updatedAt: timestamp("updated_at", { withTimezone: true, mode: 'string' }),
+}, (table) => [
+	index("tasks_assigned_to_idx").using("btree", table.assignedTo.asc().nullsLast().op("text_ops")),
+	index("tasks_due_date_idx").using("btree", table.dueDate.asc().nullsLast().op("timestamptz_ops")),
+	index("tasks_order_item_id_idx").using("btree", table.orderItemId.asc().nullsLast().op("text_ops")),
+	index("tasks_priority_idx").using("btree", table.priority.asc().nullsLast().op("text_ops")),
+	index("tasks_status_idx").using("btree", table.status.asc().nullsLast().op("text_ops")),
+	index("tasks_workshop_id_idx").using("btree", table.workshopId.asc().nullsLast().op("text_ops")),
+	foreignKey({
+			columns: [table.orderItemId],
+			foreignColumns: [orderItems.id],
+			name: "tasks_order_item_id_fkey"
+		}),
+	foreignKey({
+			columns: [table.workshopId],
+			foreignColumns: [workshops.id],
+			name: "tasks_workshop_id_fkey"
+		}),
+	pgPolicy("tasks_all", { as: "permissive", for: "all", to: ["public"], using: sql`(( SELECT auth.role() AS role) = 'authenticated'::text)` }),
+]);
 
-// ============ Zod Schema 生成 ============
-const { createInsertSchema: createProfileInsertSchema } = createSchemaFactory({ coerce: { date: true } });
-export const insertProfileSchema = createProfileInsertSchema(profiles).omit({ created_at: true });
-export type Profile = typeof profiles.$inferSelect;
-export type InsertProfile = z.infer<typeof insertProfileSchema>;
+export const productionProgress = pgTable("production_progress", {
+	id: varchar({ length: 36 }).default(gen_random_uuid()).primaryKey().notNull(),
+	orderItemId: varchar("order_item_id", { length: 36 }).notNull(),
+	workshopId: varchar("workshop_id", { length: 36 }),
+	progress: integer().default(0).notNull(),
+	stage: varchar({ length: 50 }),
+	description: text(),
+	operatorId: varchar("operator_id", { length: 36 }),
+	createdAt: timestamp("created_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+}, (table) => [
+	index("production_progress_created_at_idx").using("btree", table.createdAt.asc().nullsLast().op("timestamptz_ops")),
+	index("production_progress_order_item_id_idx").using("btree", table.orderItemId.asc().nullsLast().op("text_ops")),
+	index("production_progress_workshop_id_idx").using("btree", table.workshopId.asc().nullsLast().op("text_ops")),
+	foreignKey({
+			columns: [table.orderItemId],
+			foreignColumns: [orderItems.id],
+			name: "production_progress_order_item_id_fkey"
+		}).onDelete("cascade"),
+	foreignKey({
+			columns: [table.workshopId],
+			foreignColumns: [workshops.id],
+			name: "production_progress_workshop_id_fkey"
+		}),
+	pgPolicy("production_progress_all", { as: "permissive", for: "all", to: ["public"], using: sql`(( SELECT auth.role() AS role) = 'authenticated'::text)` }),
+]);
 
-const { createInsertSchema: createCustomerInsertSchema } = createSchemaFactory({ coerce: { date: true } });
-export const insertCustomerSchema = createCustomerInsertSchema(customers).omit({ id: true, created_at: true });
-export type Customer = typeof customers.$inferSelect;
-export type InsertCustomer = z.infer<typeof insertCustomerSchema>;
+export const shipping = pgTable("shipping", {
+	id: varchar({ length: 36 }).default(gen_random_uuid()).primaryKey().notNull(),
+	shippingNo: varchar("shipping_no", { length: 50 }).notNull(),
+	orderId: varchar("order_id", { length: 36 }),
+	customerId: varchar("customer_id", { length: 36 }),
+	receiverName: varchar("receiver_name", { length: 100 }),
+	receiverPhone: varchar("receiver_phone", { length: 20 }),
+	receiverAddress: text("receiver_address"),
+	logisticsCompany: varchar("logistics_company", { length: 100 }),
+	trackingNo: varchar("tracking_no", { length: 100 }),
+	status: varchar({ length: 20 }).default('pending'),
+	shippedAt: timestamp("shipped_at", { withTimezone: true, mode: 'string' }),
+	deliveredAt: timestamp("delivered_at", { withTimezone: true, mode: 'string' }),
+	remark: text(),
+	createdBy: varchar("created_by", { length: 36 }),
+	createdAt: timestamp("created_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+	updatedAt: timestamp("updated_at", { withTimezone: true, mode: 'string' }),
+}, (table) => [
+	index("shipping_customer_id_idx").using("btree", table.customerId.asc().nullsLast().op("text_ops")),
+	index("shipping_order_id_idx").using("btree", table.orderId.asc().nullsLast().op("text_ops")),
+	index("shipping_shipping_no_idx").using("btree", table.shippingNo.asc().nullsLast().op("text_ops")),
+	index("shipping_status_idx").using("btree", table.status.asc().nullsLast().op("text_ops")),
+	index("shipping_tracking_no_idx").using("btree", table.trackingNo.asc().nullsLast().op("text_ops")),
+	foreignKey({
+			columns: [table.orderId],
+			foreignColumns: [orders.id],
+			name: "shipping_order_id_fkey"
+		}),
+	foreignKey({
+			columns: [table.customerId],
+			foreignColumns: [customers.id],
+			name: "shipping_customer_id_fkey"
+		}),
+	unique("shipping_shipping_no_key").on(table.shippingNo),
+	pgPolicy("shipping_all", { as: "permissive", for: "all", to: ["public"], using: sql`(( SELECT auth.role() AS role) = 'authenticated'::text)` }),
+]);
 
-const { createInsertSchema: createOrderInsertSchema } = createSchemaFactory({ coerce: { date: true } });
-export const insertOrderSchema = createOrderInsertSchema(orders).omit({ id: true, created_at: true });
-export type Order = typeof orders.$inferSelect;
-export type InsertOrder = z.infer<typeof insertOrderSchema>;
+export const operationLogs = pgTable("operation_logs", {
+	id: varchar({ length: 36 }).default(gen_random_uuid()).primaryKey().notNull(),
+	operatorId: varchar("operator_id", { length: 36 }),
+	action: varchar({ length: 50 }).notNull(),
+	entityType: varchar("entity_type", { length: 50 }),
+	entityId: varchar("entity_id", { length: 36 }),
+	detail: jsonb(),
+	ipAddress: varchar("ip_address", { length: 50 }),
+	createdAt: timestamp("created_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+}, (table) => [
+	index("operation_logs_action_idx").using("btree", table.action.asc().nullsLast().op("text_ops")),
+	index("operation_logs_created_at_idx").using("btree", table.createdAt.asc().nullsLast().op("timestamptz_ops")),
+	index("operation_logs_entity_type_idx").using("btree", table.entityType.asc().nullsLast().op("text_ops")),
+	index("operation_logs_operator_id_idx").using("btree", table.operatorId.asc().nullsLast().op("text_ops")),
+	pgPolicy("operation_logs_all", { as: "permissive", for: "all", to: ["public"], using: sql`(( SELECT auth.role() AS role) = 'authenticated'::text)` }),
+]);
 
-const { createInsertSchema: createOrderItemInsertSchema } = createSchemaFactory({ coerce: { date: true } });
-export const insertOrderItemSchema = createOrderItemInsertSchema(order_items).omit({ id: true, created_at: true });
-export type OrderItem = typeof order_items.$inferSelect;
-export type InsertOrderItem = z.infer<typeof insertOrderItemSchema>;
+export const smsCodes = pgTable("sms_codes", {
+	id: varchar({ length: 36 }).default(gen_random_uuid()).primaryKey().notNull(),
+	phone: varchar({ length: 20 }).notNull(),
+	code: varchar({ length: 10 }).notNull(),
+	type: varchar({ length: 20 }).default('register'),
+	expiresAt: timestamp("expires_at", { withTimezone: true, mode: 'string' }).notNull(),
+	used: boolean().default(false),
+	createdAt: timestamp("created_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+}, (table) => [
+	index("sms_codes_expires_idx").using("btree", table.expiresAt.asc().nullsLast().op("timestamptz_ops")),
+	index("sms_codes_phone_idx").using("btree", table.phone.asc().nullsLast().op("text_ops")),
+]);
 
-const { createInsertSchema: createWorkshopInsertSchema } = createSchemaFactory({ coerce: { date: true } });
-export const insertWorkshopSchema = createWorkshopInsertSchema(workshops).omit({ id: true, created_at: true });
-export type Workshop = typeof workshops.$inferSelect;
-export type InsertWorkshop = z.infer<typeof insertWorkshopSchema>;
+export const users = pgTable("users", {
+	id: varchar({ length: 36 }).default(gen_random_uuid()).primaryKey().notNull(),
+	phone: varchar({ length: 20 }).notNull(),
+	password: varchar({ length: 255 }).notNull(),
+	nickname: varchar({ length: 100 }),
+	role: varchar({ length: 20 }).default('user'),
+	isActive: boolean("is_active").default(true),
+	lastLoginAt: timestamp("last_login_at", { withTimezone: true, mode: 'string' }),
+	createdAt: timestamp("created_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+	updatedAt: timestamp("updated_at", { withTimezone: true, mode: 'string' }),
+	tenantType: varchar("tenant_type", { length: 20 }),
+	tenantId: uuid("tenant_id"),
+}, (table) => [
+	index("users_phone_idx").using("btree", table.phone.asc().nullsLast().op("text_ops")),
+	index("users_role_idx").using("btree", table.role.asc().nullsLast().op("text_ops")),
+	foreignKey({
+			columns: [table.tenantId],
+			foreignColumns: [tenants.id],
+			name: "users_tenant_id_fkey"
+		}).onDelete("set null"),
+	unique("users_phone_key").on(table.phone),
+	pgPolicy("users_all", { as: "permissive", for: "all", to: ["public"], using: sql`(( SELECT auth.role() AS role) = 'authenticated'::text)` }),
+	check("users_tenant_type_check", sql`(tenant_type)::text = ANY ((ARRAY['official'::character varying, 'manufacturer'::character varying, 'dealer'::character varying, 'material_supplier'::character varying])::text[])`),
+]);
 
-const { createInsertSchema: createTaskInsertSchema } = createSchemaFactory({ coerce: { date: true } });
-export const insertTaskSchema = createTaskInsertSchema(tasks).omit({ id: true, created_at: true });
-export type Task = typeof tasks.$inferSelect;
-export type InsertTask = z.infer<typeof insertTaskSchema>;
+export const userSettings = pgTable("user_settings", {
+	id: varchar({ length: 100 }).default(gen_random_uuid()).primaryKey().notNull(),
+	userId: varchar("user_id", { length: 100 }).notNull(),
+	settingKey: varchar("setting_key", { length: 100 }).notNull(),
+	settingValue: text("setting_value"),
+	createdAt: timestamp("created_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+	updatedAt: timestamp("updated_at", { withTimezone: true, mode: 'string' }),
+}, (table) => [
+	index("user_settings_key_idx").using("btree", table.settingKey.asc().nullsLast().op("text_ops")),
+	index("user_settings_user_id_idx").using("btree", table.userId.asc().nullsLast().op("text_ops")),
+	unique("user_settings_user_id_setting_key_key").on(table.userId, table.settingKey),
+	pgPolicy("Allow all access to user_settings", { as: "permissive", for: "all", to: ["public"], using: sql`true`, withCheck: sql`true`  }),
+]);
 
-const { createInsertSchema: createShippingInsertSchema } = createSchemaFactory({ coerce: { date: true } });
-export const insertShippingSchema = createShippingInsertSchema(shipping).omit({ id: true, created_at: true });
-export type Shipping = typeof shipping.$inferSelect;
-export type InsertShipping = z.infer<typeof insertShippingSchema>;
+export const tenants = pgTable("tenants", {
+	id: uuid().defaultRandom().primaryKey().notNull(),
+	tenantType: varchar("tenant_type", { length: 20 }).notNull(),
+	companyName: varchar("company_name", { length: 100 }).notNull(),
+	contactPhone: varchar("contact_phone", { length: 20 }),
+	address: text(),
+	prefix: varchar({ length: 20 }),
+	status: varchar({ length: 20 }).default('active'),
+	createdAt: timestamp("created_at", { mode: 'string' }).defaultNow(),
+	updatedAt: timestamp("updated_at", { mode: 'string' }).defaultNow(),
+}, (table) => [
+	unique("tenants_prefix_key").on(table.prefix),
+	check("tenants_tenant_type_check", sql`(tenant_type)::text = ANY ((ARRAY['manufacturer'::character varying, 'dealer'::character varying, 'material_supplier'::character varying])::text[])`),
+]);
 
-const { createInsertSchema: createProductionProgressInsertSchema } = createSchemaFactory({ coerce: { date: true } });
-export const insertProductionProgressSchema = createProductionProgressInsertSchema(production_progress).omit({ id: true, created_at: true });
-export type ProductionProgress = typeof production_progress.$inferSelect;
-export type InsertProductionProgress = z.infer<typeof insertProductionProgressSchema>;
+export const orderPrefixes = pgTable("order_prefixes", {
+	id: uuid().defaultRandom(),
+	prefix: varchar({ length: 20 }).notNull(),
+	companyName: varchar("company_name", { length: 100 }),
+	phone: varchar({ length: 20 }),
+	address: text(),
+	createdBy: varchar("created_by", { length: 100 }),
+	createdAt: timestamp("created_at", { mode: 'string' }).defaultNow(),
+	updatedAt: timestamp("updated_at", { mode: 'string' }).defaultNow(),
+}, (table) => [
+	unique("order_prefixes_prefix_key").on(table.prefix),
+]);
+
+export const tenantUsers = pgTable("tenant_users", {
+	id: uuid().defaultRandom().primaryKey().notNull(),
+	tenantId: uuid("tenant_id").notNull(),
+	phone: varchar({ length: 20 }).notNull(),
+	password: varchar({ length: 255 }).notNull(),
+	name: varchar({ length: 100 }),
+	role: varchar({ length: 50 }).notNull(),
+	department: varchar({ length: 50 }),
+	status: varchar({ length: 20 }).default('active'),
+	createdAt: timestamp("created_at", { mode: 'string' }).defaultNow(),
+	updatedAt: timestamp("updated_at", { mode: 'string' }).defaultNow(),
+}, (table) => [
+	foreignKey({
+			columns: [table.tenantId],
+			foreignColumns: [tenants.id],
+			name: "tenant_users_tenant_id_fkey"
+		}).onDelete("cascade"),
+	unique("tenant_users_tenant_id_phone_key").on(table.tenantId, table.phone),
+]);
