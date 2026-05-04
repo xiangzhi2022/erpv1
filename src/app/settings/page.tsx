@@ -78,47 +78,32 @@ export default function SettingsPage() {
   const DEALER_ROLES = [
     { value: '总经理', label: '1 总经理', dept: '管理' },
     { value: '店长', label: '2 店长', dept: '管理' },
-    { value: '设计师', label: '3 设计师', dept: '设计' },
-    { value: '销售顾问', label: '4 销售顾问', dept: '销售' },
-    { value: '财务', label: '5 财务', dept: '财务' },
-    { value: '客服', label: '6 客服', dept: '客服' },
-    { value: '行政', label: '7 行政', dept: '行政' },
+    { value: '财务', label: '3 财务', dept: '财务' },
+    { value: '行政', label: '4 行政', dept: '行政' },
   ];
   
-  // 生产商岗位角色（22个）
+  // 生产商岗位角色（精简版）
   const ERP_ROLES = [
     { value: '订单管理', label: '1 订单管理', dept: '订单管理' },
-    { value: '跟单员', label: '2 跟单员', dept: '订单管理' },
-    { value: '木工', label: '3 木工', dept: '生产部' },
-    { value: '打磨', label: '4 打磨', dept: '生产部' },
-    { value: '贴皮', label: '5 贴皮', dept: '生产部' },
-    { value: '喷漆', label: '6 喷漆', dept: '生产部' },
-    { value: '质检', label: '7 质检', dept: '生产部' },
-    { value: '打包发货', label: '8 打包发货', dept: '生产部' },
-    { value: '普工', label: '9 普工', dept: '生产部' },
-    { value: '工程监理', label: '10 工程监理', dept: '生产部' },
-    { value: '行政', label: '11 行政', dept: '行政部' },
-    { value: '客服', label: '12 客服', dept: '行政部' },
-    { value: '财务', label: '13 财务', dept: '财务部' },
-    { value: '会计', label: '14 会计', dept: '财务部' },
-    { value: '销售', label: '15 销售', dept: '销售部' },
-    { value: '渠道', label: '16 渠道', dept: '销售部' },
-    { value: '门店', label: '17 门店', dept: '销售部' },
-    { value: '仓库', label: '18 仓库', dept: '仓储部' },
-    { value: '采购', label: '19 采购', dept: '仓储部' },
-    { value: '设计', label: '20 设计', dept: '设计部' },
-    { value: '量尺', label: '21 量尺', dept: '设计部' },
-    { value: '人事', label: '22 人事', dept: '人事部' },
+    { value: '木工', label: '2 木工', dept: '生产部' },
+    { value: '打磨', label: '3 打磨', dept: '生产部' },
+    { value: '贴皮', label: '4 贴皮', dept: '生产部' },
+    { value: '喷漆', label: '5 喷漆', dept: '生产部' },
+    { value: '质检', label: '6 质检', dept: '生产部' },
+    { value: '打包发货', label: '7 打包发货', dept: '生产部' },
+    { value: '普工', label: '8 普工', dept: '生产部' },
+    { value: '工程监理', label: '9 工程监理', dept: '生产部' },
+    { value: '行政', label: '10 行政', dept: '行政部' },
+    { value: '财务', label: '11 财务', dept: '财务部' },
+    { value: '仓库', label: '12 仓库', dept: '仓储部' },
+    { value: '人事', label: '13 人事', dept: '人事部' },
   ];
   
   // 材料商岗位角色
   const MATERIAL_SUPPLIER_ROLES = [
     { value: '总经理', label: '1 总经理', dept: '管理' },
-    { value: '销售', label: '2 销售', dept: '销售' },
-    { value: '仓库管理', label: '3 仓库管理', dept: '仓储' },
-    { value: '财务', label: '4 财务', dept: '财务' },
-    { value: '采购', label: '5 采购', dept: '采购' },
-    { value: '客服', label: '6 客服', dept: '客服' },
+    { value: '仓库管理', label: '2 仓库管理', dept: '仓储' },
+    { value: '财务', label: '3 财务', dept: '财务' },
   ];
   
   // 加载已有设置
