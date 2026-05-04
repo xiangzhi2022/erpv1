@@ -1,10 +1,10 @@
 /**
  * 青崖ERP - 多租户权限控制工具
- * 支持角色：super_admin / saas_admin / dealer_admin / factory_admin / factory_user
+ * 支持角色：super_admin / saas_admin / dealer_admin / factory_admin / supplier_admin / factory_user / user
  */
 
 // 用户类型定义
-export type UserRole = 'super_admin' | 'saas_admin' | 'dealer_admin' | 'factory_admin' | 'factory_user' | 'user';
+export type UserRole = 'super_admin' | 'saas_admin' | 'dealer_admin' | 'factory_admin' | 'supplier_admin' | 'factory_user' | 'user';
 
 export interface AuthUser {
   id: string;
@@ -12,15 +12,16 @@ export interface AuthUser {
   nickname: string;
   role: UserRole;
   tenant_id?: string;     // 所属租户ID
-  tenant_type?: 'dealer' | 'factory';  // 租户类型
+  tenant_type?: 'dealer' | 'factory' | 'material_supplier';  // 租户类型
 }
 
 // 角色层级（数值越大权限越高）
 export const roleHierarchy: Record<UserRole, number> = {
   'super_admin': 100,      // 系统开发商
   'saas_admin': 80,       // SaaS服务商管理员
-  'dealer_admin': 50,     // 经销商管理员
-  'factory_admin': 40,    // 工厂管理员
+  'dealer_admin': 60,     // 经销商管理员
+  'factory_admin': 50,    // 工厂管理员
+  'supplier_admin': 50,    // 材料商管理员
   'factory_user': 30,     // 工厂工人
   'user': 10,             // 普通用户
 };
@@ -58,6 +59,13 @@ export function isFactoryAdmin(user: AuthUser | null): boolean {
  */
 export function isFactoryUser(user: AuthUser | null): boolean {
   return user?.role === 'factory_user';
+}
+
+/**
+ * 判断用户是否为材料商管理员
+ */
+export function isSupplierAdmin(user: AuthUser | null): boolean {
+  return user?.role === 'supplier_admin';
 }
 
 /**
@@ -145,6 +153,8 @@ export function getDashboardPath(user: AuthUser | null): string {
       return '/dealer';    // 经销商下单页
     case 'factory_admin':
       return '/factory';    // 工厂管理页
+    case 'supplier_admin':
+      return '/supplier';   // 材料商管理页
     case 'factory_user':
       return '/worker';     // 工人报工页
     default:
@@ -169,6 +179,7 @@ export const permissions = {
   'orders:read:all': ['super_admin', 'saas_admin'] as UserRole[],
   'orders:read:dealer': ['dealer_admin'] as UserRole[],
   'orders:read:factory': ['factory_admin', 'factory_user'] as UserRole[],
+  'orders:read:supplier': ['supplier_admin'] as UserRole[],
   'orders:update': ['super_admin', 'saas_admin', 'dealer_admin', 'factory_admin'] as UserRole[],
   'orders:delete': ['super_admin', 'dealer_admin'] as UserRole[],
   'orders:assign_factory': ['dealer_admin'] as UserRole[],  // 派单
@@ -180,11 +191,14 @@ export const permissions = {
   
   // 用户管理权限
   'users:manage:all': ['super_admin'] as UserRole[],
-  'users:manage:tenant': ['dealer_admin', 'factory_admin'] as UserRole[],
+  'users:manage:tenant': ['dealer_admin', 'factory_admin', 'supplier_admin'] as UserRole[],
   
   // 工厂管理权限
   'factory:manage': ['super_admin', 'saas_admin'] as UserRole[],
   'factory:view_load': ['dealer_admin', 'factory_admin'] as UserRole[],  // 查看工厂负载
+
+  // 材料商管理权限
+  'supplier:manage': ['supplier_admin'] as UserRole[],
 };
 
 // 从请求中获取用户信息（用于API路由）

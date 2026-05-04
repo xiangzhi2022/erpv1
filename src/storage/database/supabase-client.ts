@@ -6,6 +6,7 @@ export const roleHierarchy: Record<string, number> = {
   'saas_admin': 80,
   'dealer_admin': 60,
   'factory_admin': 50,
+  'supplier_admin': 50,
   'factory_user': 30,
   'user': 10,
 };
@@ -16,6 +17,7 @@ export const roleRedirectPath: Record<string, string> = {
   'saas_admin': '/',
   'dealer_admin': '/dealer',
   'factory_admin': '/factory',
+  'supplier_admin': '/supplier',
   'factory_user': '/worker',
   'user': '/dashboard',
 };

@@ -8,6 +8,7 @@ import { Input } from '@/components/ui/input';
 import { Card, CardContent } from '@/components/ui/card';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Cpu, Layers, Zap, Eye, EyeOff } from 'lucide-react';
+import { getDashboardPath } from '@/lib/auth';
 
 function ParticleBackground() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -161,7 +162,9 @@ export default function LoginPage() {
           localStorage.setItem('erp_login_remember', 'false');
         }
         
-        router.push('/dashboard');
+        // 根据用户角色跳转到对应页面
+        const redirectPath = getDashboardPath(result.user);
+        router.push(redirectPath);
       } else {
         setError(result.error || '登录失败');
       }
