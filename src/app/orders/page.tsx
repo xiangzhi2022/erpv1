@@ -39,27 +39,7 @@ export default function OrdersPage() {
   const [orderName, setOrderName] = useState('');
   const [generatedOrderNo, setGeneratedOrderNo] = useState('');
   const [isGenerating, setIsGenerating] = useState(false);
-  const [orderPrefix, setOrderPrefix] = useState('');
 
-  // 获取租户订单前缀
-  useEffect(() => {
-    const fetchPrefix = async () => {
-      try {
-        const response = await fetch('/api/auth/me');
-        const data = await response.json();
-        if (data.success && data.user?.tenant_id) {
-          const prefixRes = await fetch(`/api/orders/prefix?tenant_id=${data.user.tenant_id}`);
-          const prefixData = await prefixRes.json();
-          if (prefixData.success) {
-            setOrderPrefix(prefixData.prefix);
-          }
-        }
-      } catch (error) {
-        console.error('获取前缀失败:', error);
-      }
-    };
-    fetchPrefix();
-  }, []);
 
   // 生成订单号
   const generateOrderNo = async () => {
@@ -433,27 +413,18 @@ export default function OrdersPage() {
                     <h4 className="font-medium mb-4">录入页面</h4>
                     <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
                       <div className="space-y-2">
-                        <Label>订单前缀</Label>
+                        <Label>订单编号</Label>
                         <div className="flex gap-2">
                           <Input 
-                            placeholder="前缀" 
-                            value={orderPrefix}
-                            readOnly
-                            className="w-24 bg-muted"
+                            placeholder="点击生成订单号" 
+                            value={generatedOrderNo}
+                            readOnly 
+                            className="bg-muted font-mono flex-1"
                           />
                           <Button onClick={generateOrderNo} disabled={isGenerating} variant="default">
                             {isGenerating ? '生成中...' : '生成订单号'}
                           </Button>
                         </div>
-                      </div>
-                      <div className="space-y-2">
-                        <Label>订单编号</Label>
-                        <Input 
-                          placeholder="点击生成订单号" 
-                          value={generatedOrderNo}
-                          readOnly 
-                          className="bg-muted font-mono"
-                        />
                       </div>
                       <div className="space-y-2">
                         <Label>经销商名称</Label>
