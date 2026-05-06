@@ -1,0 +1,25 @@
+name: Local Auto Sync
+
+on:
+  push:
+    branches:
+      - main  # 如果您的主分支是 master，请修改为 master
+
+jobs:
+  sync-and-restart:
+    runs-on: self-hosted
+
+    steps:
+      - name: Fetch and pull latest code
+        run: |
+          cd /home/xiang/文档/erp/erp
+          
+          # 重置本地可能未提交的修改，并拉取最新代码
+          git fetch origin main
+          git reset --hard origin/main
+          
+          # 安装可能更新的依赖
+          npx pnpm install
+          
+          # 注意：如果您希望在这里自动重启服务，可以添加相关的重启命令。
+          # 目前默认执行到拉取代码和安装依赖。
