@@ -313,31 +313,6 @@ export const orderPrefixes = pgTable("order_prefixes", {
 	unique("order_prefixes_prefix_key").on(table.prefix),
 ]);
 
-export const suppliers = pgTable("suppliers", {
-	id: uuid("id").primaryKey().defaultRandom(),
-	supplierCode: varchar("supplier_code", { length: 20 }).notNull(),
-	name: varchar({ length: 200 }).notNull(),
-	contactPerson: varchar("contact_person", { length: 100 }),
-	phone: varchar({ length: 20 }),
-	email: varchar({ length: 200 }),
-	category: varchar({ length: 50 }),
-	rating: varchar({ length: 2 }).default('B'),
-	status: varchar({ length: 20 }).default('active'),
-	address: text(),
-	remark: text(),
-	createdBy: varchar("created_by", { length: 36 }),
-	createdAt: timestamp("created_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
-	updatedAt: timestamp("updated_at", { withTimezone: true, mode: 'string' }),
-}, (table) => [
-	index("suppliers_supplier_code_idx").using("btree", table.supplierCode.asc().nullsLast().op("text_ops")),
-	index("suppliers_name_idx").using("btree", table.name.asc().nullsLast().op("text_ops")),
-	index("suppliers_category_idx").using("btree", table.category.asc().nullsLast().op("text_ops")),
-	index("suppliers_rating_idx").using("btree", table.rating.asc().nullsLast().op("text_ops")),
-	index("suppliers_status_idx").using("btree", table.status.asc().nullsLast().op("text_ops")),
-	unique("suppliers_supplier_code_key").on(table.supplierCode),
-	pgPolicy("suppliers_all", { as: "permissive", for: "all", to: ["public"], using: sql`true`, withCheck: sql`true` }),
-]);
-
 export const tenantUsers = pgTable("tenant_users", {
 	id: uuid().defaultRandom().primaryKey().notNull(),
 	tenantId: uuid("tenant_id").notNull(),
