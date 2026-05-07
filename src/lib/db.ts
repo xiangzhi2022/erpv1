@@ -86,43 +86,6 @@ export async function insertData(table: string, data: Record<string, unknown>): 
 /**
  * 直接删除数据（使用 Service Role Key）
  */
-export async function updateData(
-  table: string, 
-  data: Record<string, unknown>, 
-  filters: Record<string, string>
-): Promise<void> {
-  const url = process.env.COZE_SUPABASE_URL;
-  const serviceKey = process.env.COZE_SUPABASE_SERVICE_ROLE_KEY;
-
-  if (!url || !serviceKey) {
-    throw new Error('Missing Supabase credentials');
-  }
-
-  // 构建查询参数
-  const queryParams = new URLSearchParams();
-  for (const [key, value] of Object.entries(filters)) {
-    queryParams.append(`${key}`, `eq.${value}`);
-  }
-
-  const apiUrl = `${url}/rest/v1/${table}?${queryParams.toString()}`;
-
-  const response = await fetch(apiUrl, {
-    method: 'PATCH',
-    headers: {
-      'Content-Type': 'application/json',
-      'apikey': serviceKey,
-      'Authorization': `Bearer ${serviceKey}`,
-      'Prefer': 'return=representation'
-    },
-    body: JSON.stringify(data)
-  });
-
-  if (!response.ok) {
-    const error = await response.text();
-    throw new Error(`Update error: ${error}`);
-  }
-}
-
 export async function deleteData(table: string, filters: Record<string, string>): Promise<void> {
   const url = process.env.COZE_SUPABASE_URL;
   const serviceKey = process.env.COZE_SUPABASE_SERVICE_ROLE_KEY;
@@ -178,14 +141,7 @@ export async function selectData(
   
   if (filters) {
     for (const [key, value] of Object.entries(filters)) {
-      // 已经包含操作符前缀的值（如 eq.、ilike.、or 等）不再重复添加 eq.
-      if (value.includes('.') && !value.startsWith('eq.')) {
-        queryParams.append(key, value);
-      } else if (!value.includes('.')) {
-        queryParams.append(key, `eq.${value}`);
-      } else {
-        queryParams.append(key, value);
-      }
+      queryParams.append(`${key}`, `eq.${value}`);
     }
   }
 

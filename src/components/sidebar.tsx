@@ -14,8 +14,7 @@ import {
   DollarSign,
   BarChart3,
   Settings,
-  LogOut,
-  Factory
+  LogOut
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Separator } from '@/components/ui/separator';
@@ -24,7 +23,6 @@ const navigation = [
   { name: '首页', href: '/dashboard', icon: LayoutDashboard },
   { name: '订单管理', href: '/orders', icon: ClipboardList },
   { name: '任务分配', href: '/tasks', icon: CheckSquare },
-  { name: '车间管理', href: '/factory/workshops', icon: Factory },
   { name: '进度管理', href: '/progress', icon: TrendingUp },
   { name: '发货管理', href: '/shipping', icon: Truck },
   { name: '财务管理', href: '/finance', icon: DollarSign },

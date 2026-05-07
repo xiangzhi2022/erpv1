@@ -89,7 +89,6 @@
 - `customers` - 客户表
 - `order_items` - 订单项表
 - `workshops` - 车间表
-- `factory_workshops` - 工厂车间管理表（含产能、状态、位置等扩展字段）
 
 ### API 端点
 - `/api/auth/login` - 登录（使用手机号）
@@ -97,8 +96,6 @@
 - `/api/auth/register` - 注册（使用手机号，无需验证码）
 - `/api/dealer/orders` - 经销商订单
 - `/api/factory/orders` - 工厂订单
-- `/api/factory/workshops` - 工厂车间管理（GET 列表/POST 新增，支持 status/keyword 过滤）
-- `/api/factory/workshops/[id]` - 车间详情/更新/删除（GET/PUT/DELETE）
 - `/api/worker/tasks` - 工人任务
 - `/api/worker/report` - 报工
 
