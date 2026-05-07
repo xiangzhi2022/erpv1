@@ -89,14 +89,11 @@
 - `customers` - 客户表
 - `order_items` - 订单项表
 - `workshops` - 车间表
-- `dealers` - 经销商表（name, contact_name, phone, region, status, remark, created_by）
 
 ### API 端点
 - `/api/auth/login` - 登录（使用手机号）
 - `/api/auth/logout` - 登出
 - `/api/auth/register` - 注册（使用手机号，无需验证码）
-- `/api/dealer` - 经销商管理（GET列表/POST新增）
-- `/api/dealer/[id]` - 经销商详情（PUT更新/DELETE删除）
 - `/api/dealer/orders` - 经销商订单
 - `/api/factory/orders` - 工厂订单
 - `/api/worker/tasks` - 工人任务
@@ -109,7 +106,7 @@ Supabase 连接信息通过 `.env.local` 文件配置：
 - `COZE_SUPABASE_SERVICE_ROLE_KEY` - Service Role Key
 
 ### 数据库配置
-**唯一数据库**：Supabase (从 `.env.local` 读取 COZE_SUPABASE_URL)
+**唯一数据库**：Supabase (https://cdcnjtgabgjkouavwxsl.supabase.co)
 
 **数据库工具**：
 ```bash

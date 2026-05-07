@@ -1,9 +1,14 @@
-import { getSupabaseClient } from '@/storage/database/supabase-client';
+import { createClient } from '@supabase/supabase-js';
 import { NextRequest, NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
 
+const supabaseUrl = process.env.COZE_SUPABASE_URL || 'https://cdcnjtgabgjkouavwxsl.supabase.co';
+const supabaseServiceKey = process.env.COZE_SUPABASE_SERVICE_ROLE_KEY || '';
+
 function getSupabaseAdmin() {
-  return getSupabaseClient();
+  return createClient(supabaseUrl, supabaseServiceKey, {
+    auth: { persistSession: false }
+  });
 }
 
 async function getAuthUser() {

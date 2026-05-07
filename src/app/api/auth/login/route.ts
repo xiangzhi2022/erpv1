@@ -1,8 +1,14 @@
 import { NextResponse } from 'next/server';
-import { getSupabaseClient } from '@/storage/database/supabase-client';
+import { createClient } from '@supabase/supabase-js';
+
+// 硬编码的 Supabase 配置（不依赖环境变量）
+const supabaseUrl = 'https://cdcnjtgabgjkouavwxsl.supabase.co';
+const supabaseServiceKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNkY25qdGdhYmdqa291YXZ3eHNsIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3Nzg1MjM0MSwiZXhwIjoyMDkzNDI4MzQxfQ.LzvwvnkQx_lIjIjsZd8FxyXRaDwTPyiVELyTEuTacmE';
 
 function getSupabaseServiceClient() {
-  return getSupabaseClient();
+  return createClient(supabaseUrl, supabaseServiceKey, {
+    auth: { persistSession: false }
+  });
 }
 
 export async function POST(request: Request) {

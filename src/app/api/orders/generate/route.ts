@@ -49,7 +49,7 @@ export async function POST(request: NextRequest) {
 
     if (orderData && orderData.length > 0) {
       // 找到当天最大的序号
-      const sequences = orderData.map((order: { order_no: string }) => {
+      const sequences = orderData.map(order => {
         const match = order.order_no.match(/^.*(\d{8})(\d{2})$/);
         return match ? parseInt(match[2], 10) : 0;
       });
