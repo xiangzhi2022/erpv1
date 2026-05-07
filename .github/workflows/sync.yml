@@ -1,0 +1,31 @@
+name: Local Sync and Restart
+on:
+  push:
+    branches: [ main ]
+
+jobs:
+  sync:
+    runs-on: self-hosted
+    steps:
+      - name: Pull and Deploy
+        run: |
+          # 1. 进入项目根目录
+          cd /workspace/projects
+          
+          # 2. 强制同步代码（避免本地文件冲突导致失败）
+          git fetch --all
+          git reset --hard origin/main
+          
+          # 3. 环境变量设置（如果有需要）
+          # export NODE_ENV=production
+          
+          # 4. 自动安装依赖 (根据你截图里的 pnpm-lock.yaml)
+          # 如果没有安装 pnpm，请先在服务器执行 npm install -g pnpm
+          pnpm install
+          
+          # 5. 编译与重启
+          # 假设你使用 pm2 或者执行你的 start-all.sh
+          # chmod +x start-all.sh
+          # ./start-all.sh
+          
+          echo "✅ 项目已于 $(date) 同步并重启完毕"
