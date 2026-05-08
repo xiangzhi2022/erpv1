@@ -1,9 +1,16 @@
 import { getSupabaseClient } from '@/db/client';
 import { cookies } from 'next/headers';
+import { ORDER_STATUSES, type OrderStatus } from '@/app/orders/schemas';
 
 const getServiceClient = () => getSupabaseClient();
 
-async function getCurrentUser() {
+interface CurrentUser {
+  id: string;
+  role: string;
+  tenant_id?: string;
+}
+
+async function getCurrentUser(): Promise<CurrentUser | null> {
   const cookieStore = await cookies();
   const userStr = cookieStore.get('erp_user')?.value;
   if (!userStr) return null;
@@ -13,6 +20,9 @@ async function getCurrentUser() {
     return null;
   }
 }
+
+// Valid status values for filtering
+const VALID_STATUSES = new Set<string>(ORDER_STATUSES);
 
 // GET /api/orders - Fetch orders with pagination, search, filtering, and items
 export async function GET(request: Request) {
@@ -26,8 +36,8 @@ export async function GET(request: Request) {
     const { searchParams } = new URL(request.url);
     const status = searchParams.get('status');
     const search = searchParams.get('search');
-    const page = parseInt(searchParams.get('page') || '1', 10);
-    const pageSize = parseInt(searchParams.get('pageSize') || '20', 10);
+    const page = Math.max(1, parseInt(searchParams.get('page') || '1', 10));
+    const pageSize = Math.min(100, Math.max(1, parseInt(searchParams.get('pageSize') || '20', 10)));
     const dateFrom = searchParams.get('dateFrom');
     const dateTo = searchParams.get('dateTo');
 
@@ -41,18 +51,22 @@ export async function GET(request: Request) {
       .order('created_at', { ascending: false })
       .range(from, to);
 
-    // Permission filter: super_admin/saas_admin sees all, others see own
+    // Permission filter: super_admin/saas_admin sees all; others see own tenant
     if (user.role !== 'super_admin' && user.role !== 'saas_admin') {
-      query = query.eq('created_by', user.id);
+      if (user.tenant_id) {
+        query = query.eq('tenant_id', user.tenant_id);
+      }
     }
 
-    // Status filter
+    // Status filter - validate before applying
     if (status && status !== 'all') {
-      const statuses = status.split(',');
-      if (statuses.length === 1) {
-        query = query.eq('status', statuses[0]);
-      } else {
-        query = query.in('status', statuses);
+      const statuses = status.split(',').filter((s) => VALID_STATUSES.has(s));
+      if (statuses.length > 0) {
+        if (statuses.length === 1) {
+          query = query.eq('status', statuses[0]);
+        } else {
+          query = query.in('status', statuses);
+        }
       }
     }
 
@@ -76,10 +90,12 @@ export async function GET(request: Request) {
       return Response.json({ success: false, error: error.message }, { status: 500 });
     }
 
-    // Get status statistics
+    // Get status statistics (using same permission scope)
     let statsQuery = supabase.from('orders').select('status');
     if (user.role !== 'super_admin' && user.role !== 'saas_admin') {
-      statsQuery = statsQuery.eq('created_by', user.id);
+      if (user.tenant_id) {
+        statsQuery = statsQuery.eq('tenant_id', user.tenant_id);
+      }
     }
     const { data: allOrders } = await statsQuery;
 
@@ -89,7 +105,7 @@ export async function GET(request: Request) {
       returned: allOrders?.filter((o: { status: string }) => o.status === 'returned').length || 0,
       confirmed: allOrders?.filter((o: { status: string }) => o.status === 'confirmed').length || 0,
       pool: allOrders?.filter((o: { status: string }) => o.status === 'pool').length || 0,
-      producing: allOrders?.filter((o: { status: string }) => o.status === 'producing' || o.status === 'in_production').length || 0,
+      producing: allOrders?.filter((o: { status: string }) => o.status === 'producing').length || 0,
       shipped: allOrders?.filter((o: { status: string }) => o.status === 'shipped').length || 0,
       completed: allOrders?.filter((o: { status: string }) => o.status === 'completed').length || 0,
       cancelled: allOrders?.filter((o: { status: string }) => o.status === 'cancelled').length || 0,
@@ -121,23 +137,46 @@ export async function POST(request: Request) {
     }
 
     const body = await request.json();
-    const { order_no, customer_name, delivery_date, remark, items } = body;
+    const { order_no, customer_name, customer_phone, delivery_date, remark, items } = body;
 
-    if (!order_no) {
+    // Validate required fields
+    if (!order_no || !order_no.trim()) {
       return Response.json({ success: false, error: '订单号不能为空' }, { status: 400 });
     }
-    if (!customer_name) {
+    if (!customer_name || !customer_name.trim()) {
       return Response.json({ success: false, error: '客户名称不能为空' }, { status: 400 });
     }
-    if (!items || items.length === 0) {
+    if (!items || !Array.isArray(items) || items.length === 0) {
       return Response.json({ success: false, error: '订单项不能为空' }, { status: 400 });
+    }
+
+    // Validate each order item
+    for (let i = 0; i < items.length; i++) {
+      const item = items[i];
+      if (!item.product_name || !item.product_name.trim()) {
+        return Response.json({ success: false, error: `第${i + 1}项: 产品名称不能为空` }, { status: 400 });
+      }
+      if (!item.quantity || item.quantity < 1) {
+        return Response.json({ success: false, error: `第${i + 1}项: 数量必须大于0` }, { status: 400 });
+      }
     }
 
     const supabase = getServiceClient();
 
-    // Calculate total amount from items
+    // Check for duplicate order_no
+    const { data: existing } = await supabase
+      .from('orders')
+      .select('id')
+      .eq('order_no', order_no.trim())
+      .maybeSingle();
+
+    if (existing) {
+      return Response.json({ success: false, error: '订单号已存在，请重新生成' }, { status: 409 });
+    }
+
+    // Calculate total amount from items (all amounts in cents)
     let totalAmount = 0;
-    const orderItems = items.map((item: { product_name: string; specification?: string; quantity: number; unit: string; unit_price: number }) => {
+    const orderItems = items.map((item: { product_name: string; specification?: string; quantity: number; unit: string; unit_price: number; remark?: string }) => {
       const subtotal = (item.quantity || 1) * (item.unit_price || 0);
       totalAmount += subtotal;
       return {
@@ -147,20 +186,22 @@ export async function POST(request: Request) {
         unit: item.unit || '件',
         unit_price: item.unit_price || 0,
         subtotal,
+        remark: item.remark || null,
       };
     });
 
-    // Create order (using actual DB schema columns)
+    // Create order - only use columns that exist in DB schema
     const { data: order, error: orderError } = await supabase
       .from('orders')
       .insert({
-        order_no,
-        customer_name,
+        order_no: order_no.trim(),
+        customer_name: customer_name.trim(),
+        customer_phone: customer_phone?.trim() || null,
         status: 'pending',
         total_amount: totalAmount,
         delivery_date: delivery_date || null,
         remark: remark || null,
-        created_by: user.id,
+        tenant_id: user.tenant_id || null,
       })
       .select()
       .single();
@@ -182,6 +223,7 @@ export async function POST(request: Request) {
 
     if (itemsError) {
       console.error('Create order items error:', itemsError);
+      // Rollback: delete the created order
       await supabase.from('orders').delete().eq('id', order.id);
       return Response.json({ success: false, error: '创建订单明细失败' }, { status: 500 });
     }
@@ -196,51 +238,6 @@ export async function POST(request: Request) {
     return Response.json({ success: true, data: fullOrder || order });
   } catch (err) {
     console.error('Create order error:', err);
-    return Response.json({ success: false, error: '服务器错误' }, { status: 500 });
-  }
-}
-
-// PUT /api/orders - Update order status
-export async function PUT(request: Request) {
-  try {
-    const user = await getCurrentUser();
-    if (!user) {
-      return Response.json({ success: false, error: '请先登录' }, { status: 401 });
-    }
-
-    const body = await request.json();
-    const { id, status, notes } = body;
-
-    if (!id || !status) {
-      return Response.json({ success: false, error: '缺少订单ID或状态' }, { status: 400 });
-    }
-
-    const supabase = getServiceClient();
-
-    const updateData: Record<string, unknown> = {
-      status,
-      updated_at: new Date().toISOString(),
-    };
-
-    if (notes !== undefined) {
-      updateData.remark = notes;
-    }
-
-    const { data, error } = await supabase
-      .from('orders')
-      .update(updateData)
-      .eq('id', id)
-      .select()
-      .single();
-
-    if (error) {
-      console.error('Update order error:', error);
-      return Response.json({ success: false, error: error.message }, { status: 500 });
-    }
-
-    return Response.json({ success: true, data });
-  } catch (err) {
-    console.error('Update order error:', err);
     return Response.json({ success: false, error: '服务器错误' }, { status: 500 });
   }
 }

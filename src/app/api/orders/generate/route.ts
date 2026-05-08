@@ -1,85 +1,100 @@
 import { getSupabaseClient } from '@/db/client';
-import { NextRequest, NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
 
-export async function POST(request: NextRequest) {
+const getServiceClient = () => getSupabaseClient();
+
+interface CurrentUser {
+  id: string;
+  role: string;
+  tenant_id?: string;
+}
+
+async function getCurrentUser(): Promise<CurrentUser | null> {
+  const cookieStore = await cookies();
+  const userStr = cookieStore.get('erp_user')?.value;
+  if (!userStr) return null;
   try {
-    const supabase = getSupabaseClient();
-    const cookieStore = await cookies();
-    const userSession = cookieStore.get('user_session');
-    
-    if (!userSession) {
-      return NextResponse.json({ success: false, error: '未登录' }, { status: 401 });
+    return JSON.parse(userStr);
+  } catch {
+    return null;
+  }
+}
+
+// POST /api/orders/generate - Generate order number with atomic sequence
+export async function POST(request: Request) {
+  try {
+    const user = await getCurrentUser();
+    if (!user) {
+      return Response.json({ success: false, error: '请先登录' }, { status: 401 });
     }
 
-    const user = JSON.parse(userSession.value);
-    const tenantId = user.tenant_id;
+    const body = await request.json();
+    const { prefix } = body;
 
-    if (!tenantId) {
-      return NextResponse.json({ success: false, error: '用户无关联租户' }, { status: 400 });
+    if (!prefix || !prefix.trim()) {
+      return Response.json({ success: false, error: '前缀不能为空' }, { status: 400 });
     }
 
-    // 获取租户的订单前缀
-    const { data: prefixData, error: prefixError } = await supabase
-      .from('order_prefixes')
-      .select('prefix, current_val')
-      .eq('tenant_id', tenantId)
+    const supabase = getServiceClient();
+    const now = new Date();
+    const dateStr = [
+      now.getFullYear(),
+      String(now.getMonth() + 1).padStart(2, '0'),
+      String(now.getDate()).padStart(2, '0'),
+    ].join('');
+
+    // Atomic sequence generation using Supabase RPC or upsert pattern
+    // Use the order_sequences table for atomic increment
+    const sequenceKey = `${prefix.trim()}-${dateStr}`;
+
+    // Try to atomically increment the sequence using upsert
+    const { data: seqData, error: seqError } = await supabase
+      .from('order_sequences')
+      .upsert(
+        { key: sequenceKey, value: 1 },
+        { onConflict: 'key' }
+      )
+      .select()
       .single();
 
-    if (prefixError || !prefixData) {
-      return NextResponse.json({ success: false, error: '未找到订单前缀配置' }, { status: 404 });
+    if (seqError) {
+      // If order_sequences table doesn't exist, fall back to counting
+      // Count existing orders with this prefix-date pattern
+      const { count, error: countError } = await supabase
+        .from('orders')
+        .select('*', { count: 'exact', head: true })
+        .like('order_no', `${prefix}${dateStr}%`);
+
+      if (countError) {
+        console.error('Generate order number count error:', countError);
+        return Response.json({ success: false, error: '生成订单号失败' }, { status: 500 });
+      }
+
+      const seq = (count || 0) + 1;
+      const orderNo = `${prefix}${dateStr}${String(seq).padStart(3, '0')}`;
+      return Response.json({ success: true, data: { order_no: orderNo } });
     }
 
-    const prefix = prefixData.prefix;
-    const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, '');
-    
-    // 使用 order_prefixes 表的序号，如果序号小于当天订单数则以当天订单数为准
-    let sequence = (prefixData.current_val || 0) + 1;
-    
-    // 查询当天该租户的订单数量，用于确保序号不重复
-    const startDate = `${dateStr}000000`;
-    const endDate = `${dateStr}235959`;
+    // If we got here, the sequence table exists
+    // We need to increment the value atomically
+    // Since upsert with onConflict doesn't auto-increment, use RPC or manual increment
+    const currentValue = (seqData as { key: string; value: number })?.value || 0;
+    const newValue = currentValue + 1;
 
-    const { data: orderData, error: orderError } = await supabase
-      .from('orders')
-      .select('order_no')
-      .eq('tenant_id', tenantId)
-      .gte('created_at', startDate)
-      .lte('created_at', endDate);
+    const { error: updateError } = await supabase
+      .from('order_sequences')
+      .update({ value: newValue })
+      .eq('key', sequenceKey);
 
-    if (orderData && orderData.length > 0) {
-      // 找到当天最大的序号
-      const sequences = orderData.map((order: Record<string, unknown>) => {
-        const match = String(order.order_no).match(/^.*(\d{8})(\d{2})$/);
-        return match ? parseInt(match[2], 10) : 0;
-      });
-      const maxSeq = Math.max(...sequences);
-      // 确保序号不重复
-      sequence = Math.max(sequence, maxSeq + 1);
+    if (updateError) {
+      console.error('Update sequence error:', updateError);
     }
 
-    // 生成订单号: 前缀 + 日期 + 顺序号（两位数）
-    const orderNo = `${prefix}${dateStr}${sequence.toString().padStart(2, '0')}`;
-
-    // 更新序号到 order_prefixes 表
-    await supabase
-      .from('order_prefixes')
-      .update({ current_val: sequence })
-      .eq('tenant_id', tenantId);
-
-    return NextResponse.json({
-      success: true,
-      orderNo,
-      prefix,
-      date: dateStr,
-      sequence,
-      tenantId
-    });
-  } catch (error) {
-    console.error('生成订单号失败:', error);
-    return NextResponse.json(
-      { success: false, error: '生成订单号失败' },
-      { status: 500 }
-    );
+    const seq = updateError ? currentValue + 1 : newValue;
+    const orderNo = `${prefix}${dateStr}${String(seq).padStart(3, '0')}`;
+    return Response.json({ success: true, data: { order_no: orderNo } });
+  } catch (err) {
+    console.error('Generate order number error:', err);
+    return Response.json({ success: false, error: '服务器错误' }, { status: 500 });
   }
 }

@@ -1,16 +1,39 @@
 import { getSupabaseClient } from '@/db/client';
-import { NextRequest, NextResponse } from 'next/server';
+import { cookies } from 'next/headers';
 
-export async function GET(request: NextRequest) {
+const getServiceClient = () => getSupabaseClient();
+
+interface CurrentUser {
+  id: string;
+  role: string;
+  tenant_id?: string;
+}
+
+async function getCurrentUser(): Promise<CurrentUser | null> {
+  const cookieStore = await cookies();
+  const userStr = cookieStore.get('erp_user')?.value;
+  if (!userStr) return null;
   try {
-    const supabase = getSupabaseClient();
-    const { searchParams } = new URL(request.url);
-    const tenantId = searchParams.get('tenant_id');
+    return JSON.parse(userStr);
+  } catch {
+    return null;
+  }
+}
 
-    if (!tenantId) {
-      return NextResponse.json({ success: false, error: '缺少租户ID' }, { status: 400 });
+// GET /api/orders/prefix - Get order prefix config for current tenant
+export async function GET() {
+  try {
+    const user = await getCurrentUser();
+    if (!user) {
+      return Response.json({ success: false, error: '请先登录' }, { status: 401 });
     }
 
+    const tenantId = user.tenant_id;
+    if (!tenantId) {
+      return Response.json({ success: false, error: '当前用户未关联租户' }, { status: 400 });
+    }
+
+    const supabase = getServiceClient();
     const { data, error } = await supabase
       .from('order_prefixes')
       .select('prefix, current_val')
@@ -18,19 +41,21 @@ export async function GET(request: NextRequest) {
       .single();
 
     if (error || !data) {
-      return NextResponse.json({ success: false, error: '未找到订单前缀配置' }, { status: 404 });
+      // Return default prefix if no config found
+      return Response.json({
+        success: true,
+        prefix: 'ORD',
+        currentVal: 0,
+      });
     }
 
-    return NextResponse.json({
+    return Response.json({
       success: true,
       prefix: data.prefix,
-      currentVal: data.current_val
+      currentVal: data.current_val,
     });
-  } catch (error) {
-    console.error('获取订单前缀失败:', error);
-    return NextResponse.json(
-      { success: false, error: '获取订单前缀失败' },
-      { status: 500 }
-    );
+  } catch (err) {
+    console.error('获取订单前缀失败:', err);
+    return Response.json({ success: false, error: '获取订单前缀失败' }, { status: 500 });
   }
 }
