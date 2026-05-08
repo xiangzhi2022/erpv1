@@ -91,6 +91,38 @@ describe('progressReportSchema', () => {
     });
     expect(result.success).toBe(false);
   });
+
+  it('should reject non-UUID work_order_id', () => {
+    const result = progressReportSchema.safeParse({
+      ...validReport,
+      work_order_id: 'not-a-uuid',
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it('should reject non-integer completed_delta', () => {
+    const result = progressReportSchema.safeParse({
+      ...validReport,
+      completed_delta: 1.5,
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it('should reject missing work_order_id', () => {
+    const result = progressReportSchema.safeParse({
+      action: 'start',
+      completed_delta: 0,
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it('should reject missing action', () => {
+    const result = progressReportSchema.safeParse({
+      work_order_id: '550e8400-e29b-41d4-a716-446655440000',
+      completed_delta: 0,
+    });
+    expect(result.success).toBe(false);
+  });
 });
 
 describe('workOrderQuerySchema', () => {
@@ -137,17 +169,32 @@ describe('workOrderQuerySchema', () => {
     });
     expect(result.success).toBe(false);
   });
+
+  it('should reject page < 1', () => {
+    const result = workOrderQuerySchema.safeParse({
+      page: 0,
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it('should reject page_size < 1', () => {
+    const result = workOrderQuerySchema.safeParse({
+      page_size: 0,
+    });
+    expect(result.success).toBe(false);
+  });
 });
 
 describe('Enums consistency', () => {
   it('should have correct WorkOrderStatus values', () => {
     const statuses = Object.values(WorkOrderStatus);
-    expect(statuses).toEqual(
-      expect.arrayContaining(['pending', 'producing', 'inspect', 'stored', 'aborted'].filter(s =>
-        statuses.includes(s as never)
-      ))
-    );
-    expect(statuses.length).toBeGreaterThanOrEqual(5);
+    expect(statuses).toContain('pending');
+    expect(statuses).toContain('scheduling');
+    expect(statuses).toContain('producing');
+    expect(statuses).toContain('inspecting');
+    expect(statuses).toContain('stored');
+    expect(statuses).toContain('aborted');
+    expect(statuses.length).toBe(6);
   });
 
   it('should have correct Priority values', () => {
@@ -156,6 +203,7 @@ describe('Enums consistency', () => {
     expect(priorities).toContain('high');
     expect(priorities).toContain('normal');
     expect(priorities).toContain('low');
+    expect(priorities.length).toBe(4);
   });
 
   it('should have correct ProgressAction values', () => {
@@ -165,6 +213,12 @@ describe('Enums consistency', () => {
     expect(actions).toContain('quality_check');
     expect(actions).toContain('warehouse_in');
     expect(actions).toContain('abort');
-    expect(actions.length).toBeGreaterThanOrEqual(8);
+    expect(actions).toContain('pause');
+    expect(actions).toContain('resume');
+    expect(actions).toContain('report_defect');
+    expect(actions).toContain('complete_cutting');
+    expect(actions).toContain('complete_assembly');
+    expect(actions).toContain('complete_painting');
+    expect(actions.length).toBe(11);
   });
 });
