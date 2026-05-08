@@ -1,15 +1,7 @@
-import { createClient } from '@supabase/supabase-js';
 import { NextRequest, NextResponse } from 'next/server';
+import { getSupabaseClient } from '@/db/client';
 import { cookies } from 'next/headers';
-
-const supabaseUrl = process.env.COZE_SUPABASE_URL || 'https://cdcnjtgabgjkouavwxsl.supabase.co';
-const supabaseServiceKey = process.env.COZE_SUPABASE_SERVICE_ROLE_KEY || '';
-
-function getSupabaseAdmin() {
-  return createClient(supabaseUrl, supabaseServiceKey, {
-    auth: { persistSession: false }
-  });
-}
+import { isUserAdmin } from '@/lib/auth-utils';
 
 async function getAuthUser() {
   const cookieStore = await cookies();
@@ -22,7 +14,7 @@ async function getAuthUser() {
   }
 }
 
-// GET - 获取用户列表
+// GET - 获取用户列表（仅管理员）
 export async function GET(request: NextRequest) {
   try {
     const user = await getAuthUser();
@@ -30,7 +22,11 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ success: false, error: '未登录' }, { status: 401 });
     }
 
-    const supabase = getSupabaseAdmin();
+    if (!isUserAdmin(user)) {
+      return NextResponse.json({ success: false, error: '无权限查看用户列表' }, { status: 403 });
+    }
+
+    const supabase = getSupabaseClient();
     const { searchParams } = new URL(request.url);
     const tenantId = searchParams.get('tenant_id');
 
@@ -47,7 +43,8 @@ export async function GET(request: NextRequest) {
     const { data, error } = await query;
 
     if (error) {
-      return NextResponse.json({ success: false, error: error.message }, { status: 500 });
+      console.error('获取用户列表失败:', error);
+      return NextResponse.json({ success: false, error: '获取用户列表失败' }, { status: 500 });
     }
 
     return NextResponse.json({ success: true, users: data || [] });
@@ -57,12 +54,16 @@ export async function GET(request: NextRequest) {
   }
 }
 
-// POST - 创建新用户（只插入 users 表）
+// POST - 创建新用户（仅管理员）
 export async function POST(request: NextRequest) {
   try {
     const currentUser = await getAuthUser();
     if (!currentUser) {
       return NextResponse.json({ success: false, error: '未登录' }, { status: 401 });
+    }
+
+    if (!isUserAdmin(currentUser)) {
+      return NextResponse.json({ success: false, error: '无权限创建用户' }, { status: 403 });
     }
 
     const body = await request.json();
@@ -78,7 +79,12 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ success: false, error: '手机号格式不正确' }, { status: 400 });
     }
 
-    const supabase = getSupabaseAdmin();
+    // 验证密码强度
+    if (password.length < 6) {
+      return NextResponse.json({ success: false, error: '密码至少6位' }, { status: 400 });
+    }
+
+    const supabase = getSupabaseClient();
 
     // 检查手机号是否已存在
     const { data: existingUser } = await supabase
@@ -105,7 +111,7 @@ export async function POST(request: NextRequest) {
       .insert({
         phone,
         password,
-        real_name: real_name || phone,  // 姓名对应 real_name 字段
+        real_name: real_name || phone,
         role: role || 'user',
         department: department || null,
         tenant_id: tenantId,
@@ -117,7 +123,7 @@ export async function POST(request: NextRequest) {
 
     if (error) {
       console.error('创建用户失败:', error);
-      return NextResponse.json({ success: false, error: error.message }, { status: 500 });
+      return NextResponse.json({ success: false, error: '创建用户失败' }, { status: 500 });
     }
 
     return NextResponse.json({ success: true, user: data });
@@ -127,7 +133,7 @@ export async function POST(request: NextRequest) {
   }
 }
 
-// PUT - 更新用户
+// PUT - 更新用户（仅管理员）
 export async function PUT(request: NextRequest) {
   try {
     const currentUser = await getAuthUser();
@@ -135,17 +141,25 @@ export async function PUT(request: NextRequest) {
       return NextResponse.json({ success: false, error: '未登录' }, { status: 401 });
     }
 
-    const body = await request.json();
-    const { id, real_name, role, department, status, password } = body;
+    if (!isUserAdmin(currentUser)) {
+      return NextResponse.json({ success: false, error: '无权限修改用户' }, { status: 403 });
+    }
+
+    // 从 URL 查询参数获取用户 ID
+    const { searchParams } = new URL(request.url);
+    const id = searchParams.get('id');
 
     if (!id) {
       return NextResponse.json({ success: false, error: '用户ID必填' }, { status: 400 });
     }
 
-    const supabase = getSupabaseAdmin();
+    const body = await request.json();
+    const { real_name, role, department, status, password } = body;
+
+    const supabase = getSupabaseClient();
 
     // 构建更新数据
-    const updateData: Record<string, unknown> = {};
+    const updateData: Record<string, unknown> = { updated_at: new Date().toISOString() };
     if (real_name !== undefined) updateData.real_name = real_name;
     if (role !== undefined) updateData.role = role;
     if (department !== undefined) updateData.department = department;
@@ -161,7 +175,7 @@ export async function PUT(request: NextRequest) {
 
     if (error) {
       console.error('更新用户失败:', error);
-      return NextResponse.json({ success: false, error: error.message }, { status: 500 });
+      return NextResponse.json({ success: false, error: '更新用户失败' }, { status: 500 });
     }
 
     return NextResponse.json({ success: true, user: data });
@@ -171,12 +185,16 @@ export async function PUT(request: NextRequest) {
   }
 }
 
-// DELETE - 删除用户
+// DELETE - 删除用户（仅管理员）
 export async function DELETE(request: NextRequest) {
   try {
     const currentUser = await getAuthUser();
     if (!currentUser) {
       return NextResponse.json({ success: false, error: '未登录' }, { status: 401 });
+    }
+
+    if (!isUserAdmin(currentUser)) {
+      return NextResponse.json({ success: false, error: '无权限删除用户' }, { status: 403 });
     }
 
     const { searchParams } = new URL(request.url);
@@ -191,7 +209,7 @@ export async function DELETE(request: NextRequest) {
       return NextResponse.json({ success: false, error: '不能删除自己' }, { status: 400 });
     }
 
-    const supabase = getSupabaseAdmin();
+    const supabase = getSupabaseClient();
 
     const { error } = await supabase
       .from('users')
@@ -200,7 +218,7 @@ export async function DELETE(request: NextRequest) {
 
     if (error) {
       console.error('删除用户失败:', error);
-      return NextResponse.json({ success: false, error: error.message }, { status: 500 });
+      return NextResponse.json({ success: false, error: '删除用户失败' }, { status: 500 });
     }
 
     return NextResponse.json({ success: true });
