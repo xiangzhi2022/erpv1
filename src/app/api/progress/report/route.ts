@@ -1,7 +1,23 @@
 import { NextResponse } from 'next/server';
 import { getSupabaseClient } from '@/db/client';
 import { getUserFromRequest } from '@/lib/auth';
-import { progressReportSchema } from '@/app/progress/schemas';
+import { progressReportSchema, WorkOrderStatus } from '@/app/progress/schemas';
+
+// Status transition map: action -> new status
+// Aligned with WorkOrderStatus enum: pending, scheduling, producing, inspecting, stored, aborted
+const ACTION_STATUS_MAP: Record<string, string> = {
+  start: WorkOrderStatus.PRODUCING,
+  complete_cutting: WorkOrderStatus.PRODUCING,
+  complete_assembly: WorkOrderStatus.PRODUCING,
+  complete_painting: WorkOrderStatus.PRODUCING,
+  quality_check: WorkOrderStatus.INSPECTING,
+  warehouse_in: WorkOrderStatus.STORED,
+  report_progress: '', // keep current status
+  report_defect: '',   // keep current status
+  pause: WorkOrderStatus.PENDING,
+  resume: WorkOrderStatus.PRODUCING,
+  abort: WorkOrderStatus.ABORTED,
+};
 
 // Submit progress report
 export async function POST(request: Request) {
@@ -29,7 +45,7 @@ export async function POST(request: Request) {
       .from('work_orders')
       .select('id, status, completed_quantity, target_quantity')
       .eq('id', work_order_id)
-      .single();
+      .maybeSingle();
 
     if (woError) {
       throw new Error(`查询工单失败: ${woError.message}`);
@@ -49,58 +65,43 @@ export async function POST(request: Request) {
     }
 
     // Determine new status based on action
-    let newStatus = workOrder.status;
-    switch (action) {
-      case 'start':
-        newStatus = 'producing';
-        break;
-      case 'complete_cutting':
-      case 'complete_assembly':
-      case 'complete_painting':
-        newStatus = 'producing';
-        break;
-      case 'quality_check':
-        newStatus = 'inspecting';
-        break;
-      case 'warehouse_in':
-        newStatus = 'stored';
-        break;
-      case 'pause':
-        newStatus = 'pending';
-        break;
-      case 'abort':
-        newStatus = 'aborted';
-        break;
-      case 'report_progress':
-        // Keep current status
-        break;
-      case 'report_defect':
-        // Keep current status but log the defect
-        break;
-      case 'resume':
-        newStatus = 'producing';
-        break;
+    let newStatus: string;
+    const mappedStatus = ACTION_STATUS_MAP[action];
+
+    if (mappedStatus === '') {
+      // Actions that keep current status (report_progress, report_defect)
+      newStatus = workOrder.status;
+    } else {
+      newStatus = mappedStatus;
     }
 
-    // Auto-complete if target reached
-    if (newCompletedQuantity >= workOrder.target_quantity && action !== 'abort') {
-      newStatus = 'inspecting';
+    // Auto-transition: if target reached and not abort/warehouse_in, go to inspecting
+    // warehouse_in should always go to stored regardless of target
+    if (newCompletedQuantity >= workOrder.target_quantity && action !== 'abort' && action !== 'warehouse_in') {
+      // If the mapped status is not a terminal state, auto-advance to inspecting
+      if (newStatus !== WorkOrderStatus.STORED && newStatus !== WorkOrderStatus.ABORTED) {
+        newStatus = WorkOrderStatus.INSPECTING;
+      }
     }
 
-    // Update work order
+    // Build update data
     const updateData: Record<string, unknown> = {
       status: newStatus,
       completed_quantity: newCompletedQuantity,
       updated_at: new Date().toISOString(),
     };
 
-    if (newStatus === 'producing' && workOrder.status !== 'producing') {
+    // Set start_date when first entering producing
+    if (newStatus === WorkOrderStatus.PRODUCING && workOrder.status !== WorkOrderStatus.PRODUCING) {
       updateData.start_date = new Date().toISOString();
     }
-    if (newStatus === 'stored') {
+
+    // Set actual_end_date when entering stored
+    if (newStatus === WorkOrderStatus.STORED) {
       updateData.actual_end_date = new Date().toISOString();
     }
 
+    // Update work order
     const { error: updateError } = await supabase
       .from('work_orders')
       .update(updateData)
@@ -122,7 +123,7 @@ export async function POST(request: Request) {
         remark: remark || null,
       })
       .select()
-      .single();
+      .maybeSingle();
 
     if (logError) {
       throw new Error(`记录进度日志失败: ${logError.message}`);
