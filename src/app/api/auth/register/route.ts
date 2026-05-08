@@ -1,16 +1,21 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseClient } from '@/db/client';
+import { hashPassword } from '@/lib/auth';
 import { randomUUID } from 'crypto';
 
 export async function POST(request: NextRequest) {
   try {
-    const { phone, password, nickname } = await request.json();
+    const { phone, password, nickname } = await request.json() as {
+      phone?: string;
+      password?: string;
+      nickname?: string;
+    };
 
     // 验证手机号或账号
     // 支持手机号格式或简单账号（如1234）
-    const isPhone = /^1[3-9]\d{9}$/.test(phone);
-    const isSimpleAccount = /^\d{4,10}$/.test(phone);
-    
+    const isPhone = /^1[3-9]\d{9}$/.test(phone || '');
+    const isSimpleAccount = /^\d{4,10}$/.test(phone || '');
+
     if (!phone || (!isPhone && !isSimpleAccount)) {
       return NextResponse.json(
         { success: false, error: '请输入正确的手机号或账号' },
@@ -45,20 +50,21 @@ export async function POST(request: NextRequest) {
     // 生成用户ID
     const userId = randomUUID();
 
-    // 创建用户
+    // 创建用户（密码哈希存储）
+    const hashedPassword = hashPassword(password);
     const { error: insertError } = await supabase
       .from('users')
       .insert({
         id: userId,
         phone,
-        password,
+        password: hashedPassword,
         nickname: nickname || `用户${phone.slice(-4)}`,
         role: 'user',
         is_active: true,
       });
 
     if (insertError) {
-      console.error('创建用户失败:', insertError);
+      console.error('创建用户失败:', insertError.message);
       return NextResponse.json(
         { success: false, error: '注册失败，请稍后重试' },
         { status: 500 }
@@ -73,11 +79,11 @@ export async function POST(request: NextRequest) {
         phone,
         nickname: nickname || `用户${phone.slice(-4)}`,
         role: 'user',
-      }
+      },
     });
-
   } catch (error) {
-    console.error('注册失败:', error);
+    const message = error instanceof Error ? error.message : '未知错误';
+    console.error('注册失败:', message);
     return NextResponse.json(
       { success: false, error: '注册失败，请稍后重试' },
       { status: 500 }
