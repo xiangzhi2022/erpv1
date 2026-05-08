@@ -5,25 +5,22 @@ import { getUserFromRequest } from "@/lib/auth";
 export async function GET(request: Request) {
   try {
     const user = await getUserFromRequest(request);
-    
+
     if (!user) {
       return NextResponse.json({ success: false, error: "请先登录" }, { status: 401 });
     }
 
-    // 经销商可以查看工厂负载
-    if (!["dealer_admin", "super_admin"].includes(user.role)) {
+    // 经销商、工厂管理员和超管均可查看工厂列表（工厂门户复用）
+    if (!["dealer_admin", "factory_admin", "super_admin"].includes(user.role)) {
       return NextResponse.json({ success: false, error: "无权限访问" }, { status: 403 });
     }
 
     const supabase = getSupabaseClient();
 
-    // 获取所有工厂及其配置
+    // 获取所有活跃工厂租户 - 仅使用 tenants 表中存在的字段
     const { data: factories, error } = await supabase
       .from("tenants")
-      .select(`
-        id, name, code, address, order_prefix,
-        factory_config:factory_config!inner(current_load, max_load, is_accepting, avg_completion_days)
-      `)
+      .select("id, name, type, contact_person, contact_phone, address, status")
       .eq("type", "factory")
       .eq("status", "active");
 
@@ -32,25 +29,49 @@ export async function GET(request: Request) {
       return NextResponse.json({ success: false, error: "获取失败" }, { status: 500 });
     }
 
-    const factoryList = (factories || []).map((f: any) => ({
-      id: f.id,
-      name: f.name,
-      code: f.code,
-      address: f.address,
-      order_prefix: f.order_prefix,
-      current_load: f.factory_config?.[0]?.current_load || 0,
-      max_load: f.factory_config?.[0]?.max_load || 100,
-      is_accepting: f.factory_config?.[0]?.is_accepting ?? true,
-      avg_completion_days: f.factory_config?.[0]?.avg_completion_days || 15,
-      load_percentage: f.factory_config?.[0] ? 
-        Math.round((f.factory_config[0].current_load / f.factory_config[0].max_load) * 100) : 0,
-    }));
+    // 获取每个工厂的订单数作为负载指标
+    const factoryIds = (factories || []).map((f: Record<string, unknown>) => f.id as string);
 
-    // 按负载从低到高排序（智能推荐）
-    factoryList.sort((a: any, b: any) => a.current_load - b.current_load);
+    interface FactoryLoad {
+      total_orders: number;
+      producing_orders: number;
+    }
 
-    return NextResponse.json({ 
-      success: true, 
+    const factoryLoadMap = new Map<string, FactoryLoad>();
+
+    if (factoryIds.length > 0) {
+      const { data: orderCounts } = await supabase
+        .from("orders")
+        .select("target_factory_id, status")
+        .in("target_factory_id", factoryIds);
+
+      (orderCounts || []).forEach((o: Record<string, unknown>) => {
+        const factoryId = o.target_factory_id as string;
+        const load = factoryLoadMap.get(factoryId) || { total_orders: 0, producing_orders: 0 };
+        load.total_orders++;
+        if (o.status === "producing") load.producing_orders++;
+        factoryLoadMap.set(factoryId, load);
+      });
+    }
+
+    const factoryList = (factories || []).map((f: Record<string, unknown>) => {
+      const load = factoryLoadMap.get(f.id as string) || { total_orders: 0, producing_orders: 0 };
+      return {
+        id: f.id,
+        name: f.name,
+        contact_person: f.contact_person,
+        contact_phone: f.contact_phone,
+        address: f.address,
+        total_orders: load.total_orders,
+        producing_orders: load.producing_orders,
+      };
+    });
+
+    // 按生产中订单数从低到高排序（智能推荐）
+    factoryList.sort((a, b) => a.producing_orders - b.producing_orders);
+
+    return NextResponse.json({
+      success: true,
       factories: factoryList,
     });
   } catch (error) {

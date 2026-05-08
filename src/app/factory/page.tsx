@@ -1,35 +1,49 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { Sidebar } from "@/components/sidebar";
 import {
   Package,
   Users,
   Clock,
   CheckCircle,
-  AlertCircle,
   ClipboardList,
   Settings,
   BarChart3,
 } from "lucide-react";
 import Link from "next/link";
 
-interface Order {
+// 对齐 /api/factory/orders 返回的订单数据结构
+interface FactoryOrder {
   id: string;
   order_no: string;
   customer_name: string;
-  total_amount: number;
+  customer_phone: string;
   status: string;
+  total_amount: number;
   delivery_date: string;
+  remark: string;
   created_at: string;
+  updated_at: string;
+  total_tasks: number;
+  completed_tasks: number;
+  progress: number;
+  dealer?: { id: string; name: string };
+  items?: { id: string; product_name: string; quantity: number; unit_price: number }[];
 }
 
-interface Task {
-  id: string;
-  task_no: string;
-  station: string;
-  progress: string;
-  order_no: string;
+// 对齐 /api/factory/orders 返回的统计结构
+interface OrderStats {
+  pending: number;
+  confirmed: number;
+  producing: number;
+  shipped: number;
+  completed: number;
+}
+
+interface TaskStats {
+  total: number;
+  completed: number;
 }
 
 const statusConfig: Record<string, { label: string; color: string }> = {
@@ -37,70 +51,78 @@ const statusConfig: Record<string, { label: string; color: string }> = {
   confirmed: { label: "已接收", color: "text-blue-600 bg-blue-50" },
   producing: { label: "生产中", color: "text-emerald-600 bg-emerald-50" },
   shipped: { label: "已发货", color: "text-purple-600 bg-purple-50" },
-};
-
-const taskProgressConfig: Record<string, { label: string; color: string }> = {
-  pending: { label: "未开始", color: "text-slate-600 bg-slate-100" },
-  processing: { label: "进行中", color: "text-blue-600 bg-blue-50" },
-  completed: { label: "已完成", color: "text-emerald-600 bg-emerald-50" },
+  completed: { label: "已完成", color: "text-green-600 bg-green-50" },
 };
 
 export default function FactoryDashboard() {
-  const [orders, setOrders] = useState<Order[]>([]);
-  const [tasks, setTasks] = useState<Task[]>([]);
+  const [orders, setOrders] = useState<FactoryOrder[]>([]);
   const [loading, setLoading] = useState(true);
-  const [stats, setStats] = useState({
+  const [orderStats, setOrderStats] = useState<OrderStats>({
     pending: 0,
+    confirmed: 0,
     producing: 0,
-    totalTasks: 0,
-    completedTasks: 0,
+    shipped: 0,
+    completed: 0,
+  });
+  const [taskStats, setTaskStats] = useState<TaskStats>({
+    total: 0,
+    completed: 0,
   });
 
-  useEffect(() => {
-    fetchData();
-  }, []);
-
-  const fetchData = async () => {
+  const fetchData = useCallback(async () => {
     try {
-      const [ordersRes, tasksRes] = await Promise.all([
-        fetch("/api/factory/orders"),
-        fetch("/api/factory/tasks"),
-      ]);
-
-      if (ordersRes.ok) {
-        const data = await ordersRes.json();
-        setOrders(data.orders || []);
-        
-        const statsData = {
-          pending: data.orders?.filter((o: Order) => o.status === "pending").length || 0,
-          producing: data.orders?.filter((o: Order) => o.status === "producing").length || 0,
-          totalTasks: data.tasks?.length || 0,
-          completedTasks: data.tasks?.filter((t: Task) => t.progress === "completed").length || 0,
-        };
-        setStats(statsData);
-      }
-
-      if (tasksRes.ok) {
-        const data = await tasksRes.json();
-        setTasks(data.tasks || []);
+      const res = await fetch("/api/factory/orders");
+      if (res.ok) {
+        const data = await res.json();
+        if (data.success) {
+          setOrders(data.orders || []);
+          setOrderStats(data.stats || { pending: 0, confirmed: 0, producing: 0, shipped: 0, completed: 0 });
+          setTaskStats(data.taskStats || { total: 0, completed: 0 });
+        }
       }
     } catch (error) {
       console.error("获取数据失败:", error);
     } finally {
       setLoading(false);
     }
+  }, []);
+
+  useEffect(() => {
+    fetchData();
+  }, [fetchData]);
+
+  const handleAcceptOrder = async (orderId: string) => {
+    try {
+      const res = await fetch("/api/factory/orders", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ order_id: orderId }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.success) {
+          // 刷新数据
+          await fetchData();
+        }
+      }
+    } catch (error) {
+      console.error("接单失败:", error);
+    }
   };
 
   const formatPrice = (price: number) => (price / 100).toFixed(2);
-  const formatDate = (date: string) => new Date(date).toLocaleDateString("zh-CN");
-  const progressPercent = stats.totalTasks > 0 
-    ? Math.round((stats.completedTasks / stats.totalTasks) * 100) 
+  const formatDate = (dateStr: string) => {
+    if (!dateStr) return "-";
+    return new Date(dateStr).toLocaleDateString("zh-CN");
+  };
+  const progressPercent = taskStats.total > 0
+    ? Math.round((taskStats.completed / taskStats.total) * 100)
     : 0;
 
   return (
     <div className="flex min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900">
       <Sidebar />
-      
+
       <main className="flex-1 p-8 ml-64">
         <div className="mb-8">
           <h1 className="text-3xl font-bold text-white">工厂管理后台</h1>
@@ -113,38 +135,38 @@ export default function FactoryDashboard() {
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-slate-400 text-sm">待接收订单</p>
-                <p className="text-3xl font-bold text-amber-400 mt-2">{stats.pending}</p>
+                <p className="text-3xl font-bold text-amber-400 mt-2">{orderStats.pending}</p>
               </div>
               <div className="w-12 h-12 bg-amber-500/20 rounded-xl flex items-center justify-center">
                 <Clock className="w-6 h-6 text-amber-400" />
               </div>
             </div>
           </div>
-          
+
           <div className="bg-slate-800/50 backdrop-blur border border-slate-700 rounded-xl p-6">
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-slate-400 text-sm">生产中订单</p>
-                <p className="text-3xl font-bold text-emerald-400 mt-2">{stats.producing}</p>
+                <p className="text-3xl font-bold text-emerald-400 mt-2">{orderStats.producing}</p>
               </div>
               <div className="w-12 h-12 bg-emerald-500/20 rounded-xl flex items-center justify-center">
                 <Package className="w-6 h-6 text-emerald-400" />
               </div>
             </div>
           </div>
-          
+
           <div className="bg-slate-800/50 backdrop-blur border border-slate-700 rounded-xl p-6">
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-slate-400 text-sm">全部工序</p>
-                <p className="text-3xl font-bold text-blue-400 mt-2">{stats.totalTasks}</p>
+                <p className="text-3xl font-bold text-blue-400 mt-2">{taskStats.total}</p>
               </div>
               <div className="w-12 h-12 bg-blue-500/20 rounded-xl flex items-center justify-center">
                 <ClipboardList className="w-6 h-6 text-blue-400" />
               </div>
             </div>
           </div>
-          
+
           <div className="bg-slate-800/50 backdrop-blur border border-slate-700 rounded-xl p-6">
             <div className="flex items-center justify-between">
               <div>
@@ -161,41 +183,41 @@ export default function FactoryDashboard() {
         {/* 快捷操作 */}
         <div className="grid grid-cols-3 gap-6 mb-8">
           <Link
-            href="/factory/orders"
+            href="/factory/workshops"
             className="bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 text-white rounded-xl p-5 flex items-center gap-4 transition-all"
           >
             <div className="w-12 h-12 bg-white/20 rounded-xl flex items-center justify-center">
               <Package className="w-6 h-6" />
             </div>
             <div>
-              <h3 className="font-bold">订单管理</h3>
-              <p className="text-blue-100 text-sm">查看和处理订单</p>
+              <h3 className="font-bold">车间管理</h3>
+              <p className="text-blue-100 text-sm">管理生产车间</p>
             </div>
           </Link>
-          
+
           <Link
-            href="/factory/tasks"
+            href="/progress"
             className="bg-gradient-to-r from-emerald-600 to-emerald-700 hover:from-emerald-700 hover:to-emerald-800 text-white rounded-xl p-5 flex items-center gap-4 transition-all"
           >
             <div className="w-12 h-12 bg-white/20 rounded-xl flex items-center justify-center">
               <ClipboardList className="w-6 h-6" />
             </div>
             <div>
-              <h3 className="font-bold">工序调度</h3>
-              <p className="text-emerald-100 text-sm">分配生产任务</p>
+              <h3 className="font-bold">生产进度</h3>
+              <p className="text-emerald-100 text-sm">查看工单进度</p>
             </div>
           </Link>
-          
+
           <Link
-            href="/factory/workers"
+            href="/shipping"
             className="bg-gradient-to-r from-purple-600 to-purple-700 hover:from-purple-700 hover:to-purple-800 text-white rounded-xl p-5 flex items-center gap-4 transition-all"
           >
             <div className="w-12 h-12 bg-white/20 rounded-xl flex items-center justify-center">
               <Users className="w-6 h-6" />
             </div>
             <div>
-              <h3 className="font-bold">工人管理</h3>
-              <p className="text-purple-100 text-sm">管理车间工人</p>
+              <h3 className="font-bold">发货管理</h3>
+              <p className="text-purple-100 text-sm">管理发货信息</p>
             </div>
           </Link>
         </div>
@@ -227,7 +249,10 @@ export default function FactoryDashboard() {
                     </div>
                     <div className="mt-2 flex justify-between items-center">
                       <span className="text-xs text-slate-500">交货: {formatDate(order.delivery_date)}</span>
-                      <button className="text-xs bg-emerald-500/20 text-emerald-400 px-3 py-1 rounded hover:bg-emerald-500/30">
+                      <button
+                        onClick={() => handleAcceptOrder(order.id)}
+                        className="text-xs bg-emerald-500/20 text-emerald-400 px-3 py-1 rounded hover:bg-emerald-500/30"
+                      >
                         接单
                       </button>
                     </div>
@@ -237,31 +262,43 @@ export default function FactoryDashboard() {
             )}
           </div>
 
-          {/* 工序进度 */}
+          {/* 生产任务进度 */}
           <div className="bg-slate-800/50 backdrop-blur border border-slate-700 rounded-xl p-6">
             <h2 className="text-lg font-bold text-white mb-4 flex items-center gap-2">
               <ClipboardList className="w-5 h-5 text-emerald-400" />
-              工序进度
+              生产中订单进度
             </h2>
             {loading ? (
               <div className="text-center py-6 text-slate-400">加载中...</div>
-            ) : tasks.length === 0 ? (
-              <div className="text-center py-6 text-slate-400">暂无进行中的工序</div>
+            ) : orders.filter(o => o.status === "producing").length === 0 ? (
+              <div className="text-center py-6 text-slate-400">暂无生产中的订单</div>
             ) : (
               <div className="space-y-3">
-                {tasks.filter(t => t.progress !== "completed").slice(0, 4).map((task) => (
+                {orders.filter(o => o.status === "producing").slice(0, 4).map((order) => (
                   <div
-                    key={task.id}
+                    key={order.id}
                     className="bg-slate-700/30 rounded-lg p-3 border border-slate-600/50"
                   >
                     <div className="flex justify-between items-start">
                       <div>
-                        <p className="font-semibold text-white">{task.station}</p>
-                        <p className="text-sm text-slate-400 mt-1">{task.order_no}</p>
+                        <p className="font-semibold text-white">{order.order_no}</p>
+                        <p className="text-sm text-slate-400 mt-1">{order.customer_name}</p>
                       </div>
-                      <span className={`px-2 py-1 rounded text-xs ${taskProgressConfig[task.progress]?.color}`}>
-                        {taskProgressConfig[task.progress]?.label}
+                      <span className={`px-2 py-1 rounded text-xs ${statusConfig[order.status]?.color || "text-slate-400 bg-slate-100"}`}>
+                        {statusConfig[order.status]?.label || order.status}
                       </span>
+                    </div>
+                    <div className="mt-2">
+                      <div className="flex justify-between text-xs text-slate-400 mb-1">
+                        <span>工序: {order.completed_tasks}/{order.total_tasks}</span>
+                        <span>{order.progress}%</span>
+                      </div>
+                      <div className="w-full bg-slate-600 rounded-full h-1.5">
+                        <div
+                          className="bg-emerald-500 h-1.5 rounded-full transition-all"
+                          style={{ width: `${order.progress}%` }}
+                        />
+                      </div>
                     </div>
                   </div>
                 ))}
