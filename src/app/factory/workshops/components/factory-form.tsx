@@ -21,7 +21,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
-import { workshopFormSchema, WorkshopFormValues } from '../schemas';
+import { workshopFormSchema, type WorkshopFormValues, type WorkshopStatusType } from '../schemas';
 import { Loader2 } from 'lucide-react';
 
 interface FactoryFormProps {
@@ -33,7 +33,7 @@ interface FactoryFormProps {
     manager: string | null;
     capacity: number;
     current_load: number;
-    status: 'normal' | 'maintenance' | 'stopped';
+    status: WorkshopStatusType;
     description: string | null;
   } | null;
   onSuccess: () => void;
@@ -44,7 +44,7 @@ export function FactoryForm({ workshop, onSuccess, onCancel }: FactoryFormProps)
   const isEditing = !!workshop;
 
   const form = useForm<WorkshopFormValues>({
-    resolver: zodResolver(workshopFormSchema) as any,
+    resolver: zodResolver(workshopFormSchema),
     defaultValues: {
       factory_code: workshop?.factory_code ?? '',
       name: workshop?.name ?? '',
@@ -74,7 +74,7 @@ export function FactoryForm({ workshop, onSuccess, onCancel }: FactoryFormProps)
   const onSubmit = async (values: WorkshopFormValues) => {
     try {
       const url = isEditing
-        ? `/api/factory/workshops/${workshop.id}`
+        ? `/api/factory/workshops/${workshop!.id}`
         : '/api/factory/workshops';
       const method = isEditing ? 'PUT' : 'POST';
 
@@ -90,6 +90,10 @@ export function FactoryForm({ workshop, onSuccess, onCancel }: FactoryFormProps)
           form.setError('factory_code', { message: '该编号已存在' });
           return;
         }
+        if (error.error?.includes('负荷不能超过产能')) {
+          form.setError('current_load', { message: '当前负荷不能超过产能' });
+          return;
+        }
         throw new Error(error.error || '操作失败');
       }
 
@@ -101,10 +105,10 @@ export function FactoryForm({ workshop, onSuccess, onCancel }: FactoryFormProps)
 
   return (
     <Form {...form}>
-      <form onSubmit={form.handleSubmit(onSubmit as any)} className="space-y-4">
+      <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
         <div className="grid grid-cols-2 gap-4">
           <FormField
-            control={form.control as any}
+            control={form.control}
             name="factory_code"
             render={({ field }) => (
               <FormItem>
@@ -123,7 +127,7 @@ export function FactoryForm({ workshop, onSuccess, onCancel }: FactoryFormProps)
           />
 
           <FormField
-            control={form.control as any}
+            control={form.control}
             name="name"
             render={({ field }) => (
               <FormItem>
@@ -139,7 +143,7 @@ export function FactoryForm({ workshop, onSuccess, onCancel }: FactoryFormProps)
 
         <div className="grid grid-cols-2 gap-4">
           <FormField
-            control={form.control as any}
+            control={form.control}
             name="location"
             render={({ field }) => (
               <FormItem>
@@ -153,7 +157,7 @@ export function FactoryForm({ workshop, onSuccess, onCancel }: FactoryFormProps)
           />
 
           <FormField
-            control={form.control as any}
+            control={form.control}
             name="manager"
             render={({ field }) => (
               <FormItem>
@@ -169,7 +173,7 @@ export function FactoryForm({ workshop, onSuccess, onCancel }: FactoryFormProps)
 
         <div className="grid grid-cols-3 gap-4">
           <FormField
-            control={form.control as any}
+            control={form.control}
             name="capacity"
             render={({ field }) => (
               <FormItem>
@@ -189,7 +193,7 @@ export function FactoryForm({ workshop, onSuccess, onCancel }: FactoryFormProps)
           />
 
           <FormField
-            control={form.control as any}
+            control={form.control}
             name="current_load"
             render={({ field }) => (
               <FormItem>
@@ -209,7 +213,7 @@ export function FactoryForm({ workshop, onSuccess, onCancel }: FactoryFormProps)
           />
 
           <FormField
-            control={form.control as any}
+            control={form.control}
             name="status"
             render={({ field }) => (
               <FormItem>
@@ -248,7 +252,7 @@ export function FactoryForm({ workshop, onSuccess, onCancel }: FactoryFormProps)
         </div>
 
         <FormField
-          control={form.control as any}
+          control={form.control}
           name="description"
           render={({ field }) => (
             <FormItem>

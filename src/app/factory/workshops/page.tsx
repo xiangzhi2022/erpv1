@@ -3,11 +3,18 @@
 import { useState, useEffect, useCallback, useOptimistic, useTransition } from 'react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardContent } from '@/components/ui/card';
 import { Progress } from '@/components/ui/progress';
 import { FactoryList } from './components/factory-list';
 import { FactoryToolbar } from './components/factory-toolbar';
 import { CreateFactoryButton } from './components/create-button';
+import {
+  WorkshopData,
+  WorkshopStats,
+  WorkshopsResponse,
+  WorkshopStatusType,
+  statusConfig,
+} from './schemas';
 import {
   Building2,
   CheckCircle2,
@@ -18,46 +25,16 @@ import {
   Loader2,
 } from 'lucide-react';
 
-export interface WorkshopData {
-  id: string;
-  factory_code: string;
-  name: string;
-  location: string | null;
-  manager: string | null;
-  capacity: number;
-  current_load: number;
-  status: 'normal' | 'maintenance' | 'stopped';
-  description: string | null;
-  created_at: string;
-  updated_at: string;
-  load_percentage: number;
-}
-
-export interface WorkshopStats {
-  total: number;
-  normal: number;
-  maintenance: number;
-  stopped: number;
-  totalCapacity: number;
-  totalLoad: number;
-}
-
-export interface WorkshopsResponse {
-  success: boolean;
-  workshops: WorkshopData[];
-  stats: WorkshopStats;
-}
-
 export type ViewMode = 'card' | 'table';
 
-const STATUS_CONFIG = {
+const STATUS_DISPLAY = {
   normal: { label: '正常运行', color: 'bg-emerald-500', textColor: 'text-emerald-700', bgColor: 'bg-emerald-50', borderColor: 'border-emerald-200' },
   maintenance: { label: '检修中', color: 'bg-amber-500', textColor: 'text-amber-700', bgColor: 'bg-amber-50', borderColor: 'border-amber-200' },
   stopped: { label: '已停工', color: 'bg-red-500', textColor: 'text-red-700', bgColor: 'bg-red-50', borderColor: 'border-red-200' },
 } as const;
 
-export function getWorkshopStatusConfig(status: keyof typeof STATUS_CONFIG) {
-  return STATUS_CONFIG[status] ?? STATUS_CONFIG.normal;
+export function getWorkshopStatusConfig(status: WorkshopStatusType) {
+  return STATUS_DISPLAY[status] ?? STATUS_DISPLAY.normal;
 }
 
 export default function WorkshopManagementPage() {
@@ -71,7 +48,7 @@ export default function WorkshopManagementPage() {
   const [optimisticWorkshops, updateOptimisticWorkshops] = useOptimistic(
     workshops,
     (state, { id, status }: { id: string; status: string }) =>
-      state.map((w) => (w.id === id ? { ...w, status: status as WorkshopData['status'] } : w))
+      state.map((w) => (w.id === id ? { ...w, status: status as WorkshopStatusType } : w))
   );
 
   const fetchWorkshops = useCallback(async () => {
@@ -119,7 +96,11 @@ export default function WorkshopManagementPage() {
   const handleDelete = async (id: string) => {
     try {
       const res = await fetch(`/api/factory/workshops/${id}`, { method: 'DELETE' });
-      if (!res.ok) throw new Error('Failed to delete');
+      if (!res.ok) {
+        const data = await res.json();
+        console.error('删除失败:', data.error || '未知错误');
+        return;
+      }
       await fetchWorkshops();
     } catch {
       console.error('Failed to delete workshop');
