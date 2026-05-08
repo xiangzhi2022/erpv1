@@ -1,201 +1,245 @@
 'use client';
 
-import { useState, useEffect } from 'react';
-import { useRouter } from 'next/navigation';
-import { Sidebar } from '@/components/sidebar';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { useState, useCallback, useOptimistic, useEffect } from 'react';
+import { ProgressBoard } from './components/progress-board';
+import { ProgressToolbar, type ProgressFilter } from './components/progress-toolbar';
+import { ProgressUpdateSheet } from './components/progress-update';
+import { ProgressDetailSheet } from './components/progress-detail';
+import { StatsWidgets } from './components/stats-widgets';
+import { Spinner } from '@/components/ui/spinner';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
-import { Progress } from '@/components/ui/progress';
-import { Skeleton } from '@/components/ui/skeleton';
-import { Package, Search, RotateCcw } from 'lucide-react';
+import { Plus, RefreshCw } from 'lucide-react';
+import type { WorkOrder, ProgressStats } from './schemas';
 
-interface Order {
-  id: string;
-  order_no: string;
-  customer_name: string;
-  status: string;
-  total_amount: number;
-  created_at: string;
-  delivery_date?: string;
-}
-
-const statusColors: Record<string, string> = {
-  '已完成': 'bg-green-500',
-  '生产中': 'bg-blue-500',
-  '刚启动': 'bg-orange-500',
-  '待排产': 'bg-gray-500',
-  pending: 'bg-orange-500',
-  confirmed: 'bg-blue-500',
-  producing: 'bg-yellow-500',
-  shipped: 'bg-green-500',
-  completed: 'bg-emerald-500',
-};
-
-const statusLabels: Record<string, string> = {
-  pending: '待排产',
-  confirmed: '刚启动',
-  producing: '生产中',
-  shipped: '已发货',
-  completed: '已完成',
-  returned: '已退回',
-  cancelled: '已取消',
+const defaultStats: ProgressStats = {
+  total: 0,
+  pending: 0,
+  producing: 0,
+  inspecting: 0,
+  stored: 0,
+  aborted: 0,
+  overdue: 0,
 };
 
 export default function ProgressPage() {
-  const router = useRouter();
-  const [orders, setOrders] = useState<Order[]>([]);
+  const [workOrders, setWorkOrders] = useState<WorkOrder[]>([]);
+  const [stats, setStats] = useState<ProgressStats>(defaultStats);
+  const [workshops, setWorkshops] = useState<Array<{ id: string; name: string; code: string }>>([]);
   const [loading, setLoading] = useState(true);
-  const [searchOrderNo, setSearchOrderNo] = useState('');
-  const [searchName, setSearchName] = useState('');
+  const [refreshing, setRefreshing] = useState(false);
+  const [filter, setFilter] = useState<ProgressFilter>({
+    keyword: '',
+    status: 'all',
+    workshop_id: 'all',
+    priority: 'all',
+  });
 
-  useEffect(() => {
-    fetchOrders();
-  }, []);
+  // Stats active filter
+  const [statsFilter, setStatsFilter] = useState<string>('all');
 
-  const fetchOrders = async () => {
-    try {
-      const res = await fetch('/api/orders');
-      if (res.ok) {
-        const data = await res.json();
-        setOrders(data.data || []);
+  // Sheet states
+  const [updateSheetOpen, setUpdateSheetOpen] = useState(false);
+  const [detailSheetOpen, setDetailSheetOpen] = useState(false);
+  const [selectedWorkOrder, setSelectedWorkOrder] = useState<WorkOrder | null>(null);
+
+  // Optimistic update
+  const [optimisticOrders, addOptimisticUpdate] = useOptimistic<
+    WorkOrder[],
+    { workOrderId: string; completedDelta: number }
+  >(workOrders, (state, update) => {
+    return state.map((wo) => {
+      if (wo.id === update.workOrderId) {
+        return {
+          ...wo,
+          completed_quantity: wo.completed_quantity + update.completedDelta,
+        };
       }
-    } catch (error) {
-      console.error('获取订单失败:', error);
+      return wo;
+    });
+  });
+
+  // Fetch work orders
+  const fetchWorkOrders = useCallback(async (showRefreshLoader = false) => {
+    if (showRefreshLoader) {
+      setRefreshing(true);
+    } else {
+      setLoading(true);
+    }
+    try {
+      const params = new URLSearchParams();
+      if (filter.keyword) params.set('keyword', filter.keyword);
+      if (filter.status && filter.status !== 'all') params.set('status', filter.status);
+      if (filter.workshop_id && filter.workshop_id !== 'all') params.set('workshop_id', filter.workshop_id);
+      if (filter.priority && filter.priority !== 'all') params.set('priority', filter.priority);
+
+      const res = await fetch(`/api/progress/work-orders?${params.toString()}`);
+      const result = await res.json();
+      if (result.success) {
+        setWorkOrders(result.data || []);
+        setStats(result.stats || defaultStats);
+      }
+    } catch (err) {
+      console.error('获取工单失败:', err);
     } finally {
       setLoading(false);
+      setRefreshing(false);
     }
-  };
+  }, [filter]);
 
-  // 只显示有进度的订单（非待接收、非已退回）
-  const progressOrders = orders
-    .filter(o => !['pending', 'returned', 'cancelled'].includes(o.status))
-    .filter(o => {
-      if (searchOrderNo.trim() && !o.order_no?.includes(searchOrderNo.trim())) return false;
-      if (searchName.trim() && !o.customer_name?.includes(searchName.trim())) return false;
-      return true;
-    });
-
-  // 模拟进度计算（基于状态）
-  const getProgress = (status: string): number => {
-    switch (status) {
-      case 'confirmed': return 15;
-      case 'producing': return 55;
-      case 'shipped': return 85;
-      case 'completed': return 100;
-      default: return 5;
+  // Fetch workshops
+  const fetchWorkshops = useCallback(async () => {
+    try {
+      const res = await fetch('/api/progress/workshops');
+      const result = await res.json();
+      if (result.success) {
+        setWorkshops(result.data || []);
+      }
+    } catch (err) {
+      console.error('获取车间列表失败:', err);
     }
-  };
+  }, []);
 
-  const handleReset = () => {
-    setSearchOrderNo('');
-    setSearchName('');
-  };
+  useEffect(() => {
+    fetchWorkOrders();
+  }, [fetchWorkOrders]);
+
+  useEffect(() => {
+    fetchWorkshops();
+  }, [fetchWorkshops]);
+
+  // Handle progress report submission
+  const handleProgressSubmit = useCallback(
+    async (data: {
+      work_order_id: string;
+      action: string;
+      completed_delta: number;
+      remark: string;
+    }) => {
+      // Optimistic update
+      addOptimisticUpdate({
+        workOrderId: data.work_order_id,
+        completedDelta: data.completed_delta,
+      });
+
+      try {
+        const res = await fetch('/api/progress/report', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(data),
+        });
+        const result = await res.json();
+
+        if (!result.success) {
+          throw new Error(result.error || '上报失败');
+        }
+
+        // Refresh data to get server-side state
+        await fetchWorkOrders(true);
+      } catch (err) {
+        console.error('进度上报失败:', err);
+        // Rollback by refreshing
+        await fetchWorkOrders(true);
+        throw err;
+      }
+    },
+    [addOptimisticUpdate, fetchWorkOrders]
+  );
+
+  // Handle update button click
+  const handleUpdate = useCallback((wo: WorkOrder) => {
+    setSelectedWorkOrder(wo);
+    setUpdateSheetOpen(true);
+  }, []);
+
+  // Handle view detail
+  const handleViewDetail = useCallback((wo: WorkOrder) => {
+    setSelectedWorkOrder(wo);
+    setDetailSheetOpen(true);
+  }, []);
+
+  // Handle stats filter click
+  const handleStatsFilter = useCallback((status: string) => {
+    setStatsFilter(status);
+    if (status === 'all') {
+      setFilter((prev) => ({ ...prev, status: 'all' }));
+    } else if (status === 'overdue') {
+      // Overdue is not a status, show all producing/inspecting with overdue
+      setFilter((prev) => ({ ...prev, status: 'all' }));
+    } else {
+      setFilter((prev) => ({ ...prev, status }));
+    }
+  }, []);
 
   return (
-    <div className="flex min-h-screen bg-background">
-      <Sidebar />
-      
-      <main className="flex-1 p-8">
-        <div className="max-w-7xl mx-auto space-y-6">
-          <div className="flex items-center justify-between">
-            <div>
-              <h1 className="text-3xl font-bold tracking-tight">进度管理</h1>
-              <p className="text-muted-foreground mt-1">跟踪和管理生产进度</p>
-            </div>
-            <Button variant="outline" onClick={fetchOrders}>刷新数据</Button>
-          </div>
-
-          {/* Search */}
-          <Card>
-            <CardContent className="pt-6">
-              <div className="grid gap-4 md:grid-cols-4">
-                <div className="space-y-2">
-                  <Label>订单编号</Label>
-                  <Input
-                    placeholder="请输入订单编号"
-                    value={searchOrderNo}
-                    onChange={(e) => setSearchOrderNo(e.target.value)}
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label>客户名称</Label>
-                  <Input
-                    placeholder="请输入客户名称"
-                    value={searchName}
-                    onChange={(e) => setSearchName(e.target.value)}
-                  />
-                </div>
-                <div className="flex items-end gap-2">
-                  <Button variant="outline" onClick={handleReset}>
-                    <RotateCcw className="h-4 w-4 mr-1" /> 重置
-                  </Button>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-
-          {/* Progress List */}
-          <Card>
-            <CardHeader>
-              <div className="flex items-center justify-between">
-                <CardTitle>生产进度列表</CardTitle>
-                <span className="text-sm text-muted-foreground">共 {progressOrders.length} 条</span>
-              </div>
-            </CardHeader>
-            <CardContent>
-              {loading ? (
-                <div className="space-y-4">
-                  {Array.from({ length: 4 }).map((_, i) => (
-                    <Skeleton key={i} className="h-24 w-full rounded-lg" />
-                  ))}
-                </div>
-              ) : progressOrders.length === 0 ? (
-                <div className="text-center py-12 text-muted-foreground">
-                  <Package className="h-12 w-12 mx-auto mb-4 opacity-50" />
-                  <p>暂无进度数据</p>
-                  <Button variant="outline" className="mt-4" onClick={() => router.push('/orders')}>
-                    去查看订单
-                  </Button>
-                </div>
-              ) : (
-                <div className="space-y-6">
-                  {progressOrders.map((order) => {
-                    const progress = getProgress(order.status);
-                    const statusLabel = statusLabels[order.status] || order.status;
-                    return (
-                      <div
-                        key={order.id}
-                        className="border rounded-lg p-4 hover:shadow-sm transition-shadow cursor-pointer"
-                        onClick={() => router.push(`/orders?status=${order.status}`)}
-                      >
-                        <div className="flex items-center justify-between mb-4">
-                          <div className="flex items-center gap-4">
-                            <span className="font-mono text-sm bg-muted px-2 py-1 rounded">{order.order_no}</span>
-                            <span className="font-medium">{order.customer_name || '-'}</span>
-                          </div>
-                          <div className="flex items-center gap-4">
-                            <span className={`px-3 py-1 rounded-full text-xs font-medium text-white ${statusColors[order.status] || 'bg-gray-500'}`}>
-                              {statusLabel}
-                            </span>
-                            <span className="text-sm text-muted-foreground">{progress}%</span>
-                          </div>
-                        </div>
-                        <Progress value={progress} className="h-2" />
-                        <div className="flex justify-between mt-2 text-xs text-muted-foreground">
-                          <span>创建时间：{order.created_at ? new Date(order.created_at).toLocaleDateString('zh-CN') : '-'}</span>
-                          <span>交付日期：{order.delivery_date || '待定'}</span>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-            </CardContent>
-          </Card>
+    <div className="p-6 space-y-5 h-[calc(100vh-4rem)] flex flex-col">
+      {/* Header */}
+      <div className="flex justify-between items-center shrink-0">
+        <div>
+          <h1 className="text-2xl font-bold tracking-tight">生产进度</h1>
+          <p className="text-muted-foreground text-sm">追踪车间排产执行情况与交付进度</p>
         </div>
-      </main>
+        <div className="flex items-center gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-8 text-xs"
+            onClick={() => fetchWorkOrders(true)}
+            disabled={refreshing}
+          >
+            <RefreshCw className={`h-3.5 w-3.5 mr-1 ${refreshing ? 'animate-spin' : ''}`} />
+            刷新
+          </Button>
+          <Button size="sm" className="h-8 text-xs">
+            <Plus className="h-3.5 w-3.5 mr-1" />
+            创建工单
+          </Button>
+        </div>
+      </div>
+
+      {/* Stats */}
+      <StatsWidgets
+        stats={stats}
+        activeFilter={statsFilter}
+        onFilterClick={handleStatsFilter}
+      />
+
+      {/* Toolbar */}
+      <ProgressToolbar
+        workshops={workshops}
+        filter={filter}
+        onFilterChange={setFilter}
+      />
+
+      {/* Board */}
+      <div className="flex-1 overflow-auto">
+        {loading ? (
+          <div className="flex flex-col items-center justify-center h-40 text-muted-foreground">
+            <Spinner className="h-6 w-6 mb-2" />
+            <p className="text-sm">加载工单数据...</p>
+          </div>
+        ) : (
+          <ProgressBoard
+            data={optimisticOrders}
+            onUpdate={handleUpdate}
+            onViewDetail={handleViewDetail}
+          />
+        )}
+      </div>
+
+      {/* Sheets */}
+      <ProgressUpdateSheet
+        open={updateSheetOpen}
+        onOpenChange={setUpdateSheetOpen}
+        workOrder={selectedWorkOrder}
+        onSubmit={handleProgressSubmit}
+      />
+
+      <ProgressDetailSheet
+        open={detailSheetOpen}
+        onOpenChange={setDetailSheetOpen}
+        workOrder={selectedWorkOrder}
+        onUpdate={handleUpdate}
+      />
     </div>
   );
 }

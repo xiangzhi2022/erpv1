@@ -1,71 +1,71 @@
-import { Card, CardContent, CardHeader } from "@/components/ui/card";
-import { Sidebar } from "@/components/sidebar";
+import { Skeleton } from '@/components/ui/skeleton';
+import { Card, CardContent } from '@/components/ui/card';
 
-export default function WorkshopsLoading() {
+export default function Loading() {
   return (
-    <div className="flex min-h-screen bg-background">
-      <Sidebar />
-      <main className="flex-1 ml-64">
-        <div className="p-6 space-y-6">
-          {/* 标题骨架 */}
-          <div className="flex items-center justify-between">
-            <div className="space-y-2">
-              <div className="h-8 w-40 bg-muted animate-pulse rounded" />
-              <div className="h-4 w-64 bg-muted animate-pulse rounded" />
-            </div>
-            <div className="h-10 w-28 bg-muted animate-pulse rounded-md" />
-          </div>
-
-          {/* 统计卡片骨架 */}
-          <div className="grid grid-cols-4 gap-4">
-            {[1, 2, 3, 4].map((i) => (
-              <Card key={i} className="animate-pulse">
-                <CardContent className="p-4 flex items-center gap-4">
-                  <div className="w-10 h-10 bg-muted rounded-lg" />
-                  <div className="space-y-2">
-                    <div className="h-3 bg-muted rounded w-16" />
-                    <div className="h-6 bg-muted rounded w-8" />
-                  </div>
-                </CardContent>
-              </Card>
-            ))}
-          </div>
-
-          {/* 过滤栏骨架 */}
-          <div className="flex items-center gap-3">
-            <div className="h-9 w-72 bg-muted animate-pulse rounded-md" />
-            <div className="h-9 w-20 bg-muted animate-pulse rounded-md" />
-          </div>
-
-          {/* 卡片骨架 */}
-          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-            {[1, 2, 3, 4, 5, 6].map((i) => (
-              <Card key={i} className="animate-pulse">
-                <CardHeader className="pb-3">
-                  <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 bg-muted rounded-lg" />
-                    <div className="space-y-2">
-                      <div className="h-4 bg-muted rounded w-24" />
-                      <div className="h-3 bg-muted rounded w-16" />
-                    </div>
-                  </div>
-                </CardHeader>
-                <CardContent className="space-y-4">
-                  <div className="grid grid-cols-2 gap-3">
-                    <div className="h-3 bg-muted rounded" />
-                    <div className="h-3 bg-muted rounded" />
-                  </div>
-                  <div className="space-y-2">
-                    <div className="h-3 bg-muted rounded" />
-                    <div className="h-2 bg-muted rounded" />
-                  </div>
-                  <div className="h-3 bg-muted rounded w-3/4" />
-                </CardContent>
-              </Card>
-            ))}
-          </div>
+    <div className="p-4 md:p-6 space-y-6">
+      {/* Header skeleton */}
+      <div className="flex items-center justify-between">
+        <div className="space-y-2">
+          <Skeleton className="h-4 w-40" />
+          <Skeleton className="h-8 w-32" />
+          <Skeleton className="h-4 w-56" />
         </div>
-      </main>
+        <Skeleton className="h-9 w-24" />
+      </div>
+
+      {/* Stats skeleton */}
+      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
+        {Array.from({ length: 6 }).map((_, i) => (
+          <Card key={i} className="shadow-sm">
+            <CardContent className="p-4">
+              <div className="flex items-center justify-between">
+                <div className="space-y-2">
+                  <Skeleton className="h-3 w-16" />
+                  <Skeleton className="h-7 w-10" />
+                </div>
+                <Skeleton className="h-9 w-9 rounded-lg" />
+              </div>
+            </CardContent>
+          </Card>
+        ))}
+      </div>
+
+      {/* Toolbar skeleton */}
+      <div className="flex items-center gap-3">
+        <Skeleton className="h-9 w-64" />
+        <Skeleton className="h-9 w-36" />
+        <div className="flex-1" />
+        <Skeleton className="h-9 w-36" />
+      </div>
+
+      {/* Cards skeleton */}
+      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+        {Array.from({ length: 6 }).map((_, i) => (
+          <Card key={i} className="shadow-sm">
+            <CardContent className="p-5 space-y-4">
+              <div className="flex items-center gap-3">
+                <Skeleton className="h-10 w-10 rounded-lg" />
+                <div className="space-y-2 flex-1">
+                  <Skeleton className="h-5 w-24" />
+                  <Skeleton className="h-3 w-16" />
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                <Skeleton className="h-4 w-20" />
+                <Skeleton className="h-4 w-16" />
+              </div>
+              <div className="space-y-1.5">
+                <div className="flex justify-between">
+                  <Skeleton className="h-3 w-16" />
+                  <Skeleton className="h-3 w-8" />
+                </div>
+                <Skeleton className="h-2 w-full" />
+              </div>
+            </CardContent>
+          </Card>
+        ))}
+      </div>
     </div>
   );
 }

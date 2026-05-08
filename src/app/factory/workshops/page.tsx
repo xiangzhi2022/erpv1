@@ -1,125 +1,93 @@
-"use client";
+'use client';
 
-import { useState, useOptimistic, useCallback, useEffect } from "react";
-import { Sidebar } from "@/components/sidebar";
-import { FactoryList } from "./components/factory-list";
-import { FactoryToolbar } from "./components/factory-toolbar";
-import { FactoryFormModal } from "./components/factory-form";
-import { CreateFactoryButton } from "./components/create-button";
-import { Workshop, WorkshopStats, WorkshopFormValues, WorkshopStatusType, statusConfig } from "./schemas";
-import { toast } from "sonner";
-import { Card, CardContent, CardHeader } from "@/components/ui/card";
-import { Factory, Wrench, Ban, Activity } from "lucide-react";
+import { useState, useEffect, useCallback, useOptimistic, useTransition } from 'react';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Progress } from '@/components/ui/progress';
+import { FactoryList } from './components/factory-list';
+import { FactoryToolbar } from './components/factory-toolbar';
+import { CreateFactoryButton } from './components/create-button';
+import {
+  Building2,
+  CheckCircle2,
+  Wrench,
+  OctagonX,
+  Gauge,
+  Activity,
+  Loader2,
+} from 'lucide-react';
 
-function StatsCards({ stats }: { stats: WorkshopStats }) {
-  const overallLoad =
-    stats.totalCapacity > 0
-      ? Math.round((stats.totalLoad / stats.totalCapacity) * 100)
-      : 0;
+export interface WorkshopData {
+  id: string;
+  factory_code: string;
+  name: string;
+  location: string | null;
+  manager: string | null;
+  capacity: number;
+  current_load: number;
+  status: 'normal' | 'maintenance' | 'stopped';
+  description: string | null;
+  created_at: string;
+  updated_at: string;
+  load_percentage: number;
+}
 
-  return (
-    <div className="grid grid-cols-4 gap-4">
-      <Card>
-        <CardContent className="p-4 flex items-center gap-4">
-          <div className="w-10 h-10 bg-blue-100 rounded-lg flex items-center justify-center">
-            <Factory className="h-5 w-5 text-blue-600" />
-          </div>
-          <div>
-            <p className="text-sm text-muted-foreground">车间总数</p>
-            <p className="text-2xl font-bold">{stats.total}</p>
-          </div>
-        </CardContent>
-      </Card>
-      <Card>
-        <CardContent className="p-4 flex items-center gap-4">
-          <div className="w-10 h-10 bg-emerald-100 rounded-lg flex items-center justify-center">
-            <Activity className="h-5 w-5 text-emerald-600" />
-          </div>
-          <div>
-            <p className="text-sm text-muted-foreground">正常运行</p>
-            <p className="text-2xl font-bold text-emerald-600">
-              {stats.normal}
-            </p>
-          </div>
-        </CardContent>
-      </Card>
-      <Card>
-        <CardContent className="p-4 flex items-center gap-4">
-          <div className="w-10 h-10 bg-amber-100 rounded-lg flex items-center justify-center">
-            <Wrench className="h-5 w-5 text-amber-600" />
-          </div>
-          <div>
-            <p className="text-sm text-muted-foreground">检修中</p>
-            <p className="text-2xl font-bold text-amber-600">
-              {stats.maintenance}
-            </p>
-          </div>
-        </CardContent>
-      </Card>
-      <Card>
-        <CardContent className="p-4 flex items-center gap-4">
-          <div className="w-10 h-10 bg-red-100 rounded-lg flex items-center justify-center">
-            <Ban className="h-5 w-5 text-red-600" />
-          </div>
-          <div>
-            <p className="text-sm text-muted-foreground">停工</p>
-            <p className="text-2xl font-bold text-red-600">{stats.stopped}</p>
-          </div>
-        </CardContent>
-      </Card>
-    </div>
-  );
+export interface WorkshopStats {
+  total: number;
+  normal: number;
+  maintenance: number;
+  stopped: number;
+  totalCapacity: number;
+  totalLoad: number;
+}
+
+export interface WorkshopsResponse {
+  success: boolean;
+  workshops: WorkshopData[];
+  stats: WorkshopStats;
+}
+
+export type ViewMode = 'card' | 'table';
+
+const STATUS_CONFIG = {
+  normal: { label: '正常运行', color: 'bg-emerald-500', textColor: 'text-emerald-700', bgColor: 'bg-emerald-50', borderColor: 'border-emerald-200' },
+  maintenance: { label: '检修中', color: 'bg-amber-500', textColor: 'text-amber-700', bgColor: 'bg-amber-50', borderColor: 'border-amber-200' },
+  stopped: { label: '已停工', color: 'bg-red-500', textColor: 'text-red-700', bgColor: 'bg-red-50', borderColor: 'border-red-200' },
+} as const;
+
+export function getWorkshopStatusConfig(status: keyof typeof STATUS_CONFIG) {
+  return STATUS_CONFIG[status] ?? STATUS_CONFIG.normal;
 }
 
 export default function WorkshopManagementPage() {
-  const [workshops, setWorkshops] = useState<Workshop[]>([]);
-  const [stats, setStats] = useState<WorkshopStats>({
-    total: 0,
-    normal: 0,
-    maintenance: 0,
-    stopped: 0,
-    totalCapacity: 0,
-    totalLoad: 0,
-  });
+  const [workshops, setWorkshops] = useState<WorkshopData[]>([]);
+  const [stats, setStats] = useState<WorkshopStats | null>(null);
   const [loading, setLoading] = useState(true);
+  const [viewMode, setViewMode] = useState<ViewMode>('card');
+  const [statusFilter, setStatusFilter] = useState<string>('all');
+  const [keyword, setKeyword] = useState('');
+  const [isPending, startTransition] = useTransition();
+  const [optimisticWorkshops, updateOptimisticWorkshops] = useOptimistic(
+    workshops,
+    (state, { id, status }: { id: string; status: string }) =>
+      state.map((w) => (w.id === id ? { ...w, status: status as WorkshopData['status'] } : w))
+  );
 
-  // 搜索 & 过滤
-  const [keyword, setKeyword] = useState("");
-  const [statusFilter, setStatusFilter] = useState("all");
-  const [viewMode, setViewMode] = useState<"card" | "table">("card");
-
-  // 弹窗状态
-  const [formOpen, setFormOpen] = useState(false);
-  const [editingWorkshop, setEditingWorkshop] = useState<Workshop | null>(null);
-
-  // 乐观更新
-  const [optimisticWorkshops, addOptimisticUpdate] = useOptimistic<
-    Workshop[],
-    { id: string; updates: Partial<Workshop> }
-  >(workshops, (state, { id, updates }) => {
-    return state.map((w) => (w.id === id ? { ...w, ...updates } : w));
-  });
-
-  // 获取数据
   const fetchWorkshops = useCallback(async () => {
     try {
+      setLoading(true);
       const params = new URLSearchParams();
-      if (statusFilter && statusFilter !== "all") {
-        params.set("status", statusFilter);
-      }
-      if (keyword) {
-        params.set("keyword", keyword);
-      }
+      if (statusFilter && statusFilter !== 'all') params.set('status', statusFilter);
+      if (keyword.trim()) params.set('keyword', keyword.trim());
 
       const res = await fetch(`/api/factory/workshops?${params.toString()}`);
-      if (res.ok) {
-        const data = await res.json();
-        setWorkshops(data.workshops || []);
-        setStats(data.stats || { total: 0, normal: 0, maintenance: 0, stopped: 0, totalCapacity: 0, totalLoad: 0 });
-      }
-    } catch (error) {
-      console.error("获取车间列表失败:", error);
-      toast.error("获取车间列表失败");
+      if (!res.ok) throw new Error('Failed to fetch');
+      const data: WorkshopsResponse = await res.json();
+      setWorkshops(data.workshops);
+      setStats(data.stats);
+    } catch {
+      console.error('Failed to fetch workshops');
     } finally {
       setLoading(false);
     }
@@ -129,203 +97,174 @@ export default function WorkshopManagementPage() {
     fetchWorkshops();
   }, [fetchWorkshops]);
 
-  // 新增车间
-  const handleCreate = async (values: WorkshopFormValues) => {
-    try {
-      const res = await fetch("/api/factory/workshops", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(values),
-      });
-
-      const data = await res.json();
-
-      if (!res.ok || !data.success) {
-        toast.error(data.error || "创建失败");
-        return;
+  const handleStatusToggle = async (id: string, newStatus: string) => {
+    startTransition(async () => {
+      updateOptimisticWorkshops({ id, status: newStatus });
+      try {
+        const res = await fetch(`/api/factory/workshops/${id}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ status: newStatus }),
+        });
+        if (!res.ok) throw new Error('Failed to update status');
+        // Re-fetch to get the latest stats
+        await fetchWorkshops();
+      } catch {
+        // Revert on error by re-fetching
+        await fetchWorkshops();
       }
-
-      toast.success("车间创建成功");
-      await fetchWorkshops();
-    } catch (error) {
-      console.error("创建车间失败:", error);
-      toast.error("创建车间失败");
-    }
+    });
   };
 
-  // 编辑车间
-  const handleEdit = async (values: WorkshopFormValues) => {
-    if (!editingWorkshop) return;
-
-    try {
-      const res = await fetch(
-        `/api/factory/workshops/${editingWorkshop.id}`,
-        {
-          method: "PUT",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(values),
-        }
-      );
-
-      const data = await res.json();
-
-      if (!res.ok || !data.success) {
-        toast.error(data.error || "更新失败");
-        return;
-      }
-
-      toast.success("车间信息已更新");
-      setEditingWorkshop(null);
-      await fetchWorkshops();
-    } catch (error) {
-      console.error("更新车间失败:", error);
-      toast.error("更新车间失败");
-    }
-  };
-
-  // 删除车间
   const handleDelete = async (id: string) => {
     try {
-      const res = await fetch(`/api/factory/workshops/${id}`, {
-        method: "DELETE",
-      });
-
-      const data = await res.json();
-
-      if (!res.ok || !data.success) {
-        toast.error(data.error || "删除失败");
-        return;
-      }
-
-      toast.success("车间已删除");
+      const res = await fetch(`/api/factory/workshops/${id}`, { method: 'DELETE' });
+      if (!res.ok) throw new Error('Failed to delete');
       await fetchWorkshops();
-    } catch (error) {
-      console.error("删除车间失败:", error);
-      toast.error("删除车间失败");
+    } catch {
+      console.error('Failed to delete workshop');
     }
   };
 
-  // 状态切换（乐观更新）
-  const handleStatusChange = async (id: string, newStatus: WorkshopStatusType) => {
-    // 乐观更新：立即反映UI变化
-    addOptimisticUpdate({
-      id,
-      updates: {
-        status: newStatus,
-      },
-    });
+  const overallLoadRate = stats && stats.totalCapacity > 0
+    ? Math.round((stats.totalLoad / stats.totalCapacity) * 100)
+    : 0;
 
-    try {
-      const res = await fetch(`/api/factory/workshops/${id}`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ status: newStatus }),
-      });
-
-      const data = await res.json();
-
-      if (!res.ok || !data.success) {
-        toast.error(data.error || "状态变更失败");
-        // 回滚：重新获取数据
-        await fetchWorkshops();
-        return;
-      }
-
-      toast.success(
-        `车间状态已变更为「${statusConfig[newStatus].label}」`
-      );
-      await fetchWorkshops();
-    } catch (error) {
-      console.error("状态变更失败:", error);
-      toast.error("状态变更失败");
-      await fetchWorkshops();
-    }
-  };
-
-  const displayWorkshops = optimisticWorkshops;
+  const loadRateColor = overallLoadRate >= 90 ? 'text-red-600' : overallLoadRate >= 70 ? 'text-amber-600' : 'text-emerald-600';
+  const loadRateBarColor = overallLoadRate >= 90 ? '[&>div]:bg-red-500' : overallLoadRate >= 70 ? '[&>div]:bg-amber-500' : '[&>div]:bg-emerald-500';
 
   return (
-    <div className="flex min-h-screen bg-background">
-      <Sidebar />
-      <main className="flex-1 ml-64">
-        <div className="p-6 space-y-6">
-          {/* 页面标题 */}
-          <div className="flex items-center justify-between">
-            <div>
-              <h1 className="text-2xl font-bold tracking-tight">车间管理</h1>
-              <p className="text-muted-foreground mt-1">
-                管理旗下工厂车间及产能状态，实时监控运行情况。
-              </p>
-            </div>
-            <CreateFactoryButton
-              onClick={() => {
-                setEditingWorkshop(null);
-                setFormOpen(true);
-              }}
-            />
+    <div className="p-4 md:p-6 space-y-6">
+      {/* Page Header */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div>
+          <div className="flex items-center gap-2 text-sm text-muted-foreground">
+            <span>工厂管理</span>
+            <span>/</span>
+            <span className="text-foreground font-medium">车间管理</span>
           </div>
-
-          {/* 统计卡片 */}
-          <StatsCards stats={stats} />
-
-          {/* 工具栏 */}
-          <FactoryToolbar
-            keyword={keyword}
-            onKeywordChange={setKeyword}
-            statusFilter={statusFilter}
-            onStatusFilterChange={setStatusFilter}
-            viewMode={viewMode}
-            onViewModeChange={setViewMode}
-            totalCount={stats.total}
-            normalCount={stats.normal}
-            maintenanceCount={stats.maintenance}
-            stoppedCount={stats.stopped}
-          />
-
-          {/* 列表 */}
-          {loading ? (
-            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-              {[1, 2, 3].map((i) => (
-                <Card key={i} className="animate-pulse">
-                  <CardHeader className="pb-3">
-                    <div className="flex items-center gap-3">
-                      <div className="w-10 h-10 bg-muted rounded-lg" />
-                      <div className="space-y-2">
-                        <div className="h-4 bg-muted rounded w-24" />
-                        <div className="h-3 bg-muted rounded w-16" />
-                      </div>
-                    </div>
-                  </CardHeader>
-                  <CardContent className="space-y-4">
-                    <div className="h-3 bg-muted rounded" />
-                    <div className="h-2 bg-muted rounded" />
-                  </CardContent>
-                </Card>
-              ))}
-            </div>
-          ) : (
-            <FactoryList
-              workshops={displayWorkshops}
-              stats={stats}
-              viewMode={viewMode}
-              onEdit={(workshop) => {
-                setEditingWorkshop(workshop);
-                setFormOpen(true);
-              }}
-              onDelete={handleDelete}
-              onStatusChange={handleStatusChange}
-            />
-          )}
-
-          {/* 表单弹窗 */}
-          <FactoryFormModal
-            open={formOpen}
-            onOpenChange={setFormOpen}
-            workshop={editingWorkshop}
-            onSubmit={editingWorkshop ? handleEdit : handleCreate}
-          />
+          <h1 className="text-2xl font-bold tracking-tight mt-1">车间管理</h1>
+          <p className="text-sm text-muted-foreground">管理旗下工厂车间、产能及运行状态</p>
         </div>
-      </main>
+        <CreateFactoryButton onSuccess={fetchWorkshops} />
+      </div>
+
+      {/* Stats Cards */}
+      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
+        <Card className="shadow-sm">
+          <CardContent className="p-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-xs text-muted-foreground font-medium">车间总数</p>
+                <p className="text-2xl font-bold mt-1">{stats?.total ?? '-'}</p>
+              </div>
+              <div className="h-9 w-9 rounded-lg bg-blue-50 flex items-center justify-center">
+                <Building2 className="h-4.5 w-4.5 text-blue-600" />
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card className="shadow-sm">
+          <CardContent className="p-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-xs text-muted-foreground font-medium">正常运行</p>
+                <p className="text-2xl font-bold mt-1 text-emerald-600">{stats?.normal ?? '-'}</p>
+              </div>
+              <div className="h-9 w-9 rounded-lg bg-emerald-50 flex items-center justify-center">
+                <CheckCircle2 className="h-4.5 w-4.5 text-emerald-600" />
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card className="shadow-sm">
+          <CardContent className="p-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-xs text-muted-foreground font-medium">检修中</p>
+                <p className="text-2xl font-bold mt-1 text-amber-600">{stats?.maintenance ?? '-'}</p>
+              </div>
+              <div className="h-9 w-9 rounded-lg bg-amber-50 flex items-center justify-center">
+                <Wrench className="h-4.5 w-4.5 text-amber-600" />
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card className="shadow-sm">
+          <CardContent className="p-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-xs text-muted-foreground font-medium">已停工</p>
+                <p className="text-2xl font-bold mt-1 text-red-600">{stats?.stopped ?? '-'}</p>
+              </div>
+              <div className="h-9 w-9 rounded-lg bg-red-50 flex items-center justify-center">
+                <OctagonX className="h-4.5 w-4.5 text-red-600" />
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card className="shadow-sm">
+          <CardContent className="p-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-xs text-muted-foreground font-medium">总日产能</p>
+                <p className="text-2xl font-bold mt-1">{stats?.totalCapacity?.toLocaleString() ?? '-'}</p>
+              </div>
+              <div className="h-9 w-9 rounded-lg bg-violet-50 flex items-center justify-center">
+                <Gauge className="h-4.5 w-4.5 text-violet-600" />
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card className="shadow-sm">
+          <CardContent className="p-4">
+            <div className="flex items-center justify-between">
+              <div className="flex-1 min-w-0">
+                <p className="text-xs text-muted-foreground font-medium">综合负荷率</p>
+                <div className="flex items-baseline gap-1 mt-1">
+                  <span className={`text-2xl font-bold ${loadRateColor}`}>{overallLoadRate}</span>
+                  <span className={`text-sm ${loadRateColor}`}>%</span>
+                </div>
+                <Progress value={overallLoadRate} className={`h-1.5 mt-2 ${loadRateBarColor}`} />
+              </div>
+              <div className="h-9 w-9 rounded-lg bg-orange-50 flex items-center justify-center ml-2">
+                <Activity className="h-4.5 w-4.5 text-orange-600" />
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Toolbar */}
+      <FactoryToolbar
+        viewMode={viewMode}
+        onViewModeChange={setViewMode}
+        statusFilter={statusFilter}
+        onStatusFilterChange={setStatusFilter}
+        keyword={keyword}
+        onKeywordChange={setKeyword}
+      />
+
+      {/* Content */}
+      {loading && !isPending ? (
+        <div className="flex items-center justify-center py-20">
+          <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+        </div>
+      ) : (
+        <FactoryList
+          data={optimisticWorkshops}
+          viewMode={viewMode}
+          onStatusToggle={handleStatusToggle}
+          onDelete={handleDelete}
+          isPending={isPending}
+          onEditSuccess={fetchWorkshops}
+        />
+      )}
     </div>
   );
 }

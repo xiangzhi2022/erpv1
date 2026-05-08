@@ -7,125 +7,184 @@
 - **Language**: TypeScript 5
 - **UI 组件**: shadcn/ui (基于 Radix UI)
 - **Styling**: Tailwind CSS 4
+- **Database**: Supabase (PostgreSQL) + Drizzle (Schema 定义)
+- **Testing**: Vitest + @testing-library/react
 
 ## 目录结构
 
 ```
 ├── public/                 # 静态资源
-├── scripts/                # 构建与启动脚本
-│   ├── build.sh            # 构建脚本
-│   ├── dev.sh              # 开发环境启动脚本
-│   ├── prepare.sh          # 预处理脚本
-│   └── start.sh            # 生产环境启动脚本
+├── scripts/                # 构建与启动脚本、数据迁移、种子数据
 ├── src/
-│   ├── app/                # 页面路由与布局
-│   ├── components/ui/      # Shadcn UI 组件库
-│   ├── hooks/              # 自定义 Hooks
-│   ├── lib/                # 工具库
-│   │   └── utils.ts        # 通用工具函数 (cn)
+│   ├── __tests__/          # 测试文件
+│   │   ├── setup.ts        # 测试环境配置
+│   │   ├── utils.test.ts   # 工具函数测试
+│   │   ├── progress-schemas.test.ts  # 进度模块 Schema 测试
+│   │   └── progress-logic.test.ts    # 进度模块业务逻辑测试
+│   ├── app/
+│   │   ├── (dashboard)/    # 带侧边栏的页面布局
+│   │   │   ├── layout.tsx  # Dashboard 布局
+│   │   │   ├── page.tsx    # 仪表盘首页
+│   │   │   └── categories/ # 分类管理页面
+│   │   ├── tasks/          # 任务管理页面
+│   │   ├── progress/       # 生产进度跟踪页面
+│   │   │   ├── page.tsx           # 进度主页面
+│   │   │   ├── schemas.ts         # Zod Schema 定义
+│   │   │   └── components/        # 进度模块组件
+│   │   │       ├── progress-board.tsx     # 看板视图
+│   │   │       ├── progress-toolbar.tsx   # 筛选工具栏
+│   │   │       ├── progress-update.tsx    # 进度上报抽屉
+│   │   │       ├── progress-detail.tsx    # 工单详情
+│   │   │       ├── timeline-history.tsx   # 流转时间轴
+│   │   │       └── stats-widgets.tsx      # 统计微件
+│   │   ├── actions/        # Server Actions
+│   │   └── api/            # API 路由层
+│   │       ├── auth/       # 认证（登录/登出/验证码）
+│   │       ├── categories/ # 分类 CRUD
+│   │       ├── tasks/      # 任务 CRUD
+│   │       ├── notifications/ # 通知
+│   │       └── progress/   # 进度模块 API
+│   │           ├── work-orders/  # 工单查询/创建
+│   │           ├── report/       # 进度上报
+│   │           ├── logs/         # 进度日志
+│   │           └── workshops/    # 车间列表
+│   ├── components/
+│   │   ├── sidebar.tsx     # 侧边导航栏
+│   │   └── ui/             # Shadcn UI 组件库
+│   ├── db/                 # 数据库模块（从 storage/database 迁移而来）
+│   │   ├── schema.ts       # Drizzle Schema 定义（所有表）
+│   │   ├── relations.ts    # Drizzle 关系定义
+│   │   └── client.ts       # Supabase 客户端初始化
+│   ├── hooks/
+│   ├── lib/
+│   │   ├── auth.ts         # 认证模块
+│   │   ├── auth-utils.ts   # 认证工具
+│   │   └── utils.ts        # 通用工具函数
 │   └── server.ts           # 自定义服务端入口
-├── next.config.ts          # Next.js 配置
-├── package.json            # 项目依赖管理
-└── tsconfig.json           # TypeScript 配置
+├── package.json
+├── vitest.config.ts        # 测试配置
+└── tsconfig.json
 ```
-
-- 项目文件（如 app 目录、pages 目录、components 等）默认初始化到 `src/` 目录下。
 
 ## 包管理规范
 
 **仅允许使用 pnpm** 作为包管理器，**严禁使用 npm 或 yarn**。
-**常用命令**：
-- 安装依赖：`pnpm add <package>`
-- 安装开发依赖：`pnpm add -D <package>`
-- 安装所有依赖：`pnpm install`
-- 移除依赖：`pnpm remove <package>`
 
-## 开发规范
+### 常用命令
 
-### 编码规范
+- `pnpm dev` - 启动开发服务
+- `pnpm build` - 构建生产版本
+- `pnpm start` - 启动生产服务
+- `pnpm test` - 运行测试（vitest）
+- `pnpm ts-check` - TypeScript 类型检查
+- `pnpm lint` - ESLint 检查
+- `pnpm db:migrate` - 执行数据库迁移
+- `pnpm seed` - 执行种子数据填充
 
-- 默认按 TypeScript `strict` 心智写代码；优先复用当前作用域已声明的变量、函数、类型和导入，禁止引用未声明标识符或拼错变量名。
-- 禁止隐式 `any` 和 `as any`；函数参数、返回值、解构项、事件对象、`catch` 错误在使用前应有明确类型或先完成类型收窄，并清理未使用的变量和导入。
+## 编码规范
 
-### next.config 配置规范
-
-- 配置的路径不要写死绝对路径，必须使用 path.resolve(__dirname, ...)、import.meta.dirname 或 process.cwd() 动态拼接。
+- 默认按 TypeScript `strict` 心智写代码
+- 禁止隐式 `any` 和 `as any`
+- 函数参数、返回值、解构项、事件对象应有明确类型
+- 清理未使用的变量和导入
 
 ### Hydration 问题防范
 
-1. 严禁在 JSX 渲染逻辑中直接使用 typeof window、Date.now()、Math.random() 等动态数据。**必须使用 'use client' 并配合 useEffect + useState 确保动态内容仅在客户端挂载后渲染**；同时严禁非法 HTML 嵌套（如 <p> 嵌套 <div>）。
-2. **禁止使用 head 标签**，优先使用 metadata，详见文档：https://nextjs.org/docs/app/api-reference/functions/generate-metadata
-   1. 三方 CSS、字体等资源可在 `globals.css` 中顶部通过 `@import` 引入或使用 next/font
-   2. preload, preconnect, dns-prefetch 通过 ReactDOM 的 preload、preconnect、dns-prefetch 方法引入
-   3. json-ld 可阅读 https://nextjs.org/docs/app/guides/json-ld
+1. 严禁在 JSX 渲染逻辑中直接使用 typeof window、Date.now()、Math.random()
+2. 必须使用 'use client' 并配合 useEffect + useState
+3. 禁止非法 HTML 嵌套（如 `<p>` 嵌套 `<div>`）
+4. 三方 CSS、字体等资源可在 `globals.css` 中通过 `@import` 引入或使用 next/font
 
-## UI 设计与组件规范 (UI & Styling Standards)
+## 数据库配置
 
-- 模板默认预装核心组件库 `shadcn/ui`，位于`src/components/ui/`目录下
-- Next.js 项目**必须默认**采用 shadcn/ui 组件、风格和规范，**除非用户指定用其他的组件和规范。**
-
-## 青崖全屋定制ERP系统
-
-### 超级管理员登录
-- **手机号**: `13800000000`
-- **密码**: `19840214aA`
-- **角色**: `super_admin`
-
-### 角色权限体系
-| 角色 | 权限等级 | 说明 |
-|------|----------|------|
-| super_admin | 100 | 超级管理员 |
-| saas_admin | 80 | SaaS服务商管理员 |
-| dealer_admin | 60 | 经销商管理员 |
-| factory_admin | 50 | 工厂管理员 |
-| factory_user | 30 | 工厂工人 |
-| user | 10 | 普通用户 |
+**数据库**: Supabase (环境变量 `COZE_SUPABASE_URL`)
+**Schema 定义**: `src/db/schema.ts` (Drizzle ORM)
+**关系定义**: `src/db/relations.ts`
+**客户端**: `src/db/client.ts` (导出 `getSupabaseClient`, `getSupabaseServiceClient`)
 
 ### 数据库表
-- `users` - 用户表
-- `orders` - 订单表
-- `production_tasks` - 生产任务表
-- `tenants` - 租户表
-- `customers` - 客户表
-- `order_items` - 订单项表
-- `workshops` - 车间表
 
-### API 端点
-- `/api/auth/login` - 登录（使用手机号）
-- `/api/auth/logout` - 登出
-- `/api/auth/register` - 注册（使用手机号，无需验证码）
-- `/api/dealer/orders` - 经销商订单
-- `/api/factory/orders` - 工厂订单
-- `/api/worker/tasks` - 工人任务
-- `/api/worker/report` - 报工
-
-### 环境变量
-Supabase 连接信息通过 `.env.local` 文件配置：
-- `COZE_SUPABASE_URL` - Supabase URL
-- `COZE_SUPABASE_ANON_KEY` - Anon Key
-- `COZE_SUPABASE_SERVICE_ROLE_KEY` - Service Role Key
-
-### 数据库配置
-**唯一数据库**：Supabase (https://cdcnjtgabgjkouavwxsl.supabase.co)
-
-**数据库工具**：
-```bash
-node scripts/db-tool.js list                          # 列出所有表
-node scripts/db-tool.js select <table>                # 查询表数据
-node scripts/db-tool.js query "SELECT * FROM ..."     # 执行SQL查询
-node scripts/db-tool.js exec "UPDATE ..."              # 执行SQL更新
-```
-
-**数据库表结构**：
 | 表名 | 说明 |
 |------|------|
-| users | 系统用户表（官方管理员） |
-| tenants | 租户表（生产商/经销商/材料商） |
+| users | 系统用户表 |
+| tenants | 租户表 |
 | tenant_users | 租户用户表 |
 | orders | 订单表 |
 | order_items | 订单项表 |
 | customers | 客户表 |
 | workshops | 车间表 |
+| work_orders | 生产工单表 |
+| progress_logs | 进度日志表 |
 | production_tasks | 生产任务表 |
 | order_prefixes | 订单前缀表 |
 | user_settings | 用户设置表 |
+| categories | 分类表 |
+| tasks | 任务表 |
+| profiles | 用户档案 |
+| notifications | 通知表 |
+| sms_codes | 短信验证码 |
+| operation_logs | 操作日志 |
+| shipping | 发货信息 |
+
+### 生产进度模块核心表结构
+
+**work_orders (生产工单)**:
+- id, order_id, order_item_id, workshop_id
+- product_name, target_quantity, completed_quantity
+- status (pending/producing/inspecting/stored/aborted)
+- priority (low/normal/high/urgent)
+- start_date, expected_end_date, actual_end_date
+- remark, created_by, created_at, updated_at
+
+**progress_logs (进度日志)**:
+- id, work_order_id
+- action (start/report_progress/quality_check/warehouse_in/abort/...)
+- operator_name, completed_delta
+- remark, created_at
+
+## API 端点
+
+### 认证
+- `POST /api/auth/login` - 登录（需验证码，开发环境设置 SKIP_CAPTCHA=1 跳过）
+- `POST /api/auth/logout` - 登出
+- `GET /api/auth/captcha` - 获取验证码
+
+### 生产进度
+- `GET /api/progress/work-orders` - 工单列表（支持 status/workshop_id/priority/keyword 筛选）
+- `POST /api/progress/work-orders` - 创建工单
+- `POST /api/progress/report` - 提交进度上报（自动状态流转）
+- `GET /api/progress/logs` - 获取进度日志（按 work_order_id）
+- `GET /api/progress/workshops` - 车间列表
+
+### 认证方式
+- Cookie-based session (`auth_session`)
+- `getUserFromRequest(request)` 从 cookie 中解析当前用户
+- 内存会话存储（服务器重启后失效）
+
+### 环境变量
+
+| 变量 | 说明 |
+|------|------|
+| COZE_SUPABASE_URL | Supabase URL |
+| COZE_SUPABASE_ANON_KEY | Anon Key |
+| COZE_SUPABASE_SERVICE_ROLE_KEY | Service Role Key |
+| SKIP_CAPTCHA | 跳过验证码校验（开发用） |
+| PORT | 服务端口（默认 5000） |
+| COZE_PROJECT_DOMAIN_DEFAULT | 对外访问域名 |
+
+### 数据库工具
+
+```bash
+node scripts/db-tool.js list                          # 列出所有表
+node scripts/db-tool.js select <table>                # 查询表数据
+node scripts/db-tool.js query "SELECT * FROM ..."     # 执行SQL查询
+node scripts/seed-sandbox.js                          # 填充种子数据
+```
+
+## 测试体系
+
+- **框架**: Vitest + @testing-library/react
+- **配置**: vitest.config.ts
+- **设置**: src/__tests__/setup.ts
+- **运行**: `pnpm test` 或 `pnpm test:watch`
+- **覆盖范围**: Schema 验证、业务逻辑、工具函数

@@ -1,54 +1,35 @@
-<<<<<<< HEAD
-node_modules
-dist
+# Dependencies
+node_modules/
+.pnp*
+.npm/
+
+# Build outputs
+.next/
+dist/
+.turbo/
+.vercel/
+.parcel-cache/
+.cache/
+coverage/
+storybook-static/
+
+# TypeScript build info
+tsconfig.tsbuildinfo
+*.tsbuildinfo
+
+# Environment files
+.env
+.env.local
+.env.*.local
+
+# OS / Editor
 .DS_Store
 *.swp
-.git/*
-__pycache__/
-*.pyc
-.venv/*
-*.o
-*.a
-/vendor
-*.egg-info/
-/.env
-.env
-
-# JS/TS bundlers & build outputs
-.next
-.nuxt
-.turbo
-.vercel
-.parcel-cache
-.cache
-coverage
-storybook-static
-
-# Package manager artifacts
-pnpm-lock.yaml
-package-lock.json
-yarn.lock
-.pnp*
-.npm
-
-# Python tooling
-.pytest_cache/
-.mypy_cache/
-.ruff_cache/
-.tox/
-
-# Go tooling
-bin/
-*.test
-
-# Editor / IDE
+Thumbs.db
+ehthumbs.db
 .vscode/
 .idea/
 *.iml
-
-# OS / misc
-Thumbs.db
-ehthumbs.db
 
 # Logs
 output.log
@@ -56,7 +37,24 @@ output.log
 *.log.*
 logs/
 
-# 视频文件
+# Python
+__pycache__/
+*.pyc
+.venv/
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.tox/
+
+# Go
+bin/
+*.test
+
+# GitHub Actions (need workflow scope to push, use scripts/push-workflows.sh instead)
+.github/workflows/
+
+# Video files
 *.mp4
 *.avi
 *.mov
@@ -72,122 +70,14 @@ logs/
 *.rmvb
 *.vob
 
-# 归档文件
+# Archive files
 *.iso
 *.dmg
 *.rar
 *.zip
 *.gz
 
-# 文档类也默认加入
-*.pdf
-*.docx
-*.doc
-*.xlsx
-*.xls
-*.ppt
-*.pptx
-*.xlsx
-*.csv
-=======
-.next
-
-# Dependencies
-node_modules/
-.pnp
-.pnp.js
-
-# Production build
-dist/
-build/
-out/
-.next/
-.rsbuild/
-
-# Testing
-coverage/
-*.lcov
-.nyc_output
-
-# Environment variables
-.env
-.env.local
-.env.development.local
-.env.test.local
-.env.production.local
-
-# Logs
-logs/
-*.log
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-pnpm-debug.log*
-lerna-debug.log*
-
-# Runtime data
-pids
-*.pid
-*.seed
-*.pid.lock
-
-# Diagnostic reports
-report.[0-9]*.[0-9]*.[0-9]*.[0-9]*.json
-
-# Cache
-.cache/
-.parcel-cache/
-.eslintcache
-.stylelintcache
-.npm
-.yarn/cache
-.yarn/unplugged
-.yarn/build-state.yml
-.yarn/install-state.gz
-node-compile-cache/
-
-# Editor directories and files
-.vscode/*
-!.vscode/extensions.json
-!.vscode/settings.json
-.idea/
-*.suo
-*.ntvs*
-*.njsproj
-*.sln
-*.sw?
-*.swp
-*.swo
-*~
-
-# OS files
-.DS_Store
-.DS_Store?
-._*
-.Spotlight-V100
-.Trashes
-ehthumbs.db
-Thumbs.db
-Desktop.ini
-
-# Temporary files
-*.tmp
-*.temp
-.tmp/
-.temp/
-
-# Optional files
-*.tgz
-*.gz
-*.zip
-*.tar
-
-# TypeScript
-*.tsbuildinfo
-
-# Misc
-.vercel
-.turbo
-
-.coze-logs
->>>>>>> 9d3138ec099be15c1a179b8a59d2cd415308cf01
+# Seed/migration scripts (one-time use)
+scripts/seed-*.js
+scripts/migrate-*.js
+scripts/migrate-*.ts

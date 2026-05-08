@@ -1,13 +1,23 @@
+import { NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
 
 export async function POST() {
   try {
     const cookieStore = await cookies();
-    cookieStore.delete('erp_user');
+    const sessionId = cookieStore.get('auth_session')?.value;
 
-    return Response.json({ success: true, message: '已退出登录' });
-  } catch (err) {
-    console.error('Logout error:', err);
-    return Response.json({ success: false, error: '服务器错误' }, { status: 500 });
+    if (sessionId) {
+      // 清除服务端会话（内存存储中无需额外操作，Cookie 清除即可）
+    }
+
+    const response = NextResponse.json({ success: true });
+    response.headers.set(
+      'Set-Cookie',
+      'auth_session=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0'
+    );
+
+    return response;
+  } catch {
+    return NextResponse.json({ error: '退出登录失败' }, { status: 500 });
   }
 }

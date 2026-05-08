@@ -1,118 +1,63 @@
-'use client';
+"use client";
 
-import Link from 'next/link';
-import { usePathname } from 'next/navigation';
-import { useState, useEffect } from 'react';
-import { cn } from '@/lib/utils';
-import Image from 'next/image';
-import { 
-  LayoutDashboard, 
-  ClipboardList, 
-  CheckSquare, 
-  TrendingUp, 
-  Truck, 
-  DollarSign,
-  BarChart3,
-  Settings,
-  LogOut
-} from 'lucide-react';
-import { Button } from '@/components/ui/button';
-import { Separator } from '@/components/ui/separator';
+import Link from "next/link";
+import { usePathname } from "next/navigation";
+import {
+  LayoutDashboard,
+  FolderOpen,
+  CheckSquare,
+  Database,
+  Bell,
+} from "lucide-react";
+import { cn } from "@/lib/utils";
 
-const navigation = [
-  { name: '首页', href: '/dashboard', icon: LayoutDashboard },
-  { name: '订单管理', href: '/orders', icon: ClipboardList },
-  { name: '任务分配', href: '/tasks', icon: CheckSquare },
-  { name: '进度管理', href: '/progress', icon: TrendingUp },
-  { name: '发货管理', href: '/shipping', icon: Truck },
-  { name: '财务管理', href: '/finance', icon: DollarSign },
-  { name: '数字看板', href: '/board', icon: BarChart3 },
+const navItems = [
+  { href: "/", label: "仪表盘", icon: LayoutDashboard },
+  { href: "/categories", label: "分类管理", icon: FolderOpen },
+  { href: "/tasks", label: "任务管理", icon: CheckSquare },
+  { href: "/sync", label: "数据同步", icon: Database },
 ];
-
-interface UserInfo {
-  id: string;
-  phone: string;
-  nickname?: string;
-  role: string;
-}
 
 export function Sidebar() {
   const pathname = usePathname();
-  const [userInfo, setUserInfo] = useState<UserInfo | null>(null);
-
-  useEffect(() => {
-    // 从 Cookie 中读取用户信息
-    const cookies = document.cookie.split(';').reduce((acc, cookie) => {
-      const [key, value] = cookie.trim().split('=');
-      acc[key] = decodeURIComponent(value || '');
-      return acc;
-    }, {} as Record<string, string>);
-    
-    if (cookies['erp_user']) {
-      try {
-        const user = JSON.parse(cookies['erp_user']);
-        setUserInfo(user);
-      } catch (e) {
-        console.error('解析用户信息失败', e);
-      }
-    } else {
-      setUserInfo(null);
-    }
-  }, [pathname]);
-
-  const displayName = userInfo?.nickname || userInfo?.phone || '未登录';
 
   return (
-    <div className="flex flex-col w-64 bg-sidebar border-r border-sidebar-border h-screen">
-      {/* Logo */}
-      <div className="p-4 border-b border-sidebar-border">
-        <div>
-          <h2 className="font-semibold text-lg">青崖管理系统</h2>
-          <p className="text-sm text-muted-foreground">管理员：{displayName}</p>
-        </div>
+    <aside className="w-64 border-r bg-muted/30 flex flex-col min-h-screen">
+      <div className="p-6 border-b">
+        <h1 className="text-xl font-bold tracking-tight">核心模块联调</h1>
+        <p className="text-sm text-muted-foreground mt-1">
+          Next.js + Supabase CRUD
+        </p>
       </div>
-
-      {/* Navigation */}
       <nav className="flex-1 p-4 space-y-1">
-        {navigation.map((item) => {
-          const isActive = pathname === item.href || pathname.startsWith(item.href + '/');
+        {navItems.map((item) => {
+          const Icon = item.icon;
+          const isActive =
+            pathname === item.href ||
+            (item.href !== "/" && pathname.startsWith(item.href));
           return (
             <Link
-              key={item.name}
+              key={item.href}
               href={item.href}
               className={cn(
-                'flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors',
+                "flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors",
                 isActive
-                  ? 'bg-primary text-primary-foreground'
-                  : 'text-muted-foreground hover:bg-accent hover:text-accent-foreground'
+                  ? "bg-primary text-primary-foreground"
+                  : "text-muted-foreground hover:bg-muted hover:text-foreground"
               )}
             >
-              <item.icon className="h-5 w-5" />
-              {item.name}
+              <Icon className="h-4 w-4" />
+              {item.label}
             </Link>
           );
         })}
       </nav>
-
-      <Separator />
-
-      {/* Bottom actions */}
-      <div className="p-4 space-y-1">
-        <Link
-          href="/settings"
-          className="flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium text-muted-foreground hover:bg-accent hover:text-accent-foreground transition-colors"
-        >
-          <Settings className="h-5 w-5" />
-          系统设置
-        </Link>
-        <Link
-          href="/login"
-          className="flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium text-muted-foreground hover:bg-destructive/10 hover:text-destructive transition-colors"
-        >
-          <LogOut className="h-5 w-5" />
-          退出登录
-        </Link>
+      <div className="p-4 border-t">
+        <div className="text-xs text-muted-foreground space-y-1">
+          <p>Server Actions + Supabase</p>
+          <p>数据库同步 + RLS 校验</p>
+        </div>
       </div>
-    </div>
+    </aside>
   );
 }

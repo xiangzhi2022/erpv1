@@ -1,9 +1,9 @@
-import { getSupabaseServiceClient } from '@/storage/database/supabase-client';
+import { getSupabaseClient } from '@/db/client';
 import { NextRequest, NextResponse } from 'next/server';
 
 export async function GET(request: NextRequest) {
   try {
-    const supabase = getSupabaseServiceClient();
+    const supabase = getSupabaseClient();
     const { searchParams } = new URL(request.url);
     const tenantId = searchParams.get('tenant_id');
 

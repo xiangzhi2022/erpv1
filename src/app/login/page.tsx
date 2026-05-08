@@ -1,328 +1,399 @@
 'use client';
 
-import { useState, useEffect, useRef } from 'react';
-import { useRouter } from 'next/navigation';
-import Link from 'next/link';
+import { useState, useEffect, useCallback } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
+import { toast } from 'sonner';
+import { Eye, EyeOff, Loader2, Smartphone, Mail, RefreshCw } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Card, CardContent } from '@/components/ui/card';
+import { Label } from '@/components/ui/label';
 import { Checkbox } from '@/components/ui/checkbox';
-import { Cpu, Layers, Zap, Eye, EyeOff } from 'lucide-react';
-import { getDashboardPath } from '@/lib/auth';
+import { Separator } from '@/components/ui/separator';
 
-function ParticleBackground() {
-  const canvasRef = useRef<HTMLCanvasElement>(null);
+// ===================== OAuth 图标组件 =====================
 
-  useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
-
-    canvas.width = window.innerWidth;
-    canvas.height = window.innerHeight;
-
-    const particles: { x: number; y: number; vx: number; vy: number; size: number; opacity: number }[] = [];
-    const particleCount = 80;
-
-    for (let i = 0; i < particleCount; i++) {
-      particles.push({
-        x: Math.random() * canvas.width,
-        y: Math.random() * canvas.height,
-        vx: (Math.random() - 0.5) * 0.5,
-        vy: (Math.random() - 0.5) * 0.5,
-        size: Math.random() * 2 + 1,
-        opacity: Math.random() * 0.5 + 0.2,
-      });
-    }
-
-    function animate() {
-      if (!ctx || !canvas) return;
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
-
-      particles.forEach((p, i) => {
-        p.x += p.vx;
-        p.y += p.vy;
-
-        if (p.x < 0 || p.x > canvas.width) p.vx *= -1;
-        if (p.y < 0 || p.y > canvas.height) p.vy *= -1;
-
-        ctx.beginPath();
-        ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
-        ctx.fillStyle = `rgba(10, 130, 223, ${p.opacity})`;
-        ctx.fill();
-
-        particles.slice(i + 1).forEach((p2) => {
-          const dx = p.x - p2.x;
-          const dy = p.y - p2.y;
-          const dist = Math.sqrt(dx * dx + dy * dy);
-
-          if (dist < 150) {
-            ctx.beginPath();
-            ctx.moveTo(p.x, p.y);
-            ctx.lineTo(p2.x, p2.y);
-            ctx.strokeStyle = `rgba(10, 130, 223, ${0.1 * (1 - dist / 150)})`;
-            ctx.stroke();
-          }
-        });
-      });
-
-      requestAnimationFrame(animate);
-    }
-
-    animate();
-
-    const handleResize = () => {
-      if (!canvas) return;
-      canvas.width = window.innerWidth;
-      canvas.height = window.innerHeight;
-    };
-
-    window.addEventListener('resize', handleResize);
-    return () => window.removeEventListener('resize', handleResize);
-  }, []);
-
-  return <canvas ref={canvasRef} className="fixed inset-0 -z-10" />;
+function WechatIcon() {
+  return (
+    <svg viewBox="0 0 24 24" className="h-5 w-5" fill="currentColor">
+      <path d="M8.691 2.188C3.891 2.188 0 5.476 0 9.53c0 2.212 1.17 4.203 3.002 5.55a.59.59 0 0 1 .213.665l-.39 1.48c-.019.07-.048.141-.048.213 0 .163.13.295.29.295a.326.326 0 0 0 .167-.054l1.903-1.114a.864.864 0 0 1 .717-.098 10.16 10.16 0 0 0 2.837.403c.276 0 .543-.027.811-.05a6.127 6.127 0 0 1-.253-1.726c0-3.573 3.26-6.47 7.278-6.47.122 0 .243.005.363.013C15.596 4.373 12.454 2.188 8.691 2.188zm-2.6 4.17a1.03 1.03 0 1 1 0 2.06 1.03 1.03 0 0 1 0-2.06zm5.2 0a1.03 1.03 0 1 1 0 2.06 1.03 1.03 0 0 1 0-2.06zM23.997 15.39c0-3.248-3.238-5.882-7.229-5.882-3.992 0-7.23 2.634-7.23 5.882 0 3.249 3.238 5.882 7.23 5.882.84 0 1.647-.118 2.398-.332a.72.72 0 0 1 .596.08l1.58.926a.27.27 0 0 0 .14.047c.133 0 .24-.11.24-.245 0-.06-.024-.118-.04-.177l-.323-1.229a.49.49 0 0 1 .177-.553c1.52-1.12 2.501-2.768 2.501-4.399zm-9.726-1.08a.857.857 0 1 1 0-1.714.857.857 0 0 1 0 1.714zm4.992 0a.857.857 0 1 1 0-1.714.857.857 0 0 1 0 1.714z" />
+    </svg>
+  );
 }
 
-function GridBackground() {
+function GithubIcon() {
   return (
-    <div className="fixed inset-0 -z-10 overflow-hidden">
-      <div className="absolute inset-0 bg-gradient-to-br from-[#001a3d] via-[#002b5c] to-[#001a3d]" />
-      <div 
-        className="absolute inset-0 opacity-20"
-        style={{
-          backgroundImage: `
-            linear-gradient(to right, rgba(10, 130, 223, 0.1) 1px, transparent 1px),
-            linear-gradient(to bottom, rgba(10, 130, 223, 0.1) 1px, transparent 1px)
-          `,
-          backgroundSize: '60px 60px',
-        }}
-      />
-      <div className="absolute top-1/4 left-1/4 w-96 h-96 bg-[#0A82DF]/20 rounded-full blur-3xl animate-pulse" />
-      <div className="absolute bottom-1/4 right-1/4 w-80 h-80 bg-[#91CD30]/10 rounded-full blur-3xl animate-pulse" style={{ animationDelay: '1s' }} />
-      <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[600px] h-[600px] bg-[#004DA7]/10 rounded-full blur-3xl" />
+    <svg viewBox="0 0 24 24" className="h-5 w-5" fill="currentColor">
+      <path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z" />
+    </svg>
+  );
+}
+
+function GoogleIcon() {
+  return (
+    <svg viewBox="0 0 24 24" className="h-5 w-5">
+      <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92a5.06 5.06 0 0 1-2.2 3.32v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.1z" fill="#4285F4" />
+      <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853" />
+      <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" fill="#FBBC05" />
+      <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335" />
+    </svg>
+  );
+}
+
+// ===================== 纸艺几何装饰组件 =====================
+
+function PaperArtDecoration() {
+  return (
+    <div className="absolute inset-0 overflow-hidden">
+      {/* 大三角形 */}
+      <div className="absolute -top-20 -left-20 w-80 h-80 bg-white/[0.06] rotate-12" style={{ clipPath: 'polygon(50% 0%, 0% 100%, 100% 100%)' }} />
+      {/* 圆形 */}
+      <div className="absolute top-1/3 right-10 w-40 h-40 border-2 border-white/[0.08] rounded-full" />
+      <div className="absolute top-1/2 right-16 w-24 h-24 bg-white/[0.04] rounded-full" />
+      {/* 菱形 */}
+      <div className="absolute bottom-32 left-16 w-28 h-28 bg-white/[0.05] rotate-45" />
+      {/* 小三角形 */}
+      <div className="absolute top-20 right-1/3 w-16 h-16 bg-white/[0.08]" style={{ clipPath: 'polygon(50% 0%, 0% 100%, 100% 100%)' }} />
+      {/* 横线 */}
+      <div className="absolute bottom-48 left-8 right-8 h-px bg-white/[0.06]" />
+      <div className="absolute bottom-52 left-16 right-16 h-px bg-white/[0.04]" />
+      {/* 半圆 */}
+      <div className="absolute -bottom-16 left-1/3 w-48 h-48 border-2 border-white/[0.06] rounded-t-full" />
+      {/* 点状装饰 */}
+      <div className="absolute top-16 left-1/2 w-2 h-2 bg-white/[0.12] rounded-full" />
+      <div className="absolute top-24 left-[45%] w-1.5 h-1.5 bg-white/[0.08] rounded-full" />
+      <div className="absolute top-28 left-[55%] w-1 h-1 bg-white/[0.06] rounded-full" />
     </div>
   );
 }
 
+// ===================== 主登录页面 =====================
+
 export default function LoginPage() {
   const router = useRouter();
-  const [phone, setPhone] = useState('');
-  const [password, setPassword] = useState('');
-  const [rememberMe, setRememberMe] = useState(false);
-  const [showPassword, setShowPassword] = useState(false);
-  const [loading, setLoading] = useState(false);
-  const [mounted, setMounted] = useState(false);
-  const [error, setError] = useState('');
+  const searchParams = useSearchParams();
 
-  // 读取保存的登录信息
+  // 表单状态
+  const [account, setAccount] = useState('');
+  const [password, setPassword] = useState('');
+  const [captchaCode, setCaptchaCode] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
+  const [rememberMe, setRememberMe] = useState(false);
+  const [loading, setLoading] = useState(false);
+
+  // 验证码状态
+  const [captchaId, setCaptchaId] = useState('');
+  const [captchaSvg, setCaptchaSvg] = useState('');
+
+  // 检测账号类型
+  const isPhone = /^1\d{10,}$/.test(account);
+  const isEmail = /@/.test(account);
+
+  // OAuth 错误处理
+  const oauthError = searchParams.get('error');
+
   useEffect(() => {
-    setMounted(true);
-    const savedPhone = localStorage.getItem('erp_login_phone');
-    const savedPassword = localStorage.getItem('erp_login_password');
-    const savedRemember = localStorage.getItem('erp_login_remember');
-    
-    if (savedPhone) setPhone(savedPhone);
-    if (savedPassword) setPassword(savedPassword);
-    if (savedRemember === 'true') {
+    if (oauthError) {
+      toast.error(decodeURIComponent(oauthError));
+    }
+  }, [oauthError]);
+
+  // 加载记住的账号
+  useEffect(() => {
+    const saved = localStorage.getItem('remembered_account');
+    if (saved) {
+      setAccount(saved);
       setRememberMe(true);
     }
   }, []);
 
-  const handleLogin = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setLoading(true);
-    setError('');
-
+  // 获取验证码
+  const fetchCaptcha = useCallback(async () => {
     try {
-      const response = await fetch('/api/auth/login', {
+      const res = await fetch('/api/auth/captcha');
+      const data = await res.json();
+      setCaptchaId(data.captchaId);
+      setCaptchaSvg(data.svg);
+    } catch {
+      toast.error('获取验证码失败');
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchCaptcha();
+  }, [fetchCaptcha]);
+
+  // 前端校验
+  const validate = (): string | null => {
+    if (!account.trim()) return '请输入手机号或邮箱';
+    if (/^1/.test(account)) {
+      if (!/^1[3-9]\d{9}$/.test(account)) return '手机号格式不正确';
+    } else if (account.includes('@')) {
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(account)) return '邮箱格式不正确';
+    } else {
+      return '请输入有效的手机号或邮箱';
+    }
+    if (!password) return '请输入密码';
+    if (password.length < 6) return '密码长度不能少于6位';
+    if (!captchaCode.trim()) return '请输入验证码';
+    return null;
+  };
+
+  // 登录提交
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const error = validate();
+    if (error) {
+      toast.error(error);
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const res = await fetch('/api/auth/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ phone, password })
+        body: JSON.stringify({
+          account: account.trim(),
+          password,
+          captchaId,
+          captchaCode: captchaCode.trim(),
+          rememberMe,
+        }),
       });
 
-      const result = await response.json();
+      const data = await res.json();
 
-      if (result.success) {
-        // 保存用户信息到 Cookie（设置7天有效期）
-        const expires = new Date();
-        expires.setDate(expires.getDate() + 7);
-        document.cookie = `erp_user=${encodeURIComponent(JSON.stringify(result.user))};expires=${expires.toUTCString()};path=/;SameSite=Lax`;
-        
-        // 记住密码功能
-        if (rememberMe) {
-          localStorage.setItem('erp_login_phone', phone);
-          localStorage.setItem('erp_login_password', password);
-          localStorage.setItem('erp_login_remember', 'true');
-        } else {
-          localStorage.removeItem('erp_login_phone');
-          localStorage.removeItem('erp_login_password');
-          localStorage.setItem('erp_login_remember', 'false');
-        }
-        
-        // 根据用户角色跳转到对应页面
-        const redirectPath = getDashboardPath(result.user);
-        router.push(redirectPath);
-      } else {
-        setError(result.error || '登录失败');
+      if (!res.ok) {
+        toast.error(data.error || '登录失败');
+        fetchCaptcha(); // 刷新验证码
+        setCaptchaCode('');
+        return;
       }
-    } catch (err) {
-      setError('网络错误，请稍后重试');
+
+      // 记住我
+      if (rememberMe) {
+        localStorage.setItem('remembered_account', account.trim());
+      } else {
+        localStorage.removeItem('remembered_account');
+      }
+
+      toast.success('登录成功，正在跳转...');
+      setTimeout(() => router.push('/'), 800);
+    } catch {
+      toast.error('网络错误，请检查网络连接');
+      fetchCaptcha();
+      setCaptchaCode('');
     } finally {
       setLoading(false);
     }
   };
 
-  if (!mounted) return null;
+  // OAuth 登录
+  const handleOAuthLogin = (provider: string) => {
+    // 重定向到 OAuth 入口
+    window.location.href = `/api/auth/oauth/${provider}?redirect=/`;
+  };
 
   return (
-    <div className="min-h-screen flex items-center justify-center p-4 relative overflow-hidden">
-      <GridBackground />
-      <ParticleBackground />
-
-      <div className={`w-full max-w-md space-y-8 transition-all duration-1000 ${mounted ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-8'}`}>
-        {/* Header */}
-        <div className="text-center space-y-4">
-          <div className="space-y-2">
-            <h1 className="text-4xl font-bold tracking-tight bg-gradient-to-r from-[#0A82DF] via-white to-[#0A82DF] bg-clip-text text-transparent animate-pulse">
-              青崖管理系统
-            </h1>
-            <p className="text-[#91CD30] flex items-center justify-center gap-2">
-              <Zap className="h-4 w-4" />
-              智能制造 · 高效管理
-              <Zap className="h-4 w-4" />
-            </p>
+    <div className="flex min-h-screen">
+      {/* ===== 左侧品牌面板 ===== */}
+      <div className="hidden lg:flex lg:w-[45%] relative bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 text-white flex-col items-center justify-center p-12 overflow-hidden">
+        <PaperArtDecoration />
+        <div className="relative z-10 text-center space-y-6">
+          <div className="inline-flex items-center justify-center w-20 h-20 rounded-2xl bg-white/10 backdrop-blur-sm mb-4">
+            <svg viewBox="0 0 24 24" className="w-10 h-10 text-white" fill="none" stroke="currentColor" strokeWidth="1.5">
+              <path d="M12 2L2 7l10 5 10-5-10-5z" />
+              <path d="M2 17l10 5 10-5" />
+              <path d="M2 12l10 5 10-5" />
+            </svg>
           </div>
-
-          {/* Tech Icons */}
-          <div className="flex items-center justify-center gap-6 pt-4">
-            <div className="flex items-center gap-2 text-[#0A82DF]/70 text-sm">
-              <Cpu className="h-4 w-4" />
-              <span>AI驱动</span>
+          <h1 className="text-3xl font-bold tracking-tight">欢迎使用平台</h1>
+          <p className="text-slate-300 text-lg max-w-sm leading-relaxed">
+            一站式智能解决方案，助您高效管理、轻松协作
+          </p>
+          <div className="flex items-center justify-center gap-8 pt-4 text-sm text-slate-400">
+            <div className="text-center">
+              <div className="text-2xl font-semibold text-white">10K+</div>
+              <div>活跃用户</div>
             </div>
-            <div className="w-px h-4 bg-[#0A82DF]/30" />
-            <div className="flex items-center gap-2 text-[#0A82DF]/70 text-sm">
-              <Layers className="h-4 w-4" />
-              <span>云端协同</span>
+            <div className="w-px h-10 bg-white/10" />
+            <div className="text-center">
+              <div className="text-2xl font-semibold text-white">99.9%</div>
+              <div>服务可用</div>
             </div>
-            <div className="w-px h-4 bg-[#0A82DF]/30" />
-            <div className="flex items-center gap-2 text-[#0A82DF]/70 text-sm">
-              <Zap className="h-4 w-4" />
-              <span>实时同步</span>
+            <div className="w-px h-10 bg-white/10" />
+            <div className="text-center">
+              <div className="text-2xl font-semibold text-white">24/7</div>
+              <div>技术支持</div>
             </div>
           </div>
         </div>
+      </div>
 
-        {/* Login Card */}
-        <Card className="relative overflow-hidden border-[#0A82DF]/20 bg-[#001a3d]/90 backdrop-blur-xl shadow-2xl shadow-[#0A82DF]/10">
-          <div className="absolute inset-0 bg-gradient-to-br from-[#0A82DF]/5 via-transparent to-[#91CD30]/5" />
-          <div className="absolute top-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-[#0A82DF]/50 to-transparent" />
-          
-          <CardContent className="relative pt-8 pb-6">
-            <form onSubmit={handleLogin} className="space-y-5">
-              <div className="relative group">
+      {/* ===== 右侧登录表单 ===== */}
+      <div className="flex-1 flex items-center justify-center p-6 sm:p-12 bg-white">
+        <div className="w-full max-w-md space-y-8">
+          {/* 标题 */}
+          <div>
+            <h2 className="text-2xl font-bold text-slate-900">登录</h2>
+            <p className="mt-2 text-sm text-slate-500">请输入您的账号信息以继续</p>
+          </div>
+
+          {/* 第三方登录 */}
+          <div className="space-y-3">
+            <div className="grid grid-cols-3 gap-3">
+              <Button
+                type="button"
+                variant="outline"
+                className="h-11 w-full rounded-lg border-slate-200 hover:bg-green-50 hover:border-green-200 hover:text-green-600 transition-colors"
+                onClick={() => handleOAuthLogin('wechat')}
+              >
+                <WechatIcon />
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                className="h-11 w-full rounded-lg border-slate-200 hover:bg-slate-50 hover:border-slate-300 transition-colors"
+                onClick={() => handleOAuthLogin('github')}
+              >
+                <GithubIcon />
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                className="h-11 w-full rounded-lg border-slate-200 hover:bg-blue-50 hover:border-blue-200 transition-colors"
+                onClick={() => handleOAuthLogin('google')}
+              >
+                <GoogleIcon />
+              </Button>
+            </div>
+          </div>
+
+          {/* 分割线 */}
+          <div className="relative">
+            <Separator />
+            <span className="absolute left-1/2 -translate-x-1/2 -translate-y-1/2 bg-white px-3 text-xs text-slate-400">
+              或使用账号密码登录
+            </span>
+          </div>
+
+          {/* 登录表单 */}
+          <form onSubmit={handleSubmit} className="space-y-5">
+            {/* 账号输入 */}
+            <div className="space-y-2">
+              <Label htmlFor="account">手机号 / 邮箱</Label>
+              <div className="relative">
+                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400">
+                  {isPhone ? <Smartphone className="h-4 w-4" /> : <Mail className="h-4 w-4" />}
+                </span>
                 <Input
-                  id="phone"
-                  type="tel"
-                  placeholder="请输入手机号"
-                  value={phone}
-                  onChange={(e) => {
-                    const val = e.target.value.replace(/\D/g, '').slice(0, 11);
-                    setPhone(val);
-                  }}
-                  required
-                  className="h-12 bg-[#002b5c]/50 border-[#0A82DF]/30 focus:border-[#0A82DF] focus:ring-[#0A82DF]/20 pl-11 transition-all duration-300 placeholder:text-[#0A82DF]/50 text-white"
+                  id="account"
+                  type="text"
+                  placeholder="请输入手机号或邮箱"
+                  value={account}
+                  onChange={(e) => setAccount(e.target.value)}
+                  className="h-11 pl-10 rounded-lg border-slate-200 focus:border-slate-400 focus:ring-slate-400"
+                  autoComplete="username"
                 />
-                <div className="absolute left-4 top-1/2 -translate-y-1/2 text-[#0A82DF]/50 group-focus-within:text-[#0A82DF] transition-colors">
-                  <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z" />
-                  </svg>
-                </div>
               </div>
+            </div>
 
-              <div className="relative group">
+            {/* 密码输入 */}
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <Label htmlFor="password">密码</Label>
+                <button
+                  type="button"
+                  onClick={() => router.push('/forgot-password')}
+                  className="text-xs text-slate-500 hover:text-slate-700 transition-colors"
+                >
+                  忘记密码?
+                </button>
+              </div>
+              <div className="relative">
                 <Input
                   id="password"
                   type={showPassword ? 'text' : 'password'}
                   placeholder="请输入密码"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
-                  required
-                  className="h-12 bg-[#002b5c]/50 border-[#0A82DF]/30 focus:border-[#0A82DF] focus:ring-[#0A82DF]/20 pl-11 pr-11 transition-all duration-300 placeholder:text-[#0A82DF]/50 text-white"
+                  className="h-11 pr-10 rounded-lg border-slate-200 focus:border-slate-400 focus:ring-slate-400"
+                  autoComplete="current-password"
                 />
-                <div className="absolute left-4 top-1/2 -translate-y-1/2 text-[#0A82DF]/50 group-focus-within:text-[#0A82DF] transition-colors pointer-events-none">
-                  <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
-                  </svg>
-                </div>
                 <button
                   type="button"
                   onClick={() => setShowPassword(!showPassword)}
-                  className="absolute right-4 top-1/2 -translate-y-1/2 text-[#0A82DF]/50 hover:text-[#0A82DF] transition-colors"
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 transition-colors"
                 >
-                  {showPassword ? <EyeOff className="h-5 w-5" /> : <Eye className="h-5 w-5" />}
+                  {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                 </button>
               </div>
+            </div>
 
-              {error && (
-                <div className="text-sm text-red-400 bg-red-400/10 border border-red-400/20 rounded-md px-3 py-2">
-                  {error}
-                </div>
+            {/* 验证码 */}
+            <div className="space-y-2">
+              <Label htmlFor="captcha">验证码</Label>
+              <div className="flex gap-3">
+                <Input
+                  id="captcha"
+                  type="text"
+                  placeholder="请输入验证码"
+                  value={captchaCode}
+                  onChange={(e) => setCaptchaCode(e.target.value)}
+                  className="h-11 flex-1 rounded-lg border-slate-200 focus:border-slate-400 focus:ring-slate-400"
+                  maxLength={4}
+                  autoComplete="off"
+                />
+                <button
+                  type="button"
+                  onClick={fetchCaptcha}
+                  className="h-11 flex items-center justify-center rounded-lg border border-slate-200 bg-slate-50 hover:bg-slate-100 transition-colors overflow-hidden min-w-[120px]"
+                  title="点击刷新验证码"
+                >
+                  {captchaSvg ? (
+                    <span dangerouslySetInnerHTML={{ __html: captchaSvg }} />
+                  ) : (
+                    <RefreshCw className="h-4 w-4 text-slate-400" />
+                  )}
+                </button>
+              </div>
+            </div>
+
+            {/* 记住我 */}
+            <div className="flex items-center gap-2">
+              <Checkbox
+                id="remember"
+                checked={rememberMe}
+                onCheckedChange={(checked) => setRememberMe(checked === true)}
+              />
+              <Label htmlFor="remember" className="text-sm text-slate-600 cursor-pointer">
+                记住我
+              </Label>
+            </div>
+
+            {/* 提交按钮 */}
+            <Button
+              type="submit"
+              disabled={loading}
+              className="h-11 w-full rounded-lg bg-slate-900 hover:bg-slate-800 text-white font-medium transition-colors"
+            >
+              {loading ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  登录中...
+                </>
+              ) : (
+                '登录'
               )}
+            </Button>
+          </form>
 
-              <div className="flex items-center justify-between">
-                <div className="flex items-center space-x-2">
-                  <Checkbox 
-                    id="remember" 
-                    checked={rememberMe}
-                    onCheckedChange={(checked) => setRememberMe(checked as boolean)}
-                    className="border-[#0A82DF]/50 data-[state=checked]:bg-[#0A82DF] data-[state=checked]:border-[#0A82DF]"
-                  />
-                  <label htmlFor="remember" className="text-sm text-[#0A82DF]/70 cursor-pointer hover:text-[#0A82DF] transition-colors">
-                    记住密码
-                  </label>
-                </div>
-                <button type="button" className="text-sm text-[#0A82DF]/70 hover:text-[#0A82DF] transition-colors">
-                  忘记密码？
-                </button>
-              </div>
-
-              <Button 
-                type="submit" 
-                className="w-full h-12 text-base font-medium bg-gradient-to-r from-[#004DA7] to-[#0A82DF] hover:from-[#0A82DF] hover:to-[#004DA7] text-white shadow-lg shadow-[#0A82DF]/25 transition-all duration-300 hover:shadow-[#0A82DF]/40 hover:scale-[1.02] active:scale-[0.98]"
-                disabled={loading}
-              >
-                {loading ? (
-                  <span className="flex items-center gap-2">
-                    <svg className="animate-spin h-5 w-5" viewBox="0 0 24 24">
-                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
-                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
-                    </svg>
-                    登录中...
-                  </span>
-                ) : (
-                  <span className="flex items-center gap-2">
-                    <Zap className="h-5 w-5" />
-                    登录
-                  </span>
-                )}
-              </Button>
-
-              <div className="text-center">
-                <Link href="/register" className="text-sm text-[#0A82DF]/70 hover:text-[#0A82DF] transition-colors">
-                  还没有账号？立即注册
-                </Link>
-              </div>
-            </form>
-          </CardContent>
-        </Card>
-
-        {/* Footer */}
-        <div className="text-center text-xs text-[#0A82DF]/50">
-          <p>温州青崖信息科技有限公司</p>
-          <p className="mt-1">© 2024 All Rights Reserved</p>
+          {/* 演示提示 */}
+          <div className="rounded-lg bg-slate-50 border border-slate-100 p-4 text-xs text-slate-500 space-y-1">
+            <p className="font-medium text-slate-700">演示账号</p>
+            <p>邮箱: demo@example.com / 手机: 13800138000</p>
+            <p>密码: demo123</p>
+          </div>
         </div>
       </div>
     </div>

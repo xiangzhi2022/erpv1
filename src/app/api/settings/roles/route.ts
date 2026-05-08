@@ -1,9 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getSupabaseServiceClient } from '@/storage/database/supabase-client';
+import { getSupabaseClient } from '@/db/client';
 
 export async function GET(request: NextRequest) {
   try {
-    const supabase = getSupabaseServiceClient();
+    const supabase = getSupabaseClient();
     
     // 测试连接
     const { data: testData, error: testError } = await supabase.from('sys_roles').select('id').limit(1);

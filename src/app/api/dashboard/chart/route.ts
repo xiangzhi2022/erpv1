@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { getSupabaseServiceClient } from '@/storage/database/supabase-client';
+import { getSupabaseClient } from '@/db/client';
 import { cookies } from 'next/headers';
 import { format, subMonths, startOfMonth, endOfMonth } from 'date-fns';
 
@@ -21,9 +21,10 @@ export async function GET() {
       return NextResponse.json({ success: false, error: '请先登录' }, { status: 401 });
     }
 
-    const supabase = getSupabaseServiceClient();
+    const supabase = getSupabaseClient();
     const now = new Date();
 
+    // 获取过去6个月的数据
     const queries = [];
     for (let i = 5; i >= 0; i--) {
       const monthDate = subMonths(now, i);
@@ -33,8 +34,6 @@ export async function GET() {
 
       queries.push({
         monthLabel,
-        monthStart,
-        monthEnd,
         orderQuery: supabase
           .from('orders')
           .select('total_amount')
@@ -46,28 +45,43 @@ export async function GET() {
           .eq('tenant_type', 'dealer')
           .gte('created_at', monthStart)
           .lte('created_at', monthEnd),
+        customerQuery: supabase
+          .from('customers')
+          .select('id')
+          .gte('created_at', monthStart)
+          .lte('created_at', monthEnd),
       });
     }
 
     // 并行请求所有月份数据
     const results = await Promise.all(
       queries.map(async (q) => {
-        const [orderRes, dealerRes] = await Promise.all([
+        const [orderRes, dealerRes, customerRes] = await Promise.all([
           q.orderQuery,
           q.dealerQuery,
+          q.customerQuery,
         ]);
         const orders = orderRes.data || [];
         const dealers = dealerRes.data || [];
+        const customers = customerRes.data || [];
         return {
           month: q.monthLabel,
           orders: orders.length,
-          revenue: orders.reduce((sum, o) => sum + (o.total_amount || 0), 0),
+          revenue: orders.reduce((sum: number, o: Record<string, unknown>) => sum + (Number(o.total_amount) || 0), 0),
           newDealers: dealers.length,
+          newCustomers: customers.length,
         };
       })
     );
 
-    return NextResponse.json({ success: true, data: results });
+    return NextResponse.json(
+      { success: true, data: results },
+      {
+        headers: {
+          'Cache-Control': 'public, s-maxage=60, stale-while-revalidate=30',
+        },
+      }
+    );
   } catch (err) {
     console.error('Dashboard chart data error:', err);
     return NextResponse.json(

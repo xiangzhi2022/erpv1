@@ -1,4 +1,4 @@
-import { getSupabaseClient } from '@/storage/database/supabase-client';
+import { getSupabaseClient } from '@/db/client';
 import { cookies } from 'next/headers';
 
 const getClient = () => getSupabaseClient();

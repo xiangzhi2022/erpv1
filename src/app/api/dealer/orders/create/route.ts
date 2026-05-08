@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getSupabaseClient } from "@/storage/database/supabase-client";
+import { getSupabaseClient } from "@/db/client";
 import { getUserFromRequest } from "@/lib/auth";
 
 interface RequestBody {

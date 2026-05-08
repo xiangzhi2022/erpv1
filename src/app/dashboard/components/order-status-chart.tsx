@@ -17,6 +17,7 @@ import {
   ChartLegendContent,
 } from '@/components/ui/chart';
 import { Cell, Pie, PieChart, Label } from 'recharts';
+import { PieChart as PieChartIcon } from 'lucide-react';
 
 interface StatusDataItem {
   name: string;
@@ -67,6 +68,7 @@ export function OrderStatusChart() {
 
         const chartData = Object.entries(statusCount)
           .filter(([, count]) => count > 0)
+          .sort(([, a], [, b]) => b - a)
           .map(([status, count]) => ({
             name: status,
             value: count,
@@ -91,12 +93,20 @@ export function OrderStatusChart() {
     return (
       <Card>
         <CardHeader>
-          <CardTitle>订单状态分布</CardTitle>
-          <CardDescription>当前所有订单状态占比</CardDescription>
+          <div className="flex items-center gap-2">
+            <PieChartIcon className="h-5 w-5 text-muted-foreground" />
+            <div>
+              <CardTitle>订单状态分布</CardTitle>
+              <CardDescription>当前所有订单状态占比</CardDescription>
+            </div>
+          </div>
         </CardHeader>
         <CardContent>
-          <div className="h-[280px] flex items-center justify-center text-muted-foreground">
-            加载中...
+          <div className="h-[280px] flex items-center justify-center">
+            <div className="flex flex-col items-center gap-2 text-muted-foreground">
+              <div className="h-6 w-6 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+              <span className="text-sm">加载中...</span>
+            </div>
           </div>
         </CardContent>
       </Card>
@@ -107,12 +117,21 @@ export function OrderStatusChart() {
     return (
       <Card>
         <CardHeader>
-          <CardTitle>订单状态分布</CardTitle>
-          <CardDescription>当前所有订单状态占比</CardDescription>
+          <div className="flex items-center gap-2">
+            <PieChartIcon className="h-5 w-5 text-muted-foreground" />
+            <div>
+              <CardTitle>订单状态分布</CardTitle>
+              <CardDescription>当前所有订单状态占比</CardDescription>
+            </div>
+          </div>
         </CardHeader>
         <CardContent>
-          <div className="h-[280px] flex items-center justify-center text-muted-foreground">
-            暂无数据
+          <div className="h-[280px] flex flex-col items-center justify-center text-muted-foreground gap-3">
+            <PieChartIcon className="h-10 w-10 opacity-30" />
+            <div className="text-center">
+              <p className="text-sm font-medium">暂无订单数据</p>
+              <p className="text-xs mt-1">创建订单后将自动展示状态分布</p>
+            </div>
           </div>
         </CardContent>
       </Card>
@@ -122,13 +141,18 @@ export function OrderStatusChart() {
   return (
     <Card>
       <CardHeader>
-        <CardTitle>订单状态分布</CardTitle>
-        <CardDescription>当前所有订单状态占比</CardDescription>
+        <div className="flex items-center gap-2">
+          <PieChartIcon className="h-5 w-5 text-muted-foreground" />
+          <div>
+            <CardTitle>订单状态分布</CardTitle>
+            <CardDescription>当前所有订单状态占比</CardDescription>
+          </div>
+        </div>
       </CardHeader>
       <CardContent>
-        <ChartContainer config={statusChartConfig} className="h-[280px] w-full">
+        <ChartContainer config={statusChartConfig} className="h-[300px] w-full">
           <PieChart>
-            <ChartTooltip content={<ChartTooltipContent nameKey="name" />} />
+            <ChartTooltip content={<ChartTooltipContent nameKey="name" hideLabel />} />
             <Pie
               data={data}
               dataKey="value"
@@ -139,6 +163,7 @@ export function OrderStatusChart() {
               outerRadius={100}
               strokeWidth={2}
               stroke="hsl(var(--background))"
+              paddingAngle={2}
             >
               <Label
                 content={({ viewBox }) => {
@@ -152,15 +177,15 @@ export function OrderStatusChart() {
                       >
                         <tspan
                           x={viewBox.cx}
-                          y={viewBox.cy}
+                          y={(viewBox.cy || 0) - 6}
                           className="fill-foreground text-3xl font-bold"
                         >
                           {total}
                         </tspan>
                         <tspan
                           x={viewBox.cx}
-                          y={(viewBox.cy || 0) + 20}
-                          className="fill-muted-foreground text-sm"
+                          y={(viewBox.cy || 0) + 16}
+                          className="fill-muted-foreground text-xs"
                         >
                           总订单
                         </tspan>
@@ -176,7 +201,7 @@ export function OrderStatusChart() {
             </Pie>
             <ChartLegend
               content={<ChartLegendContent nameKey="name" />}
-              className="-mt-4 flex-wrap gap-2"
+              className="-mt-2 flex-wrap gap-x-4 gap-y-1"
             />
           </PieChart>
         </ChartContainer>

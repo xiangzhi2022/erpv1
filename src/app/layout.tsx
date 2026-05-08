@@ -1,20 +1,9 @@
 import type { Metadata } from 'next';
-import { Inspector } from 'react-dev-inspector';
 import './globals.css';
 
 export const metadata: Metadata = {
-  title: {
-    default: '青崖管理系统',
-    template: '%s | 青崖管理系统',
-  },
-  description: 'ERP生产管理系统 - 智能制造 · 高效管理',
-  keywords: ['ERP', '生产管理', '订单管理', '智能制造'],
-  authors: [{ name: '温州青崖信息科技有限公司' }],
-  generator: 'Coze Code',
-  robots: {
-    index: true,
-    follow: true,
-  },
+  title: '任务管理 | 核心模块联调',
+  description: 'Next.js + Supabase 核心模块联调演示 - 完整增删改查',
 };
 
 export default function RootLayout({
@@ -26,8 +15,10 @@ export default function RootLayout({
 
   return (
     <html lang="zh-CN">
-      <body className={`antialiased`}>
-        {isDev && <Inspector />}
+      <body className="antialiased bg-background text-foreground min-h-screen">
+        {isDev && process.env.NODE_ENV === 'development' && (
+          <div data-inspector />
+        )}
         {children}
       </body>
     </html>

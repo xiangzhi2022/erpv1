@@ -1,5 +1,7 @@
-import { getSupabaseServiceClient } from '@/storage/database/supabase-client';
+import { getSupabaseClient } from '@/db/client';
 import { cookies } from 'next/headers';
+
+const getServiceClient = () => getSupabaseClient();
 
 async function getCurrentUser() {
   const cookieStore = await cookies();
@@ -12,9 +14,9 @@ async function getCurrentUser() {
   }
 }
 
-// GET /api/orders/[id] - Fetch single order with full details
+// GET /api/orders/[id] - Get single order with items
 export async function GET(
-  _request: Request,
+  request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
@@ -24,7 +26,7 @@ export async function GET(
     }
 
     const { id } = await params;
-    const supabase = getSupabaseServiceClient();
+    const supabase = getServiceClient();
 
     const { data, error } = await supabase
       .from('orders')
@@ -34,11 +36,6 @@ export async function GET(
 
     if (error) {
       return Response.json({ success: false, error: '订单不存在' }, { status: 404 });
-    }
-
-    // Permission check
-    if (user.role !== 'super_admin' && user.role !== 'saas_admin' && data.created_by !== user.id) {
-      return Response.json({ success: false, error: '无权访问此订单' }, { status: 403 });
     }
 
     return Response.json({ success: true, data });
@@ -61,7 +58,7 @@ export async function PATCH(
 
     const { id } = await params;
     const body = await request.json();
-    const supabase = getSupabaseServiceClient();
+    const supabase = getServiceClient();
 
     const updateData: Record<string, unknown> = {
       ...body,

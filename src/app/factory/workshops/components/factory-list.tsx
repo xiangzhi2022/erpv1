@@ -1,17 +1,19 @@
-"use client";
+'use client';
 
-import { Workshop, WorkshopStats, WorkshopStatusType, statusConfig } from "../schemas";
-import { Card, CardContent, CardHeader } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
-import { Progress } from "@/components/ui/progress";
-import { Button } from "@/components/ui/button";
+import { useState } from 'react';
+import { WorkshopData, getWorkshopStatusConfig } from '../page';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { Card, CardContent } from '@/components/ui/card';
+import { Progress } from '@/components/ui/progress';
 import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -21,506 +23,457 @@ import {
   AlertDialogFooter,
   AlertDialogHeader,
   AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
+  AlertDialogTrigger,
+} from '@/components/ui/alert-dialog';
 import {
-  Factory,
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
+import { FactoryForm } from './factory-form';
+import {
+  Building2,
+  MapPin,
+  User,
+  Gauge,
   MoreVertical,
   Pencil,
   Trash2,
-  ArrowRightLeft,
+  CheckCircle2,
   Wrench,
-  Ban,
-  Play,
-} from "lucide-react";
-import { useState } from "react";
+  OctagonX,
+  Loader2,
+  Eye,
+} from 'lucide-react';
 
 interface FactoryListProps {
-  workshops: Workshop[];
-  stats: WorkshopStats;
-  viewMode: "card" | "table";
-  onEdit: (workshop: Workshop) => void;
+  data: WorkshopData[];
+  viewMode: 'card' | 'table';
+  onStatusToggle: (id: string, newStatus: string) => void;
   onDelete: (id: string) => void;
-  onStatusChange: (id: string, status: WorkshopStatusType) => void;
+  isPending: boolean;
+  onEditSuccess: () => void;
 }
 
-function getLoadColor(percentage: number): string {
-  if (percentage >= 90) return "bg-red-500";
-  if (percentage >= 70) return "bg-amber-500";
-  return "bg-emerald-500";
+function StatusBadge({ status }: { status: WorkshopData['status'] }) {
+  const config = getWorkshopStatusConfig(status);
+  return (
+    <Badge
+      variant="outline"
+      className={`${config.bgColor} ${config.textColor} ${config.borderColor} border font-medium gap-1`}
+    >
+      <span className={`h-1.5 w-1.5 rounded-full ${config.color}`} />
+      {config.label}
+    </Badge>
+  );
 }
 
-function getProgressClassName(percentage: number): string {
-  if (percentage >= 90) return "[&>div]:bg-red-500";
-  if (percentage >= 70) return "[&>div]:bg-amber-500";
-  return "[&>div]:bg-emerald-500";
+function LoadProgress({ value, capacity, load }: { value: number; capacity: number; load: number }) {
+  const barClass = value >= 90
+    ? '[&>div]:bg-red-500'
+    : value >= 70
+      ? '[&>div]:bg-amber-500'
+      : '[&>div]:bg-emerald-500';
+
+  return (
+    <div className="space-y-1.5">
+      <div className="flex items-baseline justify-between text-xs">
+        <span className="text-muted-foreground">
+          {load.toLocaleString()} / {capacity.toLocaleString()}
+        </span>
+        <span className={`font-semibold ${value >= 90 ? 'text-red-600' : value >= 70 ? 'text-amber-600' : 'text-emerald-600'}`}>
+          {value}%
+        </span>
+      </div>
+      <Progress value={value} className={`h-2 ${barClass}`} />
+    </div>
+  );
 }
 
-export function FactoryList({
-  workshops,
-  stats,
-  viewMode,
-  onEdit,
+function WorkshopCard({
+  workshop,
+  onStatusToggle,
   onDelete,
-  onStatusChange,
+  isPending,
+  onEditSuccess,
+}: {
+  workshop: WorkshopData;
+  onStatusToggle: (id: string, newStatus: string) => void;
+  onDelete: (id: string) => void;
+  isPending: boolean;
+  onEditSuccess: () => void;
+}) {
+  const [editOpen, setEditOpen] = useState(false);
+  const config = getWorkshopStatusConfig(workshop.status);
+
+  const nextStatusOptions: { status: string; label: string; icon: React.ReactNode }[] = [];
+  if (workshop.status !== 'normal') {
+    nextStatusOptions.push({ status: 'normal', label: '恢复运行', icon: <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600" /> });
+  }
+  if (workshop.status !== 'maintenance') {
+    nextStatusOptions.push({ status: 'maintenance', label: '标记检修', icon: <Wrench className="h-3.5 w-3.5 text-amber-600" /> });
+  }
+  if (workshop.status !== 'stopped') {
+    nextStatusOptions.push({ status: 'stopped', label: '标记停工', icon: <OctagonX className="h-3.5 w-3.5 text-red-600" /> });
+  }
+
+  return (
+    <>
+      <Card className={`group shadow-sm hover:shadow-md transition-all duration-200 border-l-4 ${workshop.status === 'normal' ? 'border-l-emerald-500' : workshop.status === 'maintenance' ? 'border-l-amber-500' : 'border-l-red-500'}`}>
+        <CardContent className="p-5">
+          {/* Header */}
+          <div className="flex items-start justify-between gap-3 mb-4">
+            <div className="flex items-center gap-3 min-w-0">
+              <div className={`h-10 w-10 rounded-lg ${config.bgColor} flex items-center justify-center shrink-0`}>
+                <Building2 className={`h-5 w-5 ${config.textColor}`} />
+              </div>
+              <div className="min-w-0">
+                <div className="flex items-center gap-2">
+                  <h3 className="font-semibold text-base truncate">{workshop.name}</h3>
+                  <StatusBadge status={workshop.status} />
+                </div>
+                <p className="text-xs text-muted-foreground font-mono mt-0.5">
+                  {workshop.factory_code}
+                </p>
+              </div>
+            </div>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-8 w-8 opacity-0 group-hover:opacity-100 transition-opacity"
+                >
+                  <MoreVertical className="h-4 w-4" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-40">
+                <DropdownMenuItem onClick={() => setEditOpen(true)}>
+                  <Pencil className="h-3.5 w-3.5 mr-2" />
+                  编辑信息
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+                {nextStatusOptions.map((opt) => (
+                  <DropdownMenuItem
+                    key={opt.status}
+                    onClick={() => onStatusToggle(workshop.id, opt.status)}
+                    disabled={isPending}
+                  >
+                    {opt.icon}
+                    <span className="ml-2">{opt.label}</span>
+                    {isPending && <Loader2 className="h-3 w-3 ml-auto animate-spin" />}
+                  </DropdownMenuItem>
+                ))}
+                <DropdownMenuSeparator />
+                <AlertDialog>
+                  <AlertDialogTrigger asChild>
+                    <DropdownMenuItem
+                      className="text-red-600 focus:text-red-600 focus:bg-red-50"
+                      onSelect={(e) => e.preventDefault()}
+                    >
+                      <Trash2 className="h-3.5 w-3.5 mr-2" />
+                      删除车间
+                    </DropdownMenuItem>
+                  </AlertDialogTrigger>
+                  <AlertDialogContent>
+                    <AlertDialogHeader>
+                      <AlertDialogTitle>确认删除车间</AlertDialogTitle>
+                      <AlertDialogDescription>
+                        确定要删除「{workshop.name}」({workshop.factory_code}) 吗？此操作不可撤销。
+                      </AlertDialogDescription>
+                    </AlertDialogHeader>
+                    <AlertDialogFooter>
+                      <AlertDialogCancel>取消</AlertDialogCancel>
+                      <AlertDialogAction
+                        className="bg-red-600 hover:bg-red-700"
+                        onClick={() => onDelete(workshop.id)}
+                      >
+                        确认删除
+                      </AlertDialogAction>
+                    </AlertDialogFooter>
+                  </AlertDialogContent>
+                </AlertDialog>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
+
+          {/* Info Row */}
+          <div className="grid grid-cols-2 gap-x-4 gap-y-2 mb-4 text-sm">
+            {workshop.location && (
+              <div className="flex items-center gap-1.5 text-muted-foreground">
+                <MapPin className="h-3.5 w-3.5 shrink-0" />
+                <span className="truncate">{workshop.location}</span>
+              </div>
+            )}
+            {workshop.manager && (
+              <div className="flex items-center gap-1.5 text-muted-foreground">
+                <User className="h-3.5 w-3.5 shrink-0" />
+                <span className="truncate">{workshop.manager}</span>
+              </div>
+            )}
+            <div className="flex items-center gap-1.5 text-muted-foreground">
+              <Gauge className="h-3.5 w-3.5 shrink-0" />
+              <span>日产能 {workshop.capacity.toLocaleString()}</span>
+            </div>
+          </div>
+
+          {/* Progress */}
+          <LoadProgress
+            value={workshop.load_percentage}
+            capacity={workshop.capacity}
+            load={workshop.current_load}
+          />
+
+          {/* Description */}
+          {workshop.description && (
+            <p className="text-xs text-muted-foreground mt-3 line-clamp-2">
+              {workshop.description}
+            </p>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Edit Dialog */}
+      <Dialog open={editOpen} onOpenChange={setEditOpen}>
+        <DialogContent className="sm:max-w-[500px]">
+          <DialogHeader>
+            <DialogTitle>编辑车间信息</DialogTitle>
+          </DialogHeader>
+          <FactoryForm
+            workshop={workshop}
+            onSuccess={() => {
+              setEditOpen(false);
+              onEditSuccess();
+            }}
+            onCancel={() => setEditOpen(false)}
+          />
+        </DialogContent>
+      </Dialog>
+    </>
+  );
+}
+
+function WorkshopTable({
+  data,
+  onStatusToggle,
+  onDelete,
+  isPending,
+  onEditSuccess,
 }: FactoryListProps) {
-  const [deleteTarget, setDeleteTarget] = useState<Workshop | null>(null);
-  const [statusChangeTarget, setStatusChangeTarget] = useState<{
-    workshop: Workshop;
-    newStatus: WorkshopStatusType;
-  } | null>(null);
+  const [detailWorkshop, setDetailWorkshop] = useState<WorkshopData | null>(null);
 
-  const handleDeleteConfirm = () => {
-    if (deleteTarget) {
-      onDelete(deleteTarget.id);
-      setDeleteTarget(null);
-    }
-  };
-
-  const handleStatusConfirm = () => {
-    if (statusChangeTarget) {
-      onStatusChange(
-        statusChangeTarget.workshop.id,
-        statusChangeTarget.newStatus
-      );
-      setStatusChangeTarget(null);
-    }
-  };
-
-  const getNextStatusOptions = (
-    currentStatus: WorkshopStatusType
-  ): { status: WorkshopStatusType; label: string; icon: React.ReactNode }[] => {
-    const options: {
-      status: WorkshopStatusType;
-      label: string;
-      icon: React.ReactNode;
-    }[] = [];
-    if (currentStatus !== "normal") {
-      options.push({
-        status: "normal",
-        label: "恢复正常",
-        icon: <Play className="h-4 w-4" />,
-      });
-    }
-    if (currentStatus !== "maintenance") {
-      options.push({
-        status: "maintenance",
-        label: "标记检修",
-        icon: <Wrench className="h-4 w-4" />,
-      });
-    }
-    if (currentStatus !== "stopped") {
-      options.push({
-        status: "stopped",
-        label: "标记停工",
-        icon: <Ban className="h-4 w-4" />,
-      });
-    }
-    return options;
-  };
-
-  // 卡片视图
-  if (viewMode === "card") {
-    return (
-      <>
-        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-          {workshops.map((workshop) => {
-            const config = statusConfig[workshop.status];
-            const loadPct = workshop.load_percentage;
-
-            return (
-              <Card
-                key={workshop.id}
-                className="relative group hover:shadow-md transition-shadow"
-              >
-                <CardHeader className="pb-3">
-                  <div className="flex items-start justify-between">
-                    <div className="flex items-center gap-3">
-                      <div
-                        className={`w-10 h-10 rounded-lg flex items-center justify-center ${
-                          workshop.status === "normal"
-                            ? "bg-emerald-100"
-                            : workshop.status === "maintenance"
-                            ? "bg-amber-100"
-                            : "bg-red-100"
-                        }`}
+  return (
+    <>
+      <div className="rounded-lg border shadow-sm overflow-hidden">
+        <Table>
+          <TableHeader>
+            <TableRow className="bg-muted/50">
+              <TableHead className="w-[140px]">编号</TableHead>
+              <TableHead>车间名称</TableHead>
+              <TableHead className="w-[100px]">位置</TableHead>
+              <TableHead className="w-[80px]">负责人</TableHead>
+              <TableHead className="w-[90px]">状态</TableHead>
+              <TableHead className="w-[200px]">产能负荷</TableHead>
+              <TableHead className="w-[80px] text-right">操作</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {data.length === 0 ? (
+              <TableRow>
+                <TableCell colSpan={7} className="h-32 text-center text-muted-foreground">
+                  暂无车间数据
+                </TableCell>
+              </TableRow>
+            ) : (
+              data.map((workshop) => (
+                <TableRow key={workshop.id} className="group">
+                  <TableCell className="font-mono text-xs">{workshop.factory_code}</TableCell>
+                  <TableCell className="font-medium">{workshop.name}</TableCell>
+                  <TableCell className="text-muted-foreground text-sm">{workshop.location || '-'}</TableCell>
+                  <TableCell className="text-muted-foreground text-sm">{workshop.manager || '-'}</TableCell>
+                  <TableCell>
+                    <StatusBadge status={workshop.status} />
+                  </TableCell>
+                  <TableCell>
+                    <LoadProgress
+                      value={workshop.load_percentage}
+                      capacity={workshop.capacity}
+                      load={workshop.current_load}
+                    />
+                  </TableCell>
+                  <TableCell className="text-right">
+                    <div className="flex items-center justify-end gap-1">
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-7 w-7"
+                        onClick={() => setDetailWorkshop(workshop)}
                       >
-                        <Factory
-                          className={`h-5 w-5 ${
-                            workshop.status === "normal"
-                              ? "text-emerald-600"
-                              : workshop.status === "maintenance"
-                              ? "text-amber-600"
-                              : "text-red-600"
-                          }`}
-                        />
-                      </div>
-                      <div>
-                        <h3 className="font-semibold text-base">
-                          {workshop.name}
-                        </h3>
-                        <p className="text-xs text-muted-foreground font-mono">
-                          {workshop.factory_code}
-                        </p>
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <Badge
-                        variant="outline"
-                        className={`${config.bgColor} ${config.color} border text-xs`}
-                      >
-                        <span
-                          className={`w-1.5 h-1.5 rounded-full ${config.dotColor} mr-1`}
-                        />
-                        {config.label}
-                      </Badge>
+                        <Eye className="h-3.5 w-3.5" />
+                      </Button>
                       <DropdownMenu>
                         <DropdownMenuTrigger asChild>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="h-8 w-8 opacity-0 group-hover:opacity-100 transition-opacity"
-                          >
-                            <MoreVertical className="h-4 w-4" />
+                          <Button variant="ghost" size="icon" className="h-7 w-7">
+                            <MoreVertical className="h-3.5 w-3.5" />
                           </Button>
                         </DropdownMenuTrigger>
-                        <DropdownMenuContent align="end" className="w-48">
-                          <DropdownMenuItem
-                            onClick={() => onEdit(workshop)}
-                          >
-                            <Pencil className="h-4 w-4 mr-2" />
-                            编辑信息
-                          </DropdownMenuItem>
-                          <DropdownMenuSeparator />
-                          {getNextStatusOptions(workshop.status).map((opt) => (
-                            <DropdownMenuItem
-                              key={opt.status}
-                              onClick={() =>
-                                setStatusChangeTarget({
-                                  workshop,
-                                  newStatus: opt.status,
-                                })
-                              }
-                            >
-                              {opt.icon}
-                              <span className="ml-2">{opt.label}</span>
+                        <DropdownMenuContent align="end" className="w-36">
+                          {workshop.status !== 'normal' && (
+                            <DropdownMenuItem onClick={() => onStatusToggle(workshop.id, 'normal')} disabled={isPending}>
+                              <CheckCircle2 className="h-3.5 w-3.5 mr-2 text-emerald-600" />
+                              恢复运行
                             </DropdownMenuItem>
-                          ))}
+                          )}
+                          {workshop.status !== 'maintenance' && (
+                            <DropdownMenuItem onClick={() => onStatusToggle(workshop.id, 'maintenance')} disabled={isPending}>
+                              <Wrench className="h-3.5 w-3.5 mr-2 text-amber-600" />
+                              标记检修
+                            </DropdownMenuItem>
+                          )}
+                          {workshop.status !== 'stopped' && (
+                            <DropdownMenuItem onClick={() => onStatusToggle(workshop.id, 'stopped')} disabled={isPending}>
+                              <OctagonX className="h-3.5 w-3.5 mr-2 text-red-600" />
+                              标记停工
+                            </DropdownMenuItem>
+                          )}
                           <DropdownMenuSeparator />
-                          <DropdownMenuItem
-                            className="text-destructive focus:text-destructive"
-                            onClick={() => setDeleteTarget(workshop)}
-                          >
-                            <Trash2 className="h-4 w-4 mr-2" />
-                            删除车间
-                          </DropdownMenuItem>
+                          <AlertDialog>
+                            <AlertDialogTrigger asChild>
+                              <DropdownMenuItem
+                                className="text-red-600 focus:text-red-600 focus:bg-red-50"
+                                onSelect={(e) => e.preventDefault()}
+                              >
+                                <Trash2 className="h-3.5 w-3.5 mr-2" />
+                                删除
+                              </DropdownMenuItem>
+                            </AlertDialogTrigger>
+                            <AlertDialogContent>
+                              <AlertDialogHeader>
+                                <AlertDialogTitle>确认删除</AlertDialogTitle>
+                                <AlertDialogDescription>
+                                  确定删除「{workshop.name}」？此操作不可撤销。
+                                </AlertDialogDescription>
+                              </AlertDialogHeader>
+                              <AlertDialogFooter>
+                                <AlertDialogCancel>取消</AlertDialogCancel>
+                                <AlertDialogAction
+                                  className="bg-red-600 hover:bg-red-700"
+                                  onClick={() => onDelete(workshop.id)}
+                                >
+                                  确认删除
+                                </AlertDialogAction>
+                              </AlertDialogFooter>
+                            </AlertDialogContent>
+                          </AlertDialog>
                         </DropdownMenuContent>
                       </DropdownMenu>
                     </div>
-                  </div>
-                </CardHeader>
-                <CardContent className="space-y-4">
-                  <div className="grid grid-cols-2 gap-3 text-sm">
-                    {workshop.location && (
-                      <div className="flex items-center gap-2 text-muted-foreground">
-                        <span className="text-xs">位置</span>
-                        <span className="font-medium text-foreground">
-                          {workshop.location}
-                        </span>
-                      </div>
-                    )}
-                    {workshop.manager && (
-                      <div className="flex items-center gap-2 text-muted-foreground">
-                        <span className="text-xs">负责人</span>
-                        <span className="font-medium text-foreground">
-                          {workshop.manager}
-                        </span>
-                      </div>
-                    )}
-                  </div>
+                  </TableCell>
+                </TableRow>
+              ))
+            )}
+          </TableBody>
+        </Table>
+      </div>
 
-                  {/* 产能进度 */}
-                  <div className="space-y-2">
-                    <div className="flex items-center justify-between text-sm">
-                      <span className="text-muted-foreground">产能负荷</span>
-                      <span className="font-semibold">
-                        {workshop.current_load} / {workshop.capacity}
-                      </span>
-                    </div>
-                    <Progress
-                      value={loadPct}
-                      className={`h-2 ${getProgressClassName(loadPct)}`}
-                    />
-                    <div className="flex items-center justify-between">
-                      <span
-                        className={`text-xs font-medium ${
-                          loadPct >= 90
-                            ? "text-red-600"
-                            : loadPct >= 70
-                            ? "text-amber-600"
-                            : "text-emerald-600"
-                        }`}
-                      >
-                        负荷率 {loadPct}%
-                      </span>
-                    </div>
-                  </div>
+      {/* Detail Dialog */}
+      <Dialog open={!!detailWorkshop} onOpenChange={(open) => !open && setDetailWorkshop(null)}>
+        <DialogContent className="sm:max-w-[460px]">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              {detailWorkshop?.name}
+              {detailWorkshop && <StatusBadge status={detailWorkshop.status} />}
+            </DialogTitle>
+          </DialogHeader>
+          {detailWorkshop && (
+            <div className="space-y-4 py-2">
+              <div className="grid grid-cols-2 gap-3 text-sm">
+                <div>
+                  <p className="text-muted-foreground text-xs">编号</p>
+                  <p className="font-mono mt-0.5">{detailWorkshop.factory_code}</p>
+                </div>
+                <div>
+                  <p className="text-muted-foreground text-xs">位置</p>
+                  <p className="mt-0.5">{detailWorkshop.location || '-'}</p>
+                </div>
+                <div>
+                  <p className="text-muted-foreground text-xs">负责人</p>
+                  <p className="mt-0.5">{detailWorkshop.manager || '-'}</p>
+                </div>
+                <div>
+                  <p className="text-muted-foreground text-xs">日产能</p>
+                  <p className="mt-0.5">{detailWorkshop.capacity.toLocaleString()}</p>
+                </div>
+              </div>
+              <div>
+                <p className="text-muted-foreground text-xs mb-2">产能负荷</p>
+                <LoadProgress
+                  value={detailWorkshop.load_percentage}
+                  capacity={detailWorkshop.capacity}
+                  load={detailWorkshop.current_load}
+                />
+              </div>
+              {detailWorkshop.description && (
+                <div>
+                  <p className="text-muted-foreground text-xs">描述</p>
+                  <p className="text-sm mt-0.5">{detailWorkshop.description}</p>
+                </div>
+              )}
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+    </>
+  );
+}
 
-                  {workshop.description && (
-                    <p className="text-xs text-muted-foreground line-clamp-2">
-                      {workshop.description}
-                    </p>
-                  )}
-                </CardContent>
-              </Card>
-            );
-          })}
-        </div>
-
-        {/* 空状态 */}
-        {workshops.length === 0 && (
-          <div className="flex flex-col items-center justify-center py-16 text-muted-foreground">
-            <Factory className="h-12 w-12 mb-4 opacity-30" />
-            <p className="text-lg font-medium">暂无车间数据</p>
-            <p className="text-sm mt-1">点击右上角添加新的车间</p>
-          </div>
-        )}
-
-        {/* 删除确认弹窗 */}
-        <AlertDialog
-          open={!!deleteTarget}
-          onOpenChange={(open: boolean) => !open && setDeleteTarget(null)}
-        >
-          <AlertDialogContent>
-            <AlertDialogHeader>
-              <AlertDialogTitle>确认删除车间</AlertDialogTitle>
-              <AlertDialogDescription>
-                你确定要删除车间「{deleteTarget?.name}」({deleteTarget?.factory_code})
-                吗？此操作不可撤销，该车间下的所有关联数据也将被清除。
-              </AlertDialogDescription>
-            </AlertDialogHeader>
-            <AlertDialogFooter>
-              <AlertDialogCancel>取消</AlertDialogCancel>
-              <AlertDialogAction
-                onClick={handleDeleteConfirm}
-                className="bg-destructive text-white hover:bg-destructive/90"
-              >
-                确认删除
-              </AlertDialogAction>
-            </AlertDialogFooter>
-          </AlertDialogContent>
-        </AlertDialog>
-
-        {/* 状态变更确认弹窗 */}
-        <AlertDialog
-          open={!!statusChangeTarget}
-          onOpenChange={(open: boolean) => !open && setStatusChangeTarget(null)}
-        >
-          <AlertDialogContent>
-            <AlertDialogHeader>
-              <AlertDialogTitle>确认变更状态</AlertDialogTitle>
-              <AlertDialogDescription>
-                你确定要将车间「{statusChangeTarget?.workshop.name}」的状态变更为
-                「{statusChangeTarget
-                  ? statusConfig[statusChangeTarget.newStatus].label
-                  : ""}
-                」吗？
-                {statusChangeTarget?.newStatus === "stopped" &&
-                  "停工后该车间将不再接受新任务。"}
-                {statusChangeTarget?.newStatus === "maintenance" &&
-                  "检修期间该车间产能将暂停统计。"}
-              </AlertDialogDescription>
-            </AlertDialogHeader>
-            <AlertDialogFooter>
-              <AlertDialogCancel>取消</AlertDialogCancel>
-              <AlertDialogAction onClick={handleStatusConfirm}>
-                确认变更
-              </AlertDialogAction>
-            </AlertDialogFooter>
-          </AlertDialogContent>
-        </AlertDialog>
-      </>
+export function FactoryList({
+  data,
+  viewMode,
+  onStatusToggle,
+  onDelete,
+  isPending,
+  onEditSuccess,
+}: FactoryListProps) {
+  if (data.length === 0) {
+    return (
+      <div className="flex flex-col items-center justify-center py-20 text-muted-foreground">
+        <Building2 className="h-12 w-12 mb-4 opacity-30" />
+        <p className="text-lg font-medium">暂无车间数据</p>
+        <p className="text-sm mt-1">点击右上方按钮添加第一个车间</p>
+      </div>
     );
   }
 
-  // 表格视图
-  return (
-    <>
-      <div className="rounded-lg border bg-card">
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b bg-muted/50">
-                <th className="text-left p-3 font-medium">编号</th>
-                <th className="text-left p-3 font-medium">车间名称</th>
-                <th className="text-left p-3 font-medium">位置</th>
-                <th className="text-left p-3 font-medium">负责人</th>
-                <th className="text-left p-3 font-medium">产能负荷</th>
-                <th className="text-left p-3 font-medium">状态</th>
-                <th className="text-right p-3 font-medium">操作</th>
-              </tr>
-            </thead>
-            <tbody>
-              {workshops.map((workshop) => {
-                const config = statusConfig[workshop.status];
-                const loadPct = workshop.load_percentage;
-
-                return (
-                  <tr
-                    key={workshop.id}
-                    className="border-b hover:bg-muted/30 transition-colors"
-                  >
-                    <td className="p-3 font-mono text-xs">
-                      {workshop.factory_code}
-                    </td>
-                    <td className="p-3 font-medium">{workshop.name}</td>
-                    <td className="p-3 text-muted-foreground">
-                      {workshop.location || "-"}
-                    </td>
-                    <td className="p-3">{workshop.manager || "-"}</td>
-                    <td className="p-3">
-                      <div className="flex items-center gap-3 min-w-[160px]">
-                        <Progress
-                          value={loadPct}
-                          className={`h-2 flex-1 ${getProgressClassName(loadPct)}`}
-                        />
-                        <span
-                          className={`text-xs font-medium whitespace-nowrap ${
-                            loadPct >= 90
-                              ? "text-red-600"
-                              : loadPct >= 70
-                              ? "text-amber-600"
-                              : "text-emerald-600"
-                          }`}
-                        >
-                          {loadPct}%
-                        </span>
-                      </div>
-                    </td>
-                    <td className="p-3">
-                      <Badge
-                        variant="outline"
-                        className={`${config.bgColor} ${config.color} border text-xs`}
-                      >
-                        <span
-                          className={`w-1.5 h-1.5 rounded-full ${config.dotColor} mr-1`}
-                        />
-                        {config.label}
-                      </Badge>
-                    </td>
-                    <td className="p-3 text-right">
-                      <div className="flex items-center justify-end gap-1">
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="h-8 w-8"
-                          onClick={() => onEdit(workshop)}
-                        >
-                          <Pencil className="h-4 w-4" />
-                        </Button>
-                        <DropdownMenu>
-                          <DropdownMenuTrigger asChild>
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              className="h-8 w-8"
-                            >
-                              <ArrowRightLeft className="h-4 w-4" />
-                            </Button>
-                          </DropdownMenuTrigger>
-                          <DropdownMenuContent align="end" className="w-48">
-                            {getNextStatusOptions(workshop.status).map(
-                              (opt) => (
-                                <DropdownMenuItem
-                                  key={opt.status}
-                                  onClick={() =>
-                                    setStatusChangeTarget({
-                                      workshop,
-                                      newStatus: opt.status,
-                                    })
-                                  }
-                                >
-                                  {opt.icon}
-                                  <span className="ml-2">{opt.label}</span>
-                                </DropdownMenuItem>
-                              )
-                            )}
-                          </DropdownMenuContent>
-                        </DropdownMenu>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="h-8 w-8 text-destructive hover:text-destructive"
-                          onClick={() => setDeleteTarget(workshop)}
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </Button>
-                      </div>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-
-        {workshops.length === 0 && (
-          <div className="flex flex-col items-center justify-center py-16 text-muted-foreground">
-            <Factory className="h-12 w-12 mb-4 opacity-30" />
-            <p className="text-lg font-medium">暂无车间数据</p>
-            <p className="text-sm mt-1">点击右上角添加新的车间</p>
-          </div>
-        )}
-      </div>
-
-      {/* 删除确认弹窗 */}
-      <AlertDialog
-        open={!!deleteTarget}
-        onOpenChange={(open: boolean) => !open && setDeleteTarget(null)}
-      >
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>确认删除车间</AlertDialogTitle>
-            <AlertDialogDescription>
-              你确定要删除车间「{deleteTarget?.name}」({deleteTarget?.factory_code})
-              吗？此操作不可撤销。
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>取消</AlertDialogCancel>
-            <AlertDialogAction
-              onClick={handleDeleteConfirm}
-              className="bg-destructive text-white hover:bg-destructive/90"
-            >
-              确认删除
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-
-      {/* 状态变更确认弹窗 */}
-      <AlertDialog
-        open={!!statusChangeTarget}
-        onOpenChange={(open: boolean) => !open && setStatusChangeTarget(null)}
-      >
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>确认变更状态</AlertDialogTitle>
-            <AlertDialogDescription>
-              你确定要将车间「{statusChangeTarget?.workshop.name}」的状态变更为
-              「{statusChangeTarget
-                ? statusConfig[statusChangeTarget.newStatus].label
-                : ""}
-              」吗？
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>取消</AlertDialogCancel>
-            <AlertDialogAction onClick={handleStatusConfirm}>
-              确认变更
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-    </>
+  return viewMode === 'card' ? (
+    <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+      {data.map((workshop) => (
+        <WorkshopCard
+          key={workshop.id}
+          workshop={workshop}
+          onStatusToggle={onStatusToggle}
+          onDelete={onDelete}
+          isPending={isPending}
+          onEditSuccess={onEditSuccess}
+        />
+      ))}
+    </div>
+  ) : (
+    <WorkshopTable
+      data={data}
+      viewMode={viewMode}
+      onStatusToggle={onStatusToggle}
+      onDelete={onDelete}
+      isPending={isPending}
+      onEditSuccess={onEditSuccess}
+    />
   );
 }

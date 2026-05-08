@@ -1,10 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getSupabaseServiceClient } from '@/storage/database/supabase-client';
+import { getSupabaseClient } from '@/db/client';
 import { isUserAdmin } from '@/lib/auth-utils';
 
 export async function GET(request: NextRequest) {
   try {
-    const supabase = getSupabaseServiceClient();
+    const supabase = getSupabaseClient();
     
     // 获取当前用户
     const userCookie = request.cookies.get('erp_user');

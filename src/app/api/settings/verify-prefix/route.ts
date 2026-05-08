@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getSupabaseServiceClient } from '@/storage/database/supabase-client';
+import { getSupabaseClient } from '@/db/client';
 import { isUserAdmin } from '@/lib/auth-utils';
 
 export async function GET(request: NextRequest) {
@@ -14,7 +14,7 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    const supabase = getSupabaseServiceClient();
+    const supabase = getSupabaseClient();
 
     // 从新的order_prefixes表查询
     const { data, error } = await supabase
@@ -87,7 +87,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const supabase = getSupabaseServiceClient();
+    const supabase = getSupabaseClient();
 
     // 先检查前缀是否已存在
     const { data: existing } = await supabase
@@ -181,7 +181,7 @@ export async function DELETE(request: NextRequest) {
       );
     }
 
-    const supabase = getSupabaseServiceClient();
+    const supabase = getSupabaseClient();
 
     const { error } = await supabase
       .from('order_prefixes')

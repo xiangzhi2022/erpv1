@@ -110,10 +110,10 @@ export function OrderDetailsSheet({ order, open, onOpenChange, onStatusChange }:
                   <span className="text-muted-foreground">交付日期</span>
                   <p className="mt-0.5">{formatShortDate(order.delivery_date)}</p>
                 </div>
-                {order.received_at && (
+                {order.updated_at && (
                   <div>
-                    <span className="text-muted-foreground">接收时间</span>
-                    <p className="mt-0.5">{formatDate(order.received_at)}</p>
+                    <span className="text-muted-foreground">最后更新</span>
+                    <p className="mt-0.5">{formatDate(order.updated_at)}</p>
                   </div>
                 )}
               </div>
@@ -146,7 +146,7 @@ export function OrderDetailsSheet({ order, open, onOpenChange, onStatusChange }:
                       {order.items.map((item: OrderItem) => (
                         <TableRow key={item.id}>
                           <TableCell className="font-medium">{item.product_name}</TableCell>
-                          <TableCell className="text-muted-foreground">{item.specification || '-'}</TableCell>
+                          <TableCell className="text-muted-foreground">{item.specifications || '-'}</TableCell>
                           <TableCell className="text-right">{item.quantity} {item.unit}</TableCell>
                           <TableCell className="text-right font-mono">¥{formatAmount(item.unit_price)}</TableCell>
                           <TableCell className="text-right font-mono font-medium">¥{formatAmount(item.subtotal)}</TableCell>

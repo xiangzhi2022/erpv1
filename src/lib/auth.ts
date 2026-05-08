@@ -1,224 +1,207 @@
-/**
- * 青崖ERP - 多租户权限控制工具
- * 支持角色：super_admin / saas_admin / dealer_admin / factory_admin / supplier_admin / factory_user / user
- */
+import { cookies } from 'next/headers';
+import crypto from 'crypto';
 
-// 用户类型定义
-export type UserRole = 'super_admin' | 'saas_admin' | 'dealer_admin' | 'factory_admin' | 'supplier_admin' | 'factory_user' | 'user';
+// ===================== 类型定义 =====================
 
-export interface AuthUser {
+export interface User {
   id: string;
-  phone: string;
-  nickname: string;
-  role: UserRole;
-  tenant_id?: string;     // 所属租户ID
-  tenant_type?: 'dealer' | 'factory' | 'material_supplier';  // 租户类型
+  email?: string;
+  phone?: string;
+  name: string;
+  avatar?: string;
+  provider?: 'credentials' | 'wechat' | 'github' | 'google';
 }
 
-// 角色层级（数值越大权限越高）
-export const roleHierarchy: Record<UserRole, number> = {
-  'super_admin': 100,      // 系统开发商
-  'saas_admin': 80,       // SaaS服务商管理员
-  'dealer_admin': 60,     // 经销商管理员
-  'factory_admin': 50,    // 工厂管理员
-  'supplier_admin': 50,    // 材料商管理员
-  'factory_user': 30,     // 工厂工人
-  'user': 10,             // 普通用户
-};
-
-/**
- * 判断用户是否为超级管理员（系统开发商）
- */
-export function isSuperAdmin(user: AuthUser | null): boolean {
-  return user?.role === 'super_admin';
+export interface Session {
+  user: User;
+  expiresAt: number;
 }
 
-/**
- * 判断用户是否为SaaS服务商管理员
- */
-export function isSaasAdmin(user: AuthUser | null): boolean {
-  return user?.role === 'saas_admin';
+// ===================== 内存存储（生产环境应替换为数据库）=====================
+
+// 验证码存储: captchaId -> { code, expiresAt }
+const captchaStore = new Map<string, { code: string; expiresAt: number }>();
+
+// 密码重置令牌: token -> { email, expiresAt }
+const resetTokenStore = new Map<string, { email: string; expiresAt: number }>();
+
+// OAuth state 存储: state -> { provider, redirectUrl, expiresAt }
+const oauthStateStore = new Map<string, { provider: string; redirectUrl: string; expiresAt: number }>();
+
+// 会话存储: sessionId -> Session
+const sessionStore = new Map<string, Session>();
+
+// 用户存储（演示用，生产应替换为数据库）
+const userStore = new Map<string, { password: string; user: User }>();
+
+// 初始化演示用户
+userStore.set('demo@example.com', {
+  password: 'demo123',
+  user: { id: '1', email: 'demo@example.com', name: '演示用户', provider: 'credentials' },
+});
+userStore.set('13800138000', {
+  password: 'demo123',
+  user: { id: '2', phone: '13800138000', name: '手机用户', provider: 'credentials' },
+});
+
+// ===================== 验证码相关 =====================
+
+export function generateCaptchaId(code: string): string {
+  const captchaId = crypto.randomUUID();
+  captchaStore.set(captchaId, { code: code.toLowerCase(), expiresAt: Date.now() + 5 * 60 * 1000 });
+  return captchaId;
 }
 
-/**
- * 判断用户是否为经销商管理员
- */
-export function isDealerAdmin(user: AuthUser | null): boolean {
-  return user?.role === 'dealer_admin';
+export function verifyCaptcha(captchaId: string, code: string): boolean {
+  const stored = captchaStore.get(captchaId);
+  if (!stored) return false;
+  captchaStore.delete(captchaId); // 一次性验证
+  if (Date.now() > stored.expiresAt) return false;
+  return stored.code === code.toLowerCase();
 }
 
-/**
- * 判断用户是否为工厂管理员
- */
-export function isFactoryAdmin(user: AuthUser | null): boolean {
-  return user?.role === 'factory_admin';
+// ===================== 密码重置令牌 =====================
+
+export function generateResetToken(email: string): string {
+  const token = crypto.randomBytes(32).toString('hex');
+  resetTokenStore.set(token, { email, expiresAt: Date.now() + 30 * 60 * 1000 }); // 30 分钟有效
+  return token;
 }
 
-/**
- * 判断用户是否为工厂工人
- */
-export function isFactoryUser(user: AuthUser | null): boolean {
-  return user?.role === 'factory_user';
-}
-
-/**
- * 判断用户是否为材料商管理员
- */
-export function isSupplierAdmin(user: AuthUser | null): boolean {
-  return user?.role === 'supplier_admin';
-}
-
-/**
- * 判断用户是否为工厂相关角色
- */
-export function isFactoryUserRole(user: AuthUser | null): boolean {
-  return isFactoryAdmin(user) || isFactoryUser(user);
-}
-
-/**
- * 判断用户是否可以管理所有数据
- * 超级管理员和SaaS管理员可以管理所有数据
- */
-export function canManageAllData(user: AuthUser | null): boolean {
-  if (!user) return false;
-  return isSuperAdmin(user) || isSaasAdmin(user);
-}
-
-/**
- * 判断用户是否可以访问某条数据
- * 实现多租户数据隔离
- */
-export function canAccessData(
-  user: AuthUser | null,
-  dataTenantId?: string | null,
-  dataCreatedBy?: string | null
-): boolean {
-  if (!user) return false;
-  
-  // 超级管理员和SaaS管理员可以访问所有数据
-  if (canManageAllData(user)) return true;
-  
-  // 经销商只能访问自己租户的数据
-  if (isDealerAdmin(user)) {
-    return user.tenant_id === dataTenantId;
+export function verifyResetToken(token: string): string | null {
+  const stored = resetTokenStore.get(token);
+  if (!stored) return null;
+  if (Date.now() > stored.expiresAt) {
+    resetTokenStore.delete(token);
+    return null;
   }
-  
-  // 工厂用户只能访问自己工厂的数据
-  if (isFactoryUserRole(user)) {
-    return user.tenant_id === dataTenantId;
-  }
-  
-  // 普通用户只能访问自己创建的数据
-  if (user.role === 'user') {
-    return user.id === dataCreatedBy;
-  }
-  
-  return false;
+  return stored.email;
 }
 
-/**
- * 获取订单过滤条件
- * 根据用户角色返回不同的过滤条件
- */
-export function getOrderFilter(user: AuthUser | null): { dealer_id?: string; target_factory_id?: string } | null {
-  if (!user) return null;
-  
-  // 超级管理员和SaaS管理员不过滤
-  if (canManageAllData(user)) return null;
-  
-  // 经销商：只查看自己下的订单
-  if (isDealerAdmin(user)) {
-    return { dealer_id: user.tenant_id };
-  }
-  
-  // 工厂用户：只查看派给自己的订单
-  if (isFactoryUserRole(user)) {
-    return { target_factory_id: user.tenant_id };
-  }
-  
-  return null;
+export function consumeResetToken(token: string): string | null {
+  const email = verifyResetToken(token);
+  if (email) resetTokenStore.delete(token);
+  return email;
 }
 
-/**
- * 获取用户根据角色跳转的首页路径
- */
-export function getDashboardPath(user: AuthUser | null): string {
-  if (!user) return '/login';
-  
-  switch (user.role) {
-    case 'super_admin':
-    case 'saas_admin':
-      return '/dashboard';  // 后台管理
-    case 'dealer_admin':
-      return '/dealer';    // 经销商下单页
-    case 'factory_admin':
-      return '/factory';    // 工厂管理页
-    case 'supplier_admin':
-      return '/supplier';   // 材料商管理页
-    case 'factory_user':
-      return '/worker';     // 工人报工页
-    default:
-      return '/';
+export function updateUserPassword(email: string, newPassword: string): boolean {
+  const existing = userStore.get(email);
+  if (!existing) return false;
+  existing.password = newPassword;
+  return true;
+}
+
+// ===================== OAuth State =====================
+
+export function generateOAuthState(provider: string, redirectUrl: string): string {
+  const state = crypto.randomBytes(16).toString('hex');
+  oauthStateStore.set(state, { provider, redirectUrl, expiresAt: Date.now() + 10 * 60 * 1000 });
+  return state;
+}
+
+export function verifyOAuthState(state: string): { provider: string; redirectUrl: string } | null {
+  const stored = oauthStateStore.get(state);
+  if (!stored) return null;
+  if (Date.now() > stored.expiresAt) {
+    oauthStateStore.delete(state);
+    return null;
   }
+  oauthStateStore.delete(state);
+  return stored;
 }
 
-/**
- * 判断用户是否有某项权限
- */
-export function hasPermission(user: AuthUser | null, requiredRole: UserRole): boolean {
-  if (!user) return false;
-  return roleHierarchy[user.role] >= roleHierarchy[requiredRole];
+// ===================== 会话管理 =====================
+
+const SESSION_COOKIE_NAME = 'auth_session';
+const SESSION_DURATION = 7 * 24 * 60 * 60 * 1000; // 7 天
+
+export async function createSession(user: User): Promise<string> {
+  const sessionId = crypto.randomBytes(32).toString('hex');
+  const session: Session = { user, expiresAt: Date.now() + SESSION_DURATION };
+  sessionStore.set(sessionId, session);
+  return sessionId;
 }
 
-/**
- * 权限矩阵定义
- */
-export const permissions = {
-  // 订单权限
-  'orders:create': ['super_admin', 'saas_admin', 'dealer_admin'] as UserRole[],
-  'orders:read:all': ['super_admin', 'saas_admin'] as UserRole[],
-  'orders:read:dealer': ['dealer_admin'] as UserRole[],
-  'orders:read:factory': ['factory_admin', 'factory_user'] as UserRole[],
-  'orders:read:supplier': ['supplier_admin'] as UserRole[],
-  'orders:update': ['super_admin', 'saas_admin', 'dealer_admin', 'factory_admin'] as UserRole[],
-  'orders:delete': ['super_admin', 'dealer_admin'] as UserRole[],
-  'orders:assign_factory': ['dealer_admin'] as UserRole[],  // 派单
-  
-  // 生产任务权限
-  'tasks:read': ['factory_admin', 'factory_user'] as UserRole[],
-  'tasks:update_progress': ['factory_admin', 'factory_user'] as UserRole[],
-  'tasks:assign_worker': ['factory_admin'] as UserRole[],
-  
-  // 用户管理权限
-  'users:manage:all': ['super_admin'] as UserRole[],
-  'users:manage:tenant': ['dealer_admin', 'factory_admin', 'supplier_admin'] as UserRole[],
-  
-  // 工厂管理权限
-  'factory:manage': ['super_admin', 'saas_admin'] as UserRole[],
-  'factory:view_load': ['dealer_admin', 'factory_admin'] as UserRole[],  // 查看工厂负载
+export async function getSession(): Promise<Session | null> {
+  const cookieStore = await cookies();
+  const sessionId = cookieStore.get(SESSION_COOKIE_NAME)?.value;
+  if (!sessionId) return null;
+  const session = sessionStore.get(sessionId);
+  if (!session || Date.now() > session.expiresAt) {
+    sessionStore.delete(sessionId);
+    return null;
+  }
+  return session;
+}
 
-  // 材料商管理权限
-  'supplier:manage': ['supplier_admin'] as UserRole[],
-};
+export function setSessionCookie(sessionId: string): string {
+  return `${SESSION_COOKIE_NAME}=${sessionId}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${Math.floor(SESSION_DURATION / 1000)}`;
+}
 
-// 从请求中获取用户信息（用于API路由）
+// ===================== 从请求中获取用户 =====================
+
+export interface AuthUser extends User {
+  role: string;
+  tenant_id?: string;
+  nickname?: string;
+}
+
 export async function getUserFromRequest(request: Request): Promise<AuthUser | null> {
-  const cookieHeader = request.headers.get('cookie');
-  if (!cookieHeader) return null;
-  
-  const cookies = Object.fromEntries(
-    cookieHeader.split('; ').map(c => {
-      const [key, ...val] = c.split('=');
-      return [key, val.join('=')];
-    })
-  );
-  
-  const userCookie = cookies['erp_user'];
-  if (!userCookie) return null;
-  
   try {
-    return JSON.parse(decodeURIComponent(userCookie)) as AuthUser;
+    const cookieHeader = request.headers.get('cookie') || '';
+    const sessionMatch = cookieHeader.match(new RegExp(`${SESSION_COOKIE_NAME}=([^;]+)`));
+    if (!sessionMatch) return null;
+    const session = sessionStore.get(sessionMatch[1]);
+    if (!session || Date.now() > session.expiresAt) return null;
+    // 从用户信息推导角色（演示用：默认 super_admin）
+    return { ...session.user, role: 'super_admin' };
   } catch {
     return null;
   }
+}
+
+// ===================== 用户认证 =====================
+
+export function authenticateUser(account: string, password: string): User | null {
+  const stored = userStore.get(account);
+  if (!stored) return null;
+  if (stored.password !== password) return null;
+  return stored.user;
+}
+
+export function findOrCreateOAuthUser(provider: string, providerAccountId: string, profile: { name?: string; email?: string; avatar?: string }): User {
+  // 演示：基于 provider + providerAccountId 生成唯一用户
+  const userKey = `${provider}:${providerAccountId}`;
+  const existing = userStore.get(userKey);
+  if (existing) return existing.user;
+
+  const user: User = {
+    id: crypto.randomUUID(),
+    name: profile.name || `${provider}用户`,
+    email: profile.email,
+    avatar: profile.avatar,
+    provider: provider as User['provider'],
+  };
+  userStore.set(userKey, { password: '', user });
+  return user;
+}
+
+// ===================== 定期清理过期数据 =====================
+
+if (typeof globalThis !== 'undefined') {
+  setInterval(() => {
+    const now = Date.now();
+    for (const [key, val] of captchaStore) {
+      if (now > val.expiresAt) captchaStore.delete(key);
+    }
+    for (const [key, val] of resetTokenStore) {
+      if (now > val.expiresAt) resetTokenStore.delete(key);
+    }
+    for (const [key, val] of oauthStateStore) {
+      if (now > val.expiresAt) oauthStateStore.delete(key);
+    }
+    for (const [key, val] of sessionStore) {
+      if (now > val.expiresAt) sessionStore.delete(key);
+    }
+  }, 60 * 1000);
 }

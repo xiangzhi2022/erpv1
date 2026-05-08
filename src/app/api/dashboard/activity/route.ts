@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { getSupabaseServiceClient } from '@/storage/database/supabase-client';
+import { getSupabaseClient } from '@/db/client';
 import { cookies } from 'next/headers';
 
 async function getCurrentUser() {
@@ -29,7 +29,7 @@ export async function GET() {
       return NextResponse.json({ success: false, error: '请先登录' }, { status: 401 });
     }
 
-    const supabase = getSupabaseServiceClient();
+    const supabase = getSupabaseClient();
 
     // 并行获取各类最近活动
     const [recentOrders, recentTenants, recentCustomers, recentTasks, recentShippings] =

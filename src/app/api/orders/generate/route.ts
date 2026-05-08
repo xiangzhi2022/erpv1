@@ -1,10 +1,10 @@
-import { getSupabaseServiceClient } from '@/storage/database/supabase-client';
+import { getSupabaseClient } from '@/db/client';
 import { NextRequest, NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
 
 export async function POST(request: NextRequest) {
   try {
-    const supabase = getSupabaseServiceClient();
+    const supabase = getSupabaseClient();
     const cookieStore = await cookies();
     const userSession = cookieStore.get('user_session');
     
@@ -49,8 +49,8 @@ export async function POST(request: NextRequest) {
 
     if (orderData && orderData.length > 0) {
       // 找到当天最大的序号
-      const sequences = orderData.map(order => {
-        const match = order.order_no.match(/^.*(\d{8})(\d{2})$/);
+      const sequences = orderData.map((order: Record<string, unknown>) => {
+        const match = String(order.order_no).match(/^.*(\d{8})(\d{2})$/);
         return match ? parseInt(match[2], 10) : 0;
       });
       const maxSeq = Math.max(...sequences);

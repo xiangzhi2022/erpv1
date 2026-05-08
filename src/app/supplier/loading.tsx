@@ -1,5 +1,6 @@
 import { Sidebar } from '@/components/sidebar';
 import { Skeleton } from '@/components/ui/skeleton';
+import { Card, CardContent, CardHeader } from '@/components/ui/card';
 
 export default function SupplierLoading() {
   return (
@@ -14,12 +15,17 @@ export default function SupplierLoading() {
         </div>
 
         {/* 统计卡片骨架 */}
-        <div className="grid grid-cols-4 gap-4 mb-6">
-          {Array.from({ length: 4 }).map((_, i) => (
-            <div key={i} className="rounded-lg border bg-card p-4">
-              <Skeleton className="h-4 w-20 mb-2" />
-              <Skeleton className="h-8 w-16" />
-            </div>
+        <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mb-6">
+          {Array.from({ length: 5 }).map((_, i) => (
+            <Card key={i}>
+              <CardHeader className="flex flex-row items-center justify-between pb-2">
+                <Skeleton className="h-4 w-20" />
+                <Skeleton className="h-4 w-4 rounded" />
+              </CardHeader>
+              <CardContent>
+                <Skeleton className="h-8 w-16" />
+              </CardContent>
+            </Card>
           ))}
         </div>
 
@@ -29,6 +35,7 @@ export default function SupplierLoading() {
           <Skeleton className="h-9 w-32" />
           <Skeleton className="h-9 w-28" />
           <Skeleton className="h-9 w-28" />
+          <Skeleton className="h-8 w-16" />
           <div className="flex-1" />
           <Skeleton className="h-9 w-32" />
         </div>
@@ -45,20 +52,18 @@ export default function SupplierLoading() {
             <Skeleton className="h-4 w-16" />
             <Skeleton className="h-4 w-8" />
           </div>
-          <div className="space-y-0">
-            {Array.from({ length: 8 }).map((_, i) => (
-              <div key={i} className="flex items-center gap-4 p-4 border-b last:border-0">
-                <Skeleton className="h-4 w-28" />
-                <Skeleton className="h-4 w-40" />
-                <Skeleton className="h-4 w-20" />
-                <Skeleton className="h-4 w-20" />
-                <Skeleton className="h-4 w-28" />
-                <Skeleton className="h-6 w-12 rounded-full" />
-                <Skeleton className="h-6 w-16 rounded-full" />
-                <Skeleton className="h-8 w-8" />
-              </div>
-            ))}
-          </div>
+          {Array.from({ length: 6 }).map((_, i) => (
+            <div key={i} className="flex items-center gap-4 p-4 border-b last:border-0">
+              <Skeleton className="h-4 w-28" />
+              <Skeleton className="h-4 w-40" />
+              <Skeleton className="h-4 w-20" />
+              <Skeleton className="h-4 w-20" />
+              <Skeleton className="h-4 w-28" />
+              <Skeleton className="h-6 w-12 rounded-full" />
+              <Skeleton className="h-6 w-16 rounded-full" />
+              <Skeleton className="h-8 w-8" />
+            </div>
+          ))}
         </div>
       </main>
     </div>

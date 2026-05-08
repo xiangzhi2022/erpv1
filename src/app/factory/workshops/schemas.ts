@@ -60,6 +60,11 @@ export const workshopFormSchema = z.object({
     .number({ error: "产能必须为数字" })
     .int("产能必须为整数")
     .min(0, "产能不能为负数"),
+  current_load: z
+    .number({ error: "负荷必须为数字" })
+    .int("负荷必须为整数")
+    .min(0, "负荷不能为负数"),
+  status: z.enum(["normal", "maintenance", "stopped"]),
   description: z
     .string()
     .max(500, "描述不超过500字"),

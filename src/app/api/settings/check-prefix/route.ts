@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getSupabaseServiceClient } from '@/storage/database/supabase-client';
+import { getSupabaseClient } from '@/db/client';
 
 export async function POST(request: NextRequest) {
   try {
@@ -10,7 +10,7 @@ export async function POST(request: NextRequest) {
     }
     
     const upperPrefix = prefix.toUpperCase();
-    const supabase = getSupabaseServiceClient();
+    const supabase = getSupabaseClient();
     
     // 从新的order_prefixes表查询
     const { data, error } = await supabase

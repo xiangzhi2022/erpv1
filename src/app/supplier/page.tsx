@@ -1,88 +1,233 @@
-"use client";
+'use client';
 
-import { useState, useEffect } from "react";
-import { Sidebar } from "@/components/sidebar";
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
-import { Package, Plus, Clock, CheckCircle, Truck, AlertCircle, DollarSign, ShoppingCart } from "lucide-react";
+import { useState, useEffect, useCallback } from 'react';
+import { Sidebar } from '@/components/sidebar';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { toast } from 'sonner';
+import { Truck, ShieldCheck, ShieldAlert, UserCheck, Clock } from 'lucide-react';
+import { SupplierToolbar } from './components/supplier-toolbar';
+import { SupplierTable } from './components/supplier-table';
+import { SupplierFormModal } from './components/supplier-form-modal';
+import { StatusChangeDialog } from './components/status-change-dialog';
+import { SupplierDetailDialog } from './components/supplier-detail-dialog';
+import { DeleteConfirmDialog } from './components/delete-confirm-dialog';
+import type { Supplier } from './schemas';
 
-interface MaterialOrder {
-  id: string;
-  order_no: string;
-  customer_name: string;
-  total_amount: number;
-  status: string;
-  created_at: string;
+interface SupplierStats {
+  total: number;
+  active: number;
+  inspecting: number;
+  blacklisted: number;
+  ratingA: number;
 }
 
-const statusConfig: Record<string, { label: string; color: string; icon: React.ReactNode }> = {
-  pending: { label: "待确认", color: "text-amber-600 bg-amber-50", icon: <Clock className="w-4 h-4" /> },
-  confirmed: { label: "已确认", color: "text-blue-600 bg-blue-50", icon: <CheckCircle className="w-4 h-4" /> },
-  shipped: { label: "已发货", color: "text-purple-600 bg-purple-50", icon: <Truck className="w-4 h-4" /> },
-  completed: { label: "已完成", color: "text-green-600 bg-green-50", icon: <CheckCircle className="w-4 h-4" /> },
-  cancelled: { label: "已取消", color: "text-red-600 bg-red-50", icon: <AlertCircle className="w-4 h-4" /> },
-};
+export default function SupplierPage() {
 
-export default function SupplierDashboard() {
-  const [orders, setOrders] = useState<MaterialOrder[]>([]);
+  // 数据状态
+  const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [loading, setLoading] = useState(true);
-  const [stats, setStats] = useState({
+  const [stats, setStats] = useState<SupplierStats>({
     total: 0,
-    pending: 0,
-    confirmed: 0,
-    shipped: 0,
+    active: 0,
+    inspecting: 0,
+    blacklisted: 0,
+    ratingA: 0,
   });
 
-  useEffect(() => {
-    fetchData();
-  }, []);
+  // 筛选状态
+  const [searchKeyword, setSearchKeyword] = useState('');
+  const [filters, setFilters] = useState<{
+    category?: string;
+    rating?: string;
+    status?: string;
+  }>({});
 
-  const fetchData = async () => {
+  // 弹窗状态
+  const [formOpen, setFormOpen] = useState(false);
+  const [editingSupplier, setEditingSupplier] = useState<Supplier | null>(null);
+  const [viewingSupplier, setViewingSupplier] = useState<Supplier | null>(null);
+  const [statusChangingSupplier, setStatusChangingSupplier] = useState<Supplier | null>(null);
+  const [deletingSupplier, setDeletingSupplier] = useState<Supplier | null>(null);
+  const [submitting, setSubmitting] = useState(false);
+
+  // 获取供应商列表
+  const fetchSuppliers = useCallback(async () => {
     try {
-      const res = await fetch("/api/supplier/orders");
+      setLoading(true);
+      const params = new URLSearchParams();
+      if (searchKeyword) params.set('keyword', searchKeyword);
+      if (filters.category) params.set('category', filters.category);
+      if (filters.rating) params.set('rating', filters.rating);
+      if (filters.status) params.set('status', filters.status);
+
+      const res = await fetch(`/api/supplier/list?${params.toString()}`);
       if (res.ok) {
         const data = await res.json();
-        setOrders(data.orders || []);
-        
-        const statsData = {
-          total: data.orders?.length || 0,
-          pending: data.orders?.filter((o: MaterialOrder) => o.status === "pending").length || 0,
-          confirmed: data.orders?.filter((o: MaterialOrder) => o.status === "confirmed").length || 0,
-          shipped: data.orders?.filter((o: MaterialOrder) => o.status === "shipped").length || 0,
-        };
-        setStats(statsData);
+        if (data.success) {
+          setSuppliers(data.data || []);
+          // 更新统计
+          const list: Supplier[] = data.data || [];
+          setStats({
+            total: list.length,
+            active: list.filter((s) => s.status === 'active').length,
+            inspecting: list.filter((s) => s.status === 'inspecting').length,
+            blacklisted: list.filter((s) => s.status === 'blacklisted').length,
+            ratingA: list.filter((s) => s.rating === 'A').length,
+          });
+        }
       }
     } catch (error) {
-      console.error("获取数据失败:", error);
+      console.error('获取供应商列表失败:', error);
+      toast.error('获取数据失败', { description: '无法加载供应商列表，请稍后重试' });
     } finally {
       setLoading(false);
     }
+  }, [searchKeyword, filters]);
+
+  useEffect(() => {
+    fetchSuppliers();
+  }, [fetchSuppliers]);
+
+  // 新增供应商
+  const handleCreate = () => {
+    setEditingSupplier(null);
+    setFormOpen(true);
   };
 
-  const formatPrice = (price: number) => {
-    return (price / 100).toFixed(2);
+  // 编辑供应商
+  const handleEdit = (supplier: Supplier) => {
+    setEditingSupplier(supplier);
+    setFormOpen(true);
   };
 
-  const formatDate = (date: string) => {
-    return new Date(date).toLocaleDateString("zh-CN");
+  // 查看详情
+  const handleView = (supplier: Supplier) => {
+    setViewingSupplier(supplier);
+  };
+
+  // 变更状态
+  const handleStatusChange = (supplier: Supplier) => {
+    setStatusChangingSupplier(supplier);
+  };
+
+  // 删除供应商
+  const handleDelete = (supplier: Supplier) => {
+    setDeletingSupplier(supplier);
+  };
+
+  // 表单提交（新增/编辑）
+  const handleFormSubmit = async (values: Record<string, unknown>) => {
+    try {
+      setSubmitting(true);
+      const isEdit = !!editingSupplier;
+      const url = isEdit ? '/api/supplier/update' : '/api/supplier/create';
+      const body = isEdit ? { id: editingSupplier.id, ...values } : values;
+
+      const res = await fetch(url, {
+        method: isEdit ? 'PATCH' : 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+
+      const data = await res.json();
+      if (data.success) {
+        toast.success(isEdit ? '更新成功' : '创建成功', {
+          description: isEdit ? '供应商信息已更新' : `供应商 ${values.name as string} 已创建`,
+        });
+        setFormOpen(false);
+        setEditingSupplier(null);
+        fetchSuppliers();
+      } else {
+        toast.error(isEdit ? '更新失败' : '创建失败', {
+          description: data.error || '操作失败，请重试',
+        });
+      }
+    } catch (error) {
+      console.error('提交供应商失败:', error);
+      toast.error('提交失败', { description: '网络错误，请稍后重试' });
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  // 状态变更确认
+  const handleStatusConfirm = async (supplierId: string, newStatus: string) => {
+    try {
+      setSubmitting(true);
+      const res = await fetch('/api/supplier/update', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: supplierId, status: newStatus }),
+      });
+
+      const data = await res.json();
+      if (data.success) {
+        toast.success('状态已变更', { description: '供应商合作状态已更新' });
+        setStatusChangingSupplier(null);
+        fetchSuppliers();
+      } else {
+        toast.error('变更失败', { description: data.error || '状态变更失败' });
+      }
+    } catch (error) {
+      console.error('变更状态失败:', error);
+      toast.error('变更失败', { description: '网络错误，请稍后重试' });
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  // 删除确认
+  const handleDeleteConfirm = async () => {
+    if (!deletingSupplier) return;
+    try {
+      setSubmitting(true);
+      const res = await fetch(`/api/supplier/delete?id=${deletingSupplier.id}`, {
+        method: 'DELETE',
+      });
+
+      const data = await res.json();
+      if (data.success) {
+        toast.success('删除成功', { description: `供应商 ${deletingSupplier.name} 已删除` });
+        setDeletingSupplier(null);
+        fetchSuppliers();
+      } else {
+        toast.error('删除失败', { description: data.error || '删除失败' });
+      }
+    } catch (error) {
+      console.error('删除供应商失败:', error);
+      toast.error('删除失败', { description: '网络错误，请稍后重试' });
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  // 从详情弹窗跳转编辑
+  const handleEditFromDetail = (supplier: Supplier) => {
+    setViewingSupplier(null);
+    setTimeout(() => {
+      handleEdit(supplier);
+    }, 200);
   };
 
   return (
     <div className="flex min-h-screen bg-background">
       <Sidebar />
-      
+
       <main className="flex-1 p-6 ml-64">
-        <div className="mb-8">
-          <h1 className="text-3xl font-bold">材料商管理</h1>
-          <p className="text-muted-foreground mt-1">管理材料订单和库存</p>
+        {/* 页面标题 */}
+        <div className="flex justify-between items-center mb-6">
+          <div>
+            <h1 className="text-2xl font-bold tracking-tight">供应商管理</h1>
+            <p className="text-muted-foreground mt-1">维护上游合作伙伴档案与资质评级</p>
+          </div>
         </div>
 
         {/* 统计卡片 */}
-        <div className="grid grid-cols-4 gap-4 mb-6">
+        <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mb-6">
           <Card>
             <CardHeader className="flex flex-row items-center justify-between pb-2">
-              <CardTitle className="text-sm font-medium text-muted-foreground">总订单</CardTitle>
-              <ShoppingCart className="h-4 w-4 text-muted-foreground" />
+              <CardTitle className="text-sm font-medium text-muted-foreground">供应商总数</CardTitle>
+              <Truck className="h-4 w-4 text-muted-foreground" />
             </CardHeader>
             <CardContent>
               <div className="text-2xl font-bold">{stats.total}</div>
@@ -90,92 +235,100 @@ export default function SupplierDashboard() {
           </Card>
           <Card>
             <CardHeader className="flex flex-row items-center justify-between pb-2">
-              <CardTitle className="text-sm font-medium text-muted-foreground">待确认</CardTitle>
+              <CardTitle className="text-sm font-medium text-muted-foreground">活跃合作</CardTitle>
+              <UserCheck className="h-4 w-4 text-emerald-600" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold text-emerald-600">{stats.active}</div>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between pb-2">
+              <CardTitle className="text-sm font-medium text-muted-foreground">考察中</CardTitle>
               <Clock className="h-4 w-4 text-amber-600" />
             </CardHeader>
             <CardContent>
-              <div className="text-2xl font-bold text-amber-600">{stats.pending}</div>
+              <div className="text-2xl font-bold text-amber-600">{stats.inspecting}</div>
             </CardContent>
           </Card>
           <Card>
             <CardHeader className="flex flex-row items-center justify-between pb-2">
-              <CardTitle className="text-sm font-medium text-muted-foreground">已确认</CardTitle>
-              <CheckCircle className="h-4 w-4 text-blue-600" />
+              <CardTitle className="text-sm font-medium text-muted-foreground">已拉黑</CardTitle>
+              <ShieldAlert className="h-4 w-4 text-red-600" />
             </CardHeader>
             <CardContent>
-              <div className="text-2xl font-bold text-blue-600">{stats.confirmed}</div>
+              <div className="text-2xl font-bold text-red-600">{stats.blacklisted}</div>
             </CardContent>
           </Card>
           <Card>
             <CardHeader className="flex flex-row items-center justify-between pb-2">
-              <CardTitle className="text-sm font-medium text-muted-foreground">已发货</CardTitle>
-              <Truck className="h-4 w-4 text-purple-600" />
+              <CardTitle className="text-sm font-medium text-muted-foreground">A级供应商</CardTitle>
+              <ShieldCheck className="h-4 w-4 text-blue-600" />
             </CardHeader>
             <CardContent>
-              <div className="text-2xl font-bold text-purple-600">{stats.shipped}</div>
+              <div className="text-2xl font-bold text-blue-600">{stats.ratingA}</div>
             </CardContent>
           </Card>
         </div>
 
-        {/* 订单列表 */}
-        <Card>
-          <CardHeader>
-            <div className="flex items-center justify-between">
-              <div>
-                <CardTitle>材料订单</CardTitle>
-                <CardDescription>管理您的材料供应订单</CardDescription>
+        {/* 工具栏 */}
+        <SupplierToolbar
+          onSearch={setSearchKeyword}
+          onFilterChange={setFilters}
+          onCreateClick={handleCreate}
+        />
+
+        {/* 数据表格 */}
+        <div className="mt-4">
+          {loading ? (
+            <div className="flex items-center justify-center py-16 text-muted-foreground">
+              <div className="flex items-center gap-2">
+                <div className="h-4 w-4 animate-spin rounded-full border-2 border-muted-foreground border-t-transparent" />
+                加载中...
               </div>
             </div>
-          </CardHeader>
-          <CardContent>
-            {loading ? (
-              <div className="text-center py-8 text-muted-foreground">加载中...</div>
-            ) : orders.length === 0 ? (
-              <div className="text-center py-8 text-muted-foreground">
-                暂无订单数据
-              </div>
-            ) : (
-              <div className="space-y-4">
-                {orders.map((order) => {
-                  const status = statusConfig[order.status] || statusConfig.pending;
-                  return (
-                    <div
-                      key={order.id}
-                      className="flex items-center justify-between p-4 border rounded-lg hover:bg-muted/50 transition-colors"
-                    >
-                      <div className="flex items-center gap-4">
-                        <div className="p-2 bg-muted rounded-lg">
-                          <Package className="h-5 w-5 text-muted-foreground" />
-                        </div>
-                        <div>
-                          <div className="font-medium">{order.order_no}</div>
-                          <div className="text-sm text-muted-foreground">
-                            客户: {order.customer_name}
-                          </div>
-                        </div>
-                      </div>
-                      <div className="flex items-center gap-6">
-                        <div className="text-right">
-                          <div className="font-medium flex items-center gap-1">
-                            <DollarSign className="h-4 w-4" />
-                            {formatPrice(order.total_amount)}
-                          </div>
-                          <div className="text-sm text-muted-foreground">
-                            {formatDate(order.created_at)}
-                          </div>
-                        </div>
-                        <div className={`px-3 py-1 rounded-full text-xs font-medium flex items-center gap-1 ${status.color}`}>
-                          {status.icon}
-                          {status.label}
-                        </div>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </CardContent>
-        </Card>
+          ) : (
+            <SupplierTable
+              data={suppliers}
+              onEdit={handleEdit}
+              onView={handleView}
+              onStatusChange={handleStatusChange}
+              onDelete={handleDelete}
+            />
+          )}
+        </div>
+
+        {/* 弹窗组件 */}
+        <SupplierFormModal
+          open={formOpen}
+          onOpenChange={setFormOpen}
+          supplier={editingSupplier}
+          onSubmit={handleFormSubmit}
+          loading={submitting}
+        />
+
+        <SupplierDetailDialog
+          open={!!viewingSupplier}
+          onOpenChange={(open) => !open && setViewingSupplier(null)}
+          supplier={viewingSupplier}
+          onEdit={handleEditFromDetail}
+        />
+
+        <StatusChangeDialog
+          open={!!statusChangingSupplier}
+          onOpenChange={(open) => !open && setStatusChangingSupplier(null)}
+          supplier={statusChangingSupplier}
+          onConfirm={handleStatusConfirm}
+          loading={submitting}
+        />
+
+        <DeleteConfirmDialog
+          open={!!deletingSupplier}
+          onOpenChange={(open) => !open && setDeletingSupplier(null)}
+          supplier={deletingSupplier}
+          onConfirm={handleDeleteConfirm}
+          loading={submitting}
+        />
       </main>
     </div>
   );

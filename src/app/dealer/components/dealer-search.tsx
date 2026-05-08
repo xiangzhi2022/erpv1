@@ -1,5 +1,6 @@
 'use client';
 
+import { useState, useCallback } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -11,60 +12,66 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { Search, RotateCcw } from 'lucide-react';
-import { useCallback } from 'react';
 
 export function DealerSearch() {
   const router = useRouter();
   const searchParams = useSearchParams();
 
+  const [keyword, setKeyword] = useState(searchParams.get('keyword') || '');
+  const [status, setStatus] = useState(searchParams.get('status') || 'all');
+
+  const applyFilters = useCallback(
+    (newKeyword?: string, newStatus?: string) => {
+      const kw = newKeyword !== undefined ? newKeyword : keyword;
+      const st = newStatus !== undefined ? newStatus : status;
+
+      const params = new URLSearchParams();
+      params.set('page', '1');
+      if (kw) params.set('keyword', kw);
+      if (st && st !== 'all') params.set('status', st);
+
+      router.push(`/dealer?${params.toString()}`);
+    },
+    [keyword, status, router]
+  );
+
   const handleSearch = useCallback(() => {
-    const keyword = (document.getElementById('dealer-keyword') as HTMLInputElement)?.value || '';
-    const status = (document.getElementById('dealer-status') as HTMLSelectElement)?.value || '';
-
-    const params = new URLSearchParams();
-    params.set('page', '1');
-    if (keyword) params.set('keyword', keyword);
-    if (status) params.set('status', status);
-
-    router.push(`/dealer?${params.toString()}`);
-  }, [router]);
+    applyFilters();
+  }, [applyFilters]);
 
   const handleReset = useCallback(() => {
-    const keywordInput = document.getElementById('dealer-keyword') as HTMLInputElement;
-    const statusSelect = document.getElementById('dealer-status') as HTMLSelectElement;
-    if (keywordInput) keywordInput.value = '';
-    if (statusSelect) statusSelect.value = '';
+    setKeyword('');
+    setStatus('all');
     router.push('/dealer');
   }, [router]);
 
-  const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
-    if (e.key === 'Enter') {
-      handleSearch();
-    }
-  }, [handleSearch]);
+  const handleKeyDown = useCallback(
+    (e: React.KeyboardEvent) => {
+      if (e.key === 'Enter') {
+        handleSearch();
+      }
+    },
+    [handleSearch]
+  );
+
+  const handleStatusChange = useCallback(
+    (value: string) => {
+      setStatus(value);
+      applyFilters(keyword, value);
+    },
+    [keyword, applyFilters]
+  );
 
   return (
     <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3">
       <Input
-        id="dealer-keyword"
         placeholder="搜索经销商名称/联系人/电话"
         className="w-full sm:w-[260px]"
-        defaultValue={searchParams.get('keyword') || ''}
+        value={keyword}
+        onChange={(e) => setKeyword(e.target.value)}
         onKeyDown={handleKeyDown}
       />
-      <Select
-        defaultValue={searchParams.get('status') || 'all'}
-        onValueChange={(value) => {
-          const params = new URLSearchParams(searchParams.toString());
-          params.set('page', '1');
-          if (value && value !== 'all') {
-            params.set('status', value);
-          } else {
-            params.delete('status');
-          }
-          router.push(`/dealer?${params.toString()}`);
-        }}
-      >
+      <Select value={status} onValueChange={handleStatusChange}>
         <SelectTrigger className="w-full sm:w-[140px]">
           <SelectValue placeholder="状态筛选" />
         </SelectTrigger>

@@ -1,134 +1,144 @@
-"use client";
+'use client';
 
-import { WorkshopStatusType } from "../schemas";
-import { Input } from "@/components/ui/input";
-import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
+import { useEffect, useRef, useCallback } from 'react';
+import { Input } from '@/components/ui/input';
+import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
 import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from "@/components/ui/select";
-import { LayoutGrid, List, Search, X } from "lucide-react";
+} from '@/components/ui/select';
+import {
+  LayoutGrid,
+  List,
+  Search,
+  X,
+} from 'lucide-react';
 
 interface FactoryToolbarProps {
-  keyword: string;
-  onKeywordChange: (value: string) => void;
+  viewMode: 'card' | 'table';
+  onViewModeChange: (mode: 'card' | 'table') => void;
   statusFilter: string;
-  onStatusFilterChange: (value: string) => void;
-  viewMode: "card" | "table";
-  onViewModeChange: (mode: "card" | "table") => void;
-  totalCount: number;
-  normalCount: number;
-  maintenanceCount: number;
-  stoppedCount: number;
+  onStatusFilterChange: (status: string) => void;
+  keyword: string;
+  onKeywordChange: (keyword: string) => void;
 }
 
 export function FactoryToolbar({
-  keyword,
-  onKeywordChange,
-  statusFilter,
-  onStatusFilterChange,
   viewMode,
   onViewModeChange,
-  totalCount,
-  normalCount,
-  maintenanceCount,
-  stoppedCount,
+  statusFilter,
+  onStatusFilterChange,
+  keyword,
+  onKeywordChange,
 }: FactoryToolbarProps) {
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  const handleInputChange = useCallback((value: string) => {
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    debounceRef.current = setTimeout(() => {
+      onKeywordChange(value);
+    }, 300);
+  }, [onKeywordChange]);
+
+  useEffect(() => {
+    return () => {
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+    };
+  }, []);
+
   return (
-    <div className="space-y-4">
-      {/* 快捷状态筛选标签 */}
-      <div className="flex items-center gap-2">
-        <button
-          onClick={() => onStatusFilterChange("all")}
-          className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-medium transition-colors ${
-            statusFilter === "all"
-              ? "bg-primary text-primary-foreground"
-              : "bg-muted text-muted-foreground hover:bg-muted/80"
-          }`}
-        >
-          全部
-          <span className="text-xs opacity-70">{totalCount}</span>
-        </button>
-        <button
-          onClick={() => onStatusFilterChange("normal")}
-          className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-medium transition-colors ${
-            statusFilter === "normal"
-              ? "bg-emerald-600 text-white"
-              : "bg-emerald-50 text-emerald-700 hover:bg-emerald-100"
-          }`}
-        >
-          <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
-          正常
-          <span className="text-xs opacity-70">{normalCount}</span>
-        </button>
-        <button
-          onClick={() => onStatusFilterChange("maintenance")}
-          className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-medium transition-colors ${
-            statusFilter === "maintenance"
-              ? "bg-amber-600 text-white"
-              : "bg-amber-50 text-amber-700 hover:bg-amber-100"
-          }`}
-        >
-          <span className="w-1.5 h-1.5 rounded-full bg-amber-500" />
-          检修中
-          <span className="text-xs opacity-70">{maintenanceCount}</span>
-        </button>
-        <button
-          onClick={() => onStatusFilterChange("stopped")}
-          className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-medium transition-colors ${
-            statusFilter === "stopped"
-              ? "bg-red-600 text-white"
-              : "bg-red-50 text-red-700 hover:bg-red-100"
-          }`}
-        >
-          <span className="w-1.5 h-1.5 rounded-full bg-red-500" />
-          停工
-          <span className="text-xs opacity-70">{stoppedCount}</span>
-        </button>
+    <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3">
+      {/* Search */}
+      <div className="relative w-full sm:w-64">
+        <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+        <Input
+          ref={inputRef}
+          placeholder="搜索车间名称、编号..."
+          className="pl-9 pr-8 h-9"
+          defaultValue={keyword}
+          onChange={(e) => handleInputChange(e.target.value)}
+        />
+        {keyword && (
+          <button
+            className="absolute right-2.5 top-1/2 -translate-y-1/2"
+            onClick={() => {
+              onKeywordChange('');
+              if (inputRef.current) inputRef.current.value = '';
+            }}
+          >
+            <X className="h-3.5 w-3.5 text-muted-foreground hover:text-foreground" />
+          </button>
+        )}
       </div>
 
-      {/* 搜索栏 + 视图切换 */}
-      <div className="flex items-center gap-3">
-        <div className="relative flex-1 max-w-sm">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-          <Input
-            placeholder="搜索车间名称、编号、负责人..."
-            value={keyword}
-            onChange={(e) => onKeywordChange(e.target.value)}
-            className="pl-9 pr-9"
-          />
-          {keyword && (
-            <button
-              onClick={() => onKeywordChange("")}
-              className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-            >
-              <X className="h-4 w-4" />
-            </button>
-          )}
-        </div>
+      {/* Status Filter */}
+      <Select value={statusFilter} onValueChange={onStatusFilterChange}>
+        <SelectTrigger className="w-full sm:w-[140px] h-9">
+          <SelectValue placeholder="全部状态" />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value="all">全部状态</SelectItem>
+          <SelectItem value="normal">
+            <span className="flex items-center gap-2">
+              <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
+              正常运行
+            </span>
+          </SelectItem>
+          <SelectItem value="maintenance">
+            <span className="flex items-center gap-2">
+              <span className="h-1.5 w-1.5 rounded-full bg-amber-500" />
+              检修中
+            </span>
+          </SelectItem>
+          <SelectItem value="stopped">
+            <span className="flex items-center gap-2">
+              <span className="h-1.5 w-1.5 rounded-full bg-red-500" />
+              已停工
+            </span>
+          </SelectItem>
+        </SelectContent>
+      </Select>
 
-        <div className="flex items-center border rounded-lg p-0.5">
-          <Button
-            variant={viewMode === "card" ? "secondary" : "ghost"}
-            size="icon"
-            className="h-8 w-8"
-            onClick={() => onViewModeChange("card")}
-          >
-            <LayoutGrid className="h-4 w-4" />
-          </Button>
-          <Button
-            variant={viewMode === "table" ? "secondary" : "ghost"}
-            size="icon"
-            className="h-8 w-8"
-            onClick={() => onViewModeChange("table")}
-          >
-            <List className="h-4 w-4" />
-          </Button>
-        </div>
+      {/* Active filters indicator */}
+      {statusFilter !== 'all' && (
+        <Badge
+          variant="secondary"
+          className="cursor-pointer gap-1"
+          onClick={() => onStatusFilterChange('all')}
+        >
+          {statusFilter === 'normal' ? '正常' : statusFilter === 'maintenance' ? '检修' : '停工'}
+          <X className="h-3 w-3" />
+        </Badge>
+      )}
+
+      {/* Spacer */}
+      <div className="flex-1" />
+
+      {/* View Toggle */}
+      <div className="flex items-center border rounded-lg p-0.5">
+        <Button
+          variant={viewMode === 'card' ? 'secondary' : 'ghost'}
+          size="sm"
+          className="h-7 px-2.5"
+          onClick={() => onViewModeChange('card')}
+        >
+          <LayoutGrid className="h-3.5 w-3.5 mr-1" />
+          卡片
+        </Button>
+        <Button
+          variant={viewMode === 'table' ? 'secondary' : 'ghost'}
+          size="sm"
+          className="h-7 px-2.5"
+          onClick={() => onViewModeChange('table')}
+        >
+          <List className="h-3.5 w-3.5 mr-1" />
+          列表
+        </Button>
       </div>
     </div>
   );

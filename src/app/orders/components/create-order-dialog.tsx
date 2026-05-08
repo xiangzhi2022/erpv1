@@ -53,7 +53,6 @@ export function CreateOrderDialog({ open, onOpenChange, onSuccess }: CreateOrder
     resolver: zodResolver(orderFormSchema) as any,
     defaultValues: {
       order_no: '',
-      customer_id: '',
       customer_name: '',
       delivery_date: '',
       remark: '',
@@ -132,7 +131,6 @@ export function CreateOrderDialog({ open, onOpenChange, onSuccess }: CreateOrder
 
   // Select customer
   const selectCustomer = (customer: Customer) => {
-    form.setValue('customer_id', customer.id);
     form.setValue('customer_name', customer.name);
     setCustomerSearchOpen(false);
     setCustomerSearch('');
@@ -247,7 +245,7 @@ export function CreateOrderDialog({ open, onOpenChange, onSuccess }: CreateOrder
                                 <Check
                                   className={cn(
                                     'mr-2 h-4 w-4',
-                                    form.watch('customer_id') === customer.id ? 'opacity-100' : 'opacity-0'
+                                    form.watch('customer_name') === customer.name ? 'opacity-100' : 'opacity-0'
                                   )}
                                 />
                                 <div>

@@ -1,4 +1,4 @@
-import { getSupabaseServiceClient } from '@/storage/database/supabase-client';
+import { getSupabaseClient } from '@/db/client';
 import { cookies } from 'next/headers';
 
 async function getCurrentUser() {
@@ -20,7 +20,7 @@ export async function GET(request: Request) {
       return Response.json({ success: false, error: '请先登录' }, { status: 401 });
     }
 
-    const supabase = getSupabaseServiceClient();
+    const supabase = getSupabaseClient();
     const { searchParams } = new URL(request.url);
     const search = searchParams.get('search');
 
@@ -56,23 +56,21 @@ export async function POST(request: Request) {
     }
 
     const body = await request.json();
-    const { name, contact_person, phone, address, remark } = body;
+    const { name, phone, address, remark } = body;
 
     if (!name) {
       return Response.json({ success: false, error: '客户名称不能为空' }, { status: 400 });
     }
 
-    const supabase = getSupabaseServiceClient();
+    const supabase = getSupabaseClient();
 
     const { data, error } = await supabase
       .from('customers')
       .insert({
         name,
-        contact_person: contact_person || null,
         phone: phone || null,
         address: address || null,
         remark: remark || null,
-        created_by: user.id,
       })
       .select()
       .single();

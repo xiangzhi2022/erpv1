@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import {
@@ -29,6 +29,7 @@ import {
 } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
 import { Button } from '@/components/ui/button';
+import { Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { dealerFormSchema, type DealerFormValues, type Dealer } from '../schemas';
 
@@ -39,36 +40,32 @@ interface DealerFormModalProps {
   onSuccess: () => void;
 }
 
+function getDefaultValues(dealer: Dealer | null): DealerFormValues {
+  return {
+    name: dealer?.name || '',
+    contactName: dealer?.contact_name || '',
+    phone: dealer?.phone || '',
+    region: dealer?.region || '',
+    status: (dealer?.status as 'active' | 'inactive') || 'active',
+    remark: dealer?.remark || '',
+  };
+}
+
 export function DealerFormModal({ open, onOpenChange, editingDealer, onSuccess }: DealerFormModalProps) {
   const [submitting, setSubmitting] = useState(false);
   const isEditing = !!editingDealer;
 
   const form = useForm<DealerFormValues>({
     resolver: zodResolver(dealerFormSchema),
-    defaultValues: {
-      name: editingDealer?.name || '',
-      contactName: editingDealer?.contact_name || '',
-      phone: editingDealer?.phone || '',
-      region: editingDealer?.region || '',
-      status: (editingDealer?.status as 'active' | 'inactive') || 'active',
-      remark: editingDealer?.remark || '',
-    },
+    defaultValues: getDefaultValues(editingDealer),
   });
 
-  // 每次弹窗打开时重置表单
-  const handleOpenChange = (newOpen: boolean) => {
-    if (newOpen) {
-      form.reset({
-        name: editingDealer?.name || '',
-        contactName: editingDealer?.contact_name || '',
-        phone: editingDealer?.phone || '',
-        region: editingDealer?.region || '',
-        status: (editingDealer?.status as 'active' | 'inactive') || 'active',
-        remark: editingDealer?.remark || '',
-      });
+  // 当弹窗打开或编辑对象变化时重置表单
+  useEffect(() => {
+    if (open) {
+      form.reset(getDefaultValues(editingDealer));
     }
-    onOpenChange(newOpen);
-  };
+  }, [open, editingDealer, form]);
 
   const onSubmit = async (values: DealerFormValues) => {
     try {
@@ -86,7 +83,6 @@ export function DealerFormModal({ open, onOpenChange, editingDealer, onSuccess }
       if (result.success) {
         toast.success(isEditing ? '编辑成功' : '新增成功');
         onOpenChange(false);
-        form.reset();
         onSuccess();
       } else {
         toast.error(result.error || '操作失败');
@@ -99,12 +95,12 @@ export function DealerFormModal({ open, onOpenChange, editingDealer, onSuccess }
   };
 
   return (
-    <Dialog open={open} onOpenChange={handleOpenChange}>
+    <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-[480px]">
         <DialogHeader>
           <DialogTitle>{isEditing ? '编辑经销商' : '新增经销商'}</DialogTitle>
           <DialogDescription>
-            {isEditing ? '修改经销商信息' : '填写经销商基本信息'}
+            {isEditing ? '修改经销商基本信息' : '填写经销商基本信息，带 * 为必填项'}
           </DialogDescription>
         </DialogHeader>
         <Form {...form}>
@@ -114,7 +110,9 @@ export function DealerFormModal({ open, onOpenChange, editingDealer, onSuccess }
               name="name"
               render={({ field }) => (
                 <FormItem>
-                  <FormLabel>经销商名称 <span className="text-destructive">*</span></FormLabel>
+                  <FormLabel>
+                    经销商名称 <span className="text-destructive">*</span>
+                  </FormLabel>
                   <FormControl>
                     <Input placeholder="请输入经销商名称" {...field} />
                   </FormControl>
@@ -169,7 +167,7 @@ export function DealerFormModal({ open, onOpenChange, editingDealer, onSuccess }
               render={({ field }) => (
                 <FormItem>
                   <FormLabel>状态</FormLabel>
-                  <Select onValueChange={field.onChange} defaultValue={field.value}>
+                  <Select onValueChange={field.onChange} value={field.value}>
                     <FormControl>
                       <SelectTrigger>
                         <SelectValue placeholder="选择状态" />
@@ -191,7 +189,12 @@ export function DealerFormModal({ open, onOpenChange, editingDealer, onSuccess }
                 <FormItem>
                   <FormLabel>备注</FormLabel>
                   <FormControl>
-                    <Textarea placeholder="备注信息" className="resize-none" rows={3} {...field} />
+                    <Textarea
+                      placeholder="备注信息（选填）"
+                      className="resize-none"
+                      rows={3}
+                      {...field}
+                    />
                   </FormControl>
                   <FormMessage />
                 </FormItem>
@@ -202,7 +205,8 @@ export function DealerFormModal({ open, onOpenChange, editingDealer, onSuccess }
                 取消
               </Button>
               <Button type="submit" disabled={submitting}>
-                {submitting ? '提交中...' : isEditing ? '保存' : '新增'}
+                {submitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                {isEditing ? '保存修改' : '确认新增'}
               </Button>
             </DialogFooter>
           </form>

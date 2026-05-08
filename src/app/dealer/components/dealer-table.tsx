@@ -19,8 +19,9 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
+import { ScrollArea, ScrollBar } from '@/components/ui/scroll-area';
 import { Skeleton } from '@/components/ui/skeleton';
-import { MoreHorizontal, Pencil, Trash2, ChevronLeft, ChevronRight } from 'lucide-react';
+import { MoreHorizontal, Pencil, Trash2, ChevronLeft, ChevronRight, Store } from 'lucide-react';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -39,9 +40,20 @@ interface DealerTableProps {
   refreshTrigger: number;
 }
 
-const statusConfig: Record<string, { label: string; variant: 'default' | 'secondary' | 'destructive' | 'outline'; className: string }> = {
-  active: { label: '启用', variant: 'default', className: 'bg-emerald-100 text-emerald-700 hover:bg-emerald-100' },
-  inactive: { label: '停用', variant: 'secondary', className: 'bg-gray-100 text-gray-500 hover:bg-gray-100' },
+const statusConfig: Record<
+  string,
+  { label: string; variant: 'default' | 'secondary' | 'destructive' | 'outline'; className: string }
+> = {
+  active: {
+    label: '启用',
+    variant: 'default',
+    className: 'bg-emerald-100 text-emerald-700 hover:bg-emerald-100',
+  },
+  inactive: {
+    label: '停用',
+    variant: 'secondary',
+    className: 'bg-gray-100 text-gray-500 hover:bg-gray-100',
+  },
 };
 
 export function DealerTable({ onEdit, refreshTrigger }: DealerTableProps) {
@@ -134,6 +146,7 @@ export function DealerTable({ onEdit, refreshTrigger }: DealerTableProps) {
   if (loading) {
     return (
       <div className="space-y-3">
+        <Skeleton className="h-10 w-full" />
         {Array.from({ length: 5 }).map((_, i) => (
           <Skeleton key={i} className="h-12 w-full" />
         ))}
@@ -143,42 +156,50 @@ export function DealerTable({ onEdit, refreshTrigger }: DealerTableProps) {
 
   if (dealers.length === 0) {
     return (
-      <div className="text-center py-12 text-muted-foreground">
-        暂无经销商数据
+      <div className="text-center py-16 text-muted-foreground">
+        <Store className="mx-auto h-12 w-12 opacity-30" />
+        <p className="mt-4 text-lg font-medium">暂无经销商数据</p>
+        <p className="mt-1 text-sm">点击右上角「新增经销商」添加第一条记录</p>
       </div>
     );
   }
 
   return (
     <>
-      <div className="rounded-md border">
+      <ScrollArea className="rounded-md border">
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHead className="w-[200px]">经销商名称</TableHead>
-              <TableHead className="w-[120px]">联系人</TableHead>
-              <TableHead className="w-[140px]">联系电话</TableHead>
-              <TableHead className="w-[140px]">所在地区</TableHead>
-              <TableHead className="w-[80px]">状态</TableHead>
-              <TableHead className="w-[120px]">创建时间</TableHead>
+              <TableHead className="w-[60px] text-center">序号</TableHead>
+              <TableHead className="min-w-[180px]">经销商名称</TableHead>
+              <TableHead className="min-w-[100px]">联系人</TableHead>
+              <TableHead className="min-w-[130px]">联系电话</TableHead>
+              <TableHead className="min-w-[130px]">所在地区</TableHead>
+              <TableHead className="w-[80px] text-center">状态</TableHead>
+              <TableHead className="min-w-[110px]">创建时间</TableHead>
               <TableHead className="w-[60px] text-right">操作</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
-            {dealers.map((dealer) => {
-              const status = statusConfig[dealer.status] || statusConfig.inactive;
+            {dealers.map((dealer, index) => {
+              const st = statusConfig[dealer.status] || statusConfig.inactive;
               return (
                 <TableRow key={dealer.id}>
+                  <TableCell className="text-center text-muted-foreground">
+                    {(pagination.page - 1) * pagination.pageSize + index + 1}
+                  </TableCell>
                   <TableCell className="font-medium">{dealer.name}</TableCell>
                   <TableCell>{dealer.contact_name || '-'}</TableCell>
                   <TableCell>{dealer.phone || '-'}</TableCell>
                   <TableCell>{dealer.region || '-'}</TableCell>
-                  <TableCell>
-                    <Badge variant={status.variant} className={status.className}>
-                      {status.label}
+                  <TableCell className="text-center">
+                    <Badge variant={st.variant} className={st.className}>
+                      {st.label}
                     </Badge>
                   </TableCell>
-                  <TableCell>{formatDate(dealer.created_at)}</TableCell>
+                  <TableCell className="text-muted-foreground">
+                    {formatDate(dealer.created_at)}
+                  </TableCell>
                   <TableCell className="text-right">
                     <DropdownMenu>
                       <DropdownMenuTrigger asChild>
@@ -207,14 +228,15 @@ export function DealerTable({ onEdit, refreshTrigger }: DealerTableProps) {
             })}
           </TableBody>
         </Table>
-      </div>
+        <ScrollBar orientation="horizontal" />
+      </ScrollArea>
 
       {/* 分页 */}
-      {pagination.totalPages > 1 && (
-        <div className="flex items-center justify-between py-4">
-          <p className="text-sm text-muted-foreground">
-            共 {pagination.total} 条记录，第 {pagination.page}/{pagination.totalPages} 页
-          </p>
+      <div className="flex items-center justify-between py-4">
+        <p className="text-sm text-muted-foreground">
+          共 {pagination.total} 条记录，第 {pagination.page}/{Math.max(pagination.totalPages, 1)} 页
+        </p>
+        {pagination.totalPages > 1 && (
           <div className="flex items-center gap-2">
             <Button
               variant="outline"
@@ -235,8 +257,8 @@ export function DealerTable({ onEdit, refreshTrigger }: DealerTableProps) {
               <ChevronRight className="h-4 w-4" />
             </Button>
           </div>
-        </div>
-      )}
+        )}
+      </div>
 
       {/* 删除确认弹窗 */}
       <AlertDialog open={!!deleteTarget} onOpenChange={(open) => !open && setDeleteTarget(null)}>

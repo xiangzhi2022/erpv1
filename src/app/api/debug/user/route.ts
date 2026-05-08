@@ -1,9 +1,9 @@
 import { NextResponse } from 'next/server';
-import { getSupabaseServiceClient } from '@/storage/database/supabase-client';
+import { getSupabaseClient } from '@/db/client';
 
 export async function GET() {
   try {
-    const supabase = getSupabaseServiceClient();
+    const supabase = getSupabaseClient();
     
     const { data, error } = await supabase
       .from('users')

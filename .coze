@@ -1,13 +1,14 @@
 [project]
 requires = [ "nodejs-24" ]
 template = "nextjs"
-version = "0.0.20"
-appliedPatches = [ ]
+version = "0.0.22"
 
 [dev]
-build = [ "bash", "./scripts/prepare.sh" ]
+# 代码变更前先拉取最新代码，然后安装依赖
+build = [ "bash", "./scripts/pre-sync.sh", "&&", "bash", "./scripts/prepare.sh" ]
 run = [ "bash", "./scripts/dev.sh" ]
-validate = [ "bash", "./scripts/validate.sh" ]
+# 验证通过后自动触发同步（提交+推送）
+validate = [ "bash", "./scripts/validate.sh", "&&", "bash", "./scripts/sync.sh" ]
 deps = [ "git" ]
 
 [deploy]
@@ -15,7 +16,9 @@ build = [ "bash", "./scripts/build.sh" ]
 run = [ "bash", "./scripts/start.sh" ]
 deps = [ "git" ]
 
-[github]
+# GitHub 同步配置块
+[github_sync]
 repository = "xiangzhi2022/erpv1"
 branch = "main"
-auto_commit = true
+auto_push = true
+commit_prefix = "auto-sync:"
