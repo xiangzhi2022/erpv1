@@ -28,10 +28,10 @@ export async function POST(request: Request) {
       return Response.json({ success: false, error: '请先登录' }, { status: 401 });
     }
 
-    const body = await request.json();
-    const { prefix } = body;
+    const body = await request.json().catch(() => ({}));
+    const prefix = typeof body.prefix === 'string' && body.prefix.trim() ? body.prefix.trim() : 'ORD';
 
-    if (!prefix || !prefix.trim()) {
+    if (!prefix) {
       return Response.json({ success: false, error: '前缀不能为空' }, { status: 400 });
     }
 
@@ -43,56 +43,39 @@ export async function POST(request: Request) {
       String(now.getDate()).padStart(2, '0'),
     ].join('');
 
-    // Atomic sequence generation using Supabase RPC or upsert pattern
-    // Use the order_sequences table for atomic increment
-    const sequenceKey = `${prefix.trim()}-${dateStr}`;
+    let query = supabase
+      .from('orders')
+      .select('order_no')
+      .like('order_no', `${prefix}${dateStr}%`)
+      .order('order_no', { ascending: false })
+      .limit(1);
 
-    // Try to atomically increment the sequence using upsert
-    const { data: seqData, error: seqError } = await supabase
-      .from('order_sequences')
-      .upsert(
-        { key: sequenceKey, value: 1 },
-        { onConflict: 'key' }
-      )
-      .select()
-      .single();
-
-    if (seqError) {
-      // If order_sequences table doesn't exist, fall back to counting
-      // Count existing orders with this prefix-date pattern
-      const { count, error: countError } = await supabase
-        .from('orders')
-        .select('*', { count: 'exact', head: true })
-        .like('order_no', `${prefix}${dateStr}%`);
-
-      if (countError) {
-        console.error('Generate order number count error:', countError);
-        return Response.json({ success: false, error: '生成订单号失败' }, { status: 500 });
+    if (user.role !== 'super_admin' && user.role !== 'saas_admin') {
+      if (!user.tenant_id) {
+        return Response.json({ success: false, error: '当前用户未关联租户' }, { status: 403 });
       }
-
-      const seq = (count || 0) + 1;
-      const orderNo = `${prefix}${dateStr}${String(seq).padStart(3, '0')}`;
-      return Response.json({ success: true, data: { order_no: orderNo } });
+      query = query.eq('tenant_id', user.tenant_id);
     }
 
-    // If we got here, the sequence table exists
-    // We need to increment the value atomically
-    // Since upsert with onConflict doesn't auto-increment, use RPC or manual increment
-    const currentValue = (seqData as { key: string; value: number })?.value || 0;
-    const newValue = currentValue + 1;
+    const { data, error } = await query;
 
-    const { error: updateError } = await supabase
-      .from('order_sequences')
-      .update({ value: newValue })
-      .eq('key', sequenceKey);
-
-    if (updateError) {
-      console.error('Update sequence error:', updateError);
+    if (error) {
+      console.error('Generate order number error:', error);
+      return Response.json({ success: false, error: '生成订单号失败' }, { status: 500 });
     }
 
-    const seq = updateError ? currentValue + 1 : newValue;
-    const orderNo = `${prefix}${dateStr}${String(seq).padStart(3, '0')}`;
-    return Response.json({ success: true, data: { order_no: orderNo } });
+    let sequence = 1;
+    const lastNo = data?.[0]?.order_no;
+    if (lastNo) {
+      const escapedPrefix = prefix.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const match = lastNo.match(new RegExp(`^${escapedPrefix}${dateStr}(\\d+)$`));
+      if (match) {
+        sequence = Number.parseInt(match[1], 10) + 1;
+      }
+    }
+
+    const orderNo = `${prefix}${dateStr}${String(sequence).padStart(3, '0')}`;
+    return Response.json({ success: true, data: { order_no: orderNo }, orderNo });
   } catch (err) {
     console.error('Generate order number error:', err);
     return Response.json({ success: false, error: '服务器错误' }, { status: 500 });

@@ -1,6 +1,6 @@
 import { getSupabaseClient } from '@/db/client';
 import { cookies } from 'next/headers';
-import { ORDER_STATUSES, type OrderStatus } from '@/app/orders/schemas';
+import { ORDER_STATUSES, STATUS_TRANSITIONS, type OrderStatus } from '@/app/orders/schemas';
 
 const getServiceClient = () => getSupabaseClient();
 
@@ -23,6 +23,10 @@ async function getCurrentUser(): Promise<CurrentUser | null> {
 
 // Valid status values for filtering
 const VALID_STATUSES = new Set<string>(ORDER_STATUSES);
+
+function canAccessAllTenants(user: CurrentUser): boolean {
+  return user.role === 'super_admin' || user.role === 'saas_admin';
+}
 
 // GET /api/orders - Fetch orders with pagination, search, filtering, and items
 export async function GET(request: Request) {
@@ -51,22 +55,26 @@ export async function GET(request: Request) {
       .order('created_at', { ascending: false })
       .range(from, to);
 
-    // Permission filter: super_admin/saas_admin sees all; others see own tenant
-    if (user.role !== 'super_admin' && user.role !== 'saas_admin') {
-      if (user.tenant_id) {
-        query = query.eq('tenant_id', user.tenant_id);
+    // orders has no created_by column in the current schema; non-platform users
+    // are scoped by tenant_id instead of per-user ownership.
+    if (!canAccessAllTenants(user)) {
+      if (!user.tenant_id) {
+        return Response.json({ success: false, error: '当前用户未关联租户' }, { status: 403 });
       }
+      query = query.eq('tenant_id', user.tenant_id);
     }
 
     // Status filter - validate before applying
     if (status && status !== 'all') {
-      const statuses = status.split(',').filter((s) => VALID_STATUSES.has(s));
-      if (statuses.length > 0) {
-        if (statuses.length === 1) {
-          query = query.eq('status', statuses[0]);
-        } else {
-          query = query.in('status', statuses);
-        }
+      const requestedStatuses = status.split(',').map((s) => s.trim()).filter(Boolean);
+      const statuses = requestedStatuses.filter((s) => VALID_STATUSES.has(s));
+      if (statuses.length !== requestedStatuses.length) {
+        return Response.json({ success: false, error: '订单状态筛选值无效' }, { status: 400 });
+      }
+      if (statuses.length === 1) {
+        query = query.eq('status', statuses[0]);
+      } else if (statuses.length > 1) {
+        query = query.in('status', statuses);
       }
     }
 
@@ -92,12 +100,15 @@ export async function GET(request: Request) {
 
     // Get status statistics (using same permission scope)
     let statsQuery = supabase.from('orders').select('status');
-    if (user.role !== 'super_admin' && user.role !== 'saas_admin') {
-      if (user.tenant_id) {
-        statsQuery = statsQuery.eq('tenant_id', user.tenant_id);
-      }
+    if (!canAccessAllTenants(user)) {
+      statsQuery = statsQuery.eq('tenant_id', user.tenant_id);
     }
-    const { data: allOrders } = await statsQuery;
+    const { data: allOrders, error: statsError } = await statsQuery;
+
+    if (statsError) {
+      console.error('Get order stats error:', statsError);
+      return Response.json({ success: false, error: statsError.message }, { status: 500 });
+    }
 
     const stats = {
       total: allOrders?.length || 0,
@@ -137,7 +148,7 @@ export async function POST(request: Request) {
     }
 
     const body = await request.json();
-    const { order_no, customer_name, customer_phone, delivery_date, remark, items } = body;
+    const { order_no, customer_name, customer_phone, delivery_date, remark, items, target_factory_id } = body;
 
     // Validate required fields
     if (!order_no || !order_no.trim()) {
@@ -202,6 +213,7 @@ export async function POST(request: Request) {
         delivery_date: delivery_date || null,
         remark: remark || null,
         tenant_id: user.tenant_id || null,
+        target_factory_id: target_factory_id || null,
       })
       .select()
       .single();
@@ -238,6 +250,83 @@ export async function POST(request: Request) {
     return Response.json({ success: true, data: fullOrder || order });
   } catch (err) {
     console.error('Create order error:', err);
+    return Response.json({ success: false, error: '服务器错误' }, { status: 500 });
+  }
+}
+
+// PUT /api/orders - Backward-compatible status update endpoint.
+export async function PUT(request: Request) {
+  try {
+    const user = await getCurrentUser();
+    if (!user) {
+      return Response.json({ success: false, error: '请先登录' }, { status: 401 });
+    }
+    if (!canAccessAllTenants(user) && !user.tenant_id) {
+      return Response.json({ success: false, error: '当前用户未关联租户' }, { status: 403 });
+    }
+
+    const body = await request.json();
+    const { id, status, notes } = body as { id?: string; status?: string; notes?: string };
+
+    if (!id) {
+      return Response.json({ success: false, error: '订单 ID 不能为空' }, { status: 400 });
+    }
+    if (!status || !VALID_STATUSES.has(status)) {
+      return Response.json({ success: false, error: '无效的状态值' }, { status: 400 });
+    }
+
+    const supabase = getServiceClient();
+    let fetchQuery = supabase
+      .from('orders')
+      .select('id, status, tenant_id')
+      .eq('id', id);
+
+    if (!canAccessAllTenants(user)) {
+      if (!user.tenant_id) {
+        return Response.json({ success: false, error: '当前用户未关联租户' }, { status: 403 });
+      }
+      fetchQuery = fetchQuery.eq('tenant_id', user.tenant_id);
+    }
+
+    const { data: existingOrder, error: fetchError } = await fetchQuery.single();
+
+    if (fetchError || !existingOrder) {
+      return Response.json({ success: false, error: '订单不存在或无权操作' }, { status: 404 });
+    }
+
+    const currentStatus = existingOrder.status as string;
+    const allowedTransitions = STATUS_TRANSITIONS[currentStatus];
+    if (status !== currentStatus && (!allowedTransitions || !allowedTransitions.has(status))) {
+      return Response.json(
+        { success: false, error: `不允许从「${currentStatus}」变更为「${status}」` },
+        { status: 400 }
+      );
+    }
+
+    const updateData: Record<string, unknown> = {
+      status,
+      updated_at: new Date().toISOString(),
+    };
+
+    if (typeof notes === 'string' && notes.trim()) {
+      updateData.remark = notes.trim();
+    }
+
+    const { data, error } = await supabase
+      .from('orders')
+      .update(updateData)
+      .eq('id', id)
+      .select('*, items:order_items(*)')
+      .single();
+
+    if (error) {
+      console.error('Update order status error:', error);
+      return Response.json({ success: false, error: error.message }, { status: 500 });
+    }
+
+    return Response.json({ success: true, data });
+  } catch (err) {
+    console.error('Update order status error:', err);
     return Response.json({ success: false, error: '服务器错误' }, { status: 500 });
   }
 }

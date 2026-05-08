@@ -36,23 +36,25 @@ export async function GET() {
     const supabase = getServiceClient();
     const { data, error } = await supabase
       .from('order_prefixes')
-      .select('prefix, current_val')
+      .select('prefix')
       .eq('tenant_id', tenantId)
+      .order('created_at', { ascending: false })
+      .limit(1)
       .single();
 
     if (error || !data) {
       // Return default prefix if no config found
       return Response.json({
         success: true,
+        data: { prefix: 'ORD' },
         prefix: 'ORD',
-        currentVal: 0,
       });
     }
 
     return Response.json({
       success: true,
+      data: { prefix: data.prefix },
       prefix: data.prefix,
-      currentVal: data.current_val,
     });
   } catch (err) {
     console.error('获取订单前缀失败:', err);

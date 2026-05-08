@@ -41,8 +41,12 @@ export async function GET(request: Request) {
       .order('order_no', { ascending: false })
       .limit(1);
 
-    // Apply tenant filter for non-admin users
-    if (user.role !== 'super_admin' && user.role !== 'saas_admin' && user.tenant_id) {
+    // orders has no created_by column in the current schema; non-platform users
+    // are scoped by tenant_id instead of per-user ownership.
+    if (user.role !== 'super_admin' && user.role !== 'saas_admin') {
+      if (!user.tenant_id) {
+        return Response.json({ success: false, error: '当前用户未关联租户' }, { status: 403 });
+      }
       query = query.eq('tenant_id', user.tenant_id);
     }
 
@@ -56,10 +60,10 @@ export async function GET(request: Request) {
     let sequence = 1;
     if (data && data.length > 0) {
       const lastNo = data[0].order_no;
-      // Match pattern: PREFIX + YYYYMMDD + NN(N)
-      const match = lastNo.match(/^(\D*)(\d{8})(\d+)$/);
-      if (match && match[2] === dateStr) {
-        sequence = parseInt(match[3], 10) + 1;
+      const escapedPrefix = prefix.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const match = lastNo.match(new RegExp(`^${escapedPrefix}${dateStr}(\\d+)$`));
+      if (match) {
+        sequence = parseInt(match[1], 10) + 1;
       }
     }
 
@@ -67,6 +71,7 @@ export async function GET(request: Request) {
 
     return Response.json({
       success: true,
+      data: { order_no: orderNo, prefix, date: dateStr, sequence },
       orderNo,
       prefix,
       date: dateStr,

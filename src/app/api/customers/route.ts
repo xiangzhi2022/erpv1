@@ -35,11 +35,13 @@ export async function GET(request: Request) {
       .select('*')
       .order('created_at', { ascending: false });
 
-    // Permission filter: non-admins only see their own tenant's customers
+    // customers has no created_by column in the current schema; non-platform
+    // users are scoped by tenant_id instead of per-user ownership.
     if (user.role !== 'super_admin' && user.role !== 'saas_admin') {
-      if (user.tenant_id) {
-        query = query.eq('tenant_id', user.tenant_id);
+      if (!user.tenant_id) {
+        return Response.json({ success: false, error: '当前用户未关联租户' }, { status: 403 });
       }
+      query = query.eq('tenant_id', user.tenant_id);
     }
 
     if (search && search.trim()) {
@@ -84,9 +86,10 @@ export async function POST(request: Request) {
       remark: remark?.trim() || null,
     };
 
-    // Set tenant_id if user has one
     if (user.tenant_id) {
       insertData.tenant_id = user.tenant_id;
+    } else if (user.role !== 'super_admin' && user.role !== 'saas_admin') {
+      return Response.json({ success: false, error: '当前用户未关联租户' }, { status: 403 });
     }
 
     const { data, error } = await supabase

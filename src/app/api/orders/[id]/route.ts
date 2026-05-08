@@ -31,6 +31,10 @@ const PATCHABLE_ORDER_FIELDS = new Set([
   'target_factory_id',
 ]);
 
+function canAccessAllTenants(user: CurrentUser): boolean {
+  return user.role === 'super_admin' || user.role === 'saas_admin';
+}
+
 // GET /api/orders/[id] - Get single order with items
 export async function GET(
   request: Request,
@@ -50,9 +54,13 @@ export async function GET(
       .select('*, items:order_items(*)')
       .eq('id', id);
 
-    // Permission filter: non-admins can only see their own orders
-    if (user.role !== 'super_admin' && user.role !== 'saas_admin') {
-      query = query.eq('tenant_id', user.tenant_id || '');
+    // orders has no created_by column in the current schema; non-platform users
+    // are scoped by tenant_id instead of per-user ownership.
+    if (!canAccessAllTenants(user)) {
+      if (!user.tenant_id) {
+        return Response.json({ success: false, error: '当前用户未关联租户' }, { status: 403 });
+      }
+      query = query.eq('tenant_id', user.tenant_id);
     }
 
     const { data, error } = await query.single();
@@ -89,8 +97,13 @@ export async function PATCH(
       .select('id, status, tenant_id')
       .eq('id', id);
 
-    if (user.role !== 'super_admin' && user.role !== 'saas_admin') {
-      fetchQuery = fetchQuery.eq('tenant_id', user.tenant_id || '');
+    // orders has no created_by column in the current schema; non-platform users
+    // are scoped by tenant_id instead of per-user ownership.
+    if (!canAccessAllTenants(user)) {
+      if (!user.tenant_id) {
+        return Response.json({ success: false, error: '当前用户未关联租户' }, { status: 403 });
+      }
+      fetchQuery = fetchQuery.eq('tenant_id', user.tenant_id);
     }
 
     const { data: existingOrder, error: fetchError } = await fetchQuery.single();
@@ -114,7 +127,7 @@ export async function PATCH(
       const currentStatus = existingOrder.status as string;
       const allowedTransitions = STATUS_TRANSITIONS[currentStatus];
 
-      if (!allowedTransitions || !allowedTransitions.has(newStatus)) {
+      if (newStatus !== currentStatus && (!allowedTransitions || !allowedTransitions.has(newStatus))) {
         return Response.json(
           { success: false, error: `不允许从「${currentStatus}」变更为「${newStatus}」` },
           { status: 400 }
@@ -131,6 +144,14 @@ export async function PATCH(
       if (PATCHABLE_ORDER_FIELDS.has(key)) {
         updateData[key] = body[key];
       }
+    }
+
+    if (typeof body.notes === 'string' && body.notes.trim()) {
+      updateData.remark = body.notes.trim();
+    }
+
+    if (Object.keys(updateData).length === 1) {
+      return Response.json({ success: false, error: '没有可更新的订单字段' }, { status: 400 });
     }
 
     // 4. Execute update
