@@ -109,6 +109,7 @@ export default function TasksPage() {
   const [notifications, setNotifications] = useState<NotificationItem[]>([]);
   const [unreadCount, setUnreadCount] = useState(0);
   const [loading, setLoading] = useState(true);
+  const [mounted, setMounted] = useState(false);
   const [viewMode, setViewMode] = useState<"kanban" | "list">("kanban");
   const [searchQuery, setSearchQuery] = useState("");
   const [filterStatus, setFilterStatus] = useState("all");
@@ -175,6 +176,10 @@ export default function TasksPage() {
     fetchData();
   }, [fetchData]);
 
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
   // Filtered tasks
   const filteredTasks = tasks.filter((t) => {
     if (filterStatus !== "all" && t.status !== filterStatus) return false;
@@ -224,8 +229,10 @@ export default function TasksPage() {
       const data = await res.json();
       if (data.success) {
         setTasks((prev) =>
-          prev.map((t) => (t.id === task.id ? { ...t, status: targetStatus, completed: targetStatus === "completed" } : t))
+          prev.map((t) => (t.id === task.id ? data.data : t))
         );
+        // Refresh stats after status change
+        fetchData();
       }
     } catch {
       // Silent fail
@@ -323,6 +330,8 @@ export default function TasksPage() {
       const data = await res.json();
       if (data.success) {
         setTasks((prev) => prev.map((t) => (t.id === task.id ? data.data : t)));
+        // Refresh stats after toggle
+        fetchData();
       }
     } catch {
       // Silent fail
@@ -344,13 +353,16 @@ export default function TasksPage() {
 
   const handleMarkAllRead = async () => {
     try {
-      await fetch("/api/notifications", {
+      const res = await fetch("/api/notifications", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action: "markAllRead" }),
       });
-      setNotifications((prev) => prev.map((n) => ({ ...n, read: true })));
-      setUnreadCount(0);
+      const data = await res.json();
+      if (data.success) {
+        setNotifications((prev) => prev.map((n) => ({ ...n, read: true })));
+        setUnreadCount(0);
+      }
     } catch {
       // Silent fail
     }
@@ -380,12 +392,12 @@ export default function TasksPage() {
   };
 
   const isOverdue = (task: Task): boolean => {
-    if (!task.due_date || task.status === "completed") return false;
+    if (!mounted || !task.due_date || task.status === "completed") return false;
     return new Date(task.due_date) < new Date();
   };
 
   const isDueSoon = (task: Task): boolean => {
-    if (!task.due_date || task.status === "completed") return false;
+    if (!mounted || !task.due_date || task.status === "completed") return false;
     const threeDaysLater = new Date();
     threeDaysLater.setDate(threeDaysLater.getDate() + 3);
     const dueDate = new Date(task.due_date);
@@ -610,17 +622,20 @@ export default function TasksPage() {
                             onClick={async () => {
                               if (!n.read) {
                                 try {
-                                  await fetch(`/api/notifications/${n.id}`, {
+                                  const res = await fetch(`/api/notifications/${n.id}`, {
                                     method: "PATCH",
                                   });
-                                  setNotifications((prev) =>
-                                    prev.map((item) =>
-                                      item.id === n.id
-                                        ? { ...item, read: true }
-                                        : item
-                                    )
-                                  );
-                                  setUnreadCount((c) => Math.max(0, c - 1));
+                                  const data = await res.json();
+                                  if (data.success) {
+                                    setNotifications((prev) =>
+                                      prev.map((item) =>
+                                        item.id === n.id
+                                          ? { ...item, read: true }
+                                          : item
+                                      )
+                                    );
+                                    setUnreadCount((c) => Math.max(0, c - 1));
+                                  }
                                 } catch {
                                   // Silent fail
                                 }
@@ -641,7 +656,7 @@ export default function TasksPage() {
                                   </p>
                                 )}
                                 <p className="text-[10px] text-muted-foreground mt-1">
-                                  {new Date(n.created_at).toLocaleString("zh-CN")}
+                                  {mounted ? new Date(n.created_at).toLocaleString("zh-CN") : ""}
                                 </p>
                               </div>
                             </div>
@@ -1228,7 +1243,7 @@ export default function TasksPage() {
                     {detailTask.due_date ? (
                       <>
                         <CalendarDays className="h-3.5 w-3.5" />
-                        {new Date(detailTask.due_date).toLocaleDateString("zh-CN")}
+                        {mounted ? new Date(detailTask.due_date).toLocaleDateString("zh-CN") : ""}
                         {isOverdue(detailTask) && (
                           <Badge variant="destructive" className="text-[10px] h-4 px-1 ml-1">
                             已过期

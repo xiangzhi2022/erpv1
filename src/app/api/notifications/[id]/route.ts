@@ -8,10 +8,11 @@ export async function PATCH(
 ) {
   try {
     const { id } = await params;
-    await markNotificationRead(id);
-    return NextResponse.json({ success: true });
+    const notification = await markNotificationRead(id);
+    return NextResponse.json({ success: true, data: notification });
   } catch (e: unknown) {
     const message = e instanceof Error ? e.message : "操作失败";
-    return NextResponse.json({ success: false, error: message }, { status: 500 });
+    const status = message === "通知不存在" ? 404 : 500;
+    return NextResponse.json({ success: false, error: message }, { status });
   }
 }
