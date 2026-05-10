@@ -1,37 +1,20 @@
 import { getSupabaseClient } from '@/db/client';
-import { cookies } from 'next/headers';
+import { getUserFromRequest, type AuthUser } from '@/lib/auth';
 import { ORDER_STATUSES, STATUS_TRANSITIONS } from '@/app/orders/schemas';
 
 const getServiceClient = () => getSupabaseClient();
 
-interface CurrentUser {
-  id: string;
-  role: string;
-  tenant_id?: string;
-}
-
-async function getCurrentUser(): Promise<CurrentUser | null> {
-  const cookieStore = await cookies();
-  const userStr = cookieStore.get('erp_user')?.value;
-  if (!userStr) return null;
-  try {
-    return JSON.parse(userStr);
-  } catch {
-    return null;
-  }
+function canAccessAllTenants(user: AuthUser): boolean {
+  return user.role === 'super_admin' || user.role === 'saas_admin';
 }
 
 // Valid status values for filtering
 const VALID_STATUSES = new Set<string>(ORDER_STATUSES);
 
-function canAccessAllTenants(user: CurrentUser): boolean {
-  return user.role === 'super_admin' || user.role === 'saas_admin';
-}
-
 // GET /api/orders - Fetch orders with pagination, search, filtering, and items
 export async function GET(request: Request) {
   try {
-    const user = await getCurrentUser();
+    const user = await getUserFromRequest(request);
     if (!user) {
       return Response.json({ success: false, error: '请先登录' }, { status: 401 });
     }
@@ -142,7 +125,7 @@ export async function GET(request: Request) {
 // POST /api/orders - Create order with items
 export async function POST(request: Request) {
   try {
-    const user = await getCurrentUser();
+    const user = await getUserFromRequest(request);
     if (!user) {
       return Response.json({ success: false, error: '请先登录' }, { status: 401 });
     }
@@ -257,7 +240,7 @@ export async function POST(request: Request) {
 // PUT /api/orders - Backward-compatible status update endpoint.
 export async function PUT(request: Request) {
   try {
-    const user = await getCurrentUser();
+    const user = await getUserFromRequest(request);
     if (!user) {
       return Response.json({ success: false, error: '请先登录' }, { status: 401 });
     }

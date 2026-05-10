@@ -60,15 +60,20 @@ const sessionStore = new Map<string, Session>();
 // 用户存储（演示用，生产应替换为数据库）
 const userStore = new Map<string, { password: string; user: User }>();
 
+// Demo user IDs must be valid UUIDs to satisfy database UUID column constraints
+// (e.g. users.id, work_orders.created_by, progress_logs.operator_id)
+const DEMO_UUID_1 = '00000000-0000-0000-0000-000000000001';
+const DEMO_UUID_2 = '00000000-0000-0000-0000-000000000002';
+
 // 初始化演示用户（密码已哈希）
 const DEMO_PASSWORD_HASH = hashPassword('demo123');
 userStore.set('demo@example.com', {
   password: DEMO_PASSWORD_HASH,
-  user: { id: '1', email: 'demo@example.com', name: '演示用户', provider: 'credentials' },
+  user: { id: DEMO_UUID_1, email: 'demo@example.com', name: '演示用户', provider: 'credentials' },
 });
 userStore.set('13800138000', {
   password: DEMO_PASSWORD_HASH,
-  user: { id: '2', phone: '13800138000', name: '手机用户', provider: 'credentials' },
+  user: { id: DEMO_UUID_2, phone: '13800138000', name: '手机用户', provider: 'credentials' },
 });
 
 // ===================== 验证码相关 =====================
@@ -216,6 +221,38 @@ export interface AuthUser extends User {
   nickname?: string;
 }
 
+/**
+ * Resolve role and tenant_id from the database when the session user
+ * was created from the in-memory demo store (which lacks these fields).
+ * Results are cached in-memory for the session lifetime.
+ */
+const userMetaCache = new Map<string, { role: string; tenant_id?: string; nickname?: string }>();
+
+async function resolveUserMeta(user: User): Promise<{ role: string; tenant_id?: string; nickname?: string }> {
+  const cached = userMetaCache.get(user.id);
+  if (cached) return cached;
+
+  try {
+    const supabase = getSupabaseClient();
+    const { data } = await supabase
+      .from('users')
+      .select('role, tenant_id, nickname')
+      .eq('id', user.id)
+      .maybeSingle();
+
+    if (data) {
+      const meta = { role: data.role || 'user', tenant_id: data.tenant_id || undefined, nickname: data.nickname || undefined };
+      userMetaCache.set(user.id, meta);
+      return meta;
+    }
+  } catch {
+    // DB not reachable – fall through to defaults
+  }
+
+  // Fallback: demo / memory-store users default to super_admin
+  return { role: 'super_admin' };
+}
+
 export async function getUserFromRequest(request: Request): Promise<AuthUser | null> {
   try {
     const cookieHeader = request.headers.get('cookie') || '';
@@ -223,8 +260,14 @@ export async function getUserFromRequest(request: Request): Promise<AuthUser | n
     if (!sessionMatch) return null;
     const session = sessionStore.get(sessionMatch[1]);
     if (!session || Date.now() > session.expiresAt) return null;
-    // 从用户信息推导角色（演示用：默认 super_admin）
-    return { ...session.user, role: 'super_admin' };
+
+    const meta = await resolveUserMeta(session.user);
+    return {
+      ...session.user,
+      role: meta.role,
+      tenant_id: meta.tenant_id,
+      nickname: meta.nickname || session.user.name,
+    };
   } catch {
     return null;
   }
