@@ -1,115 +1,157 @@
-# Review & Integration Report
+﻿# Review & GitHub Delivery Report
 
 ## Summary
 
-Final integration review of the erpv1 codebase on `main` branch. All 7 worker branches (`codex-db-schema-alignment`, `codex-db-client-cleanup`, `codex-orders-module-hardening`, `codex-progress-workflow`, `codex-workers-module`, `codex-supplier-module`, `codex-test-coverage-core-flows`) were checked but **none exist** in the remote repository. This review is therefore based on the current state of `main` (commit `0494c52`).
+This branch completes Task 08 by preparing the final release integration branch after worker tasks were completed. The branch `codex-release-integration` now merges the latest `origin/codex-test-coverage-core-flows`, which itself contains the completed worker branches for Tasks 01-07 and 09-20.
 
-## Validation Results
+Task 08 is intentionally documentation and delivery focused. No new business feature implementation was added directly in this task beyond merging the completed integration branch and preparing this PR description.
 
-| Check | Status | Details |
-|-------|--------|---------|
-| `pnpm ts-check` | PASS | Zero TypeScript type errors |
-| `pnpm test` | PASS | 33/33 tests passed (3 test files) |
-| `pnpm lint` | FAIL | 39 errors, 42 warnings |
-| `next build` | PASS | Production build succeeds (75 routes) |
-| Worker branches | NOT FOUND | None of the 7 expected branches exist in remote |
-| `.env` in repo | SAFE | `.env` is in `.gitignore` and not tracked |
+## Integrated Branches
 
-## Findings
+Included through `origin/codex-test-coverage-core-flows`:
 
-### CRITICAL
+- `origin/codex-db-schema-alignment`
+- `origin/codex-db-client-cleanup`
+- `origin/codex-orders-module-hardening`
+- `origin/codex-progress-workflow`
+- `origin/codex-workers-module`
+- `origin/codex-supplier-module`
+- `origin/codex-test-coverage-core-flows`
+- `origin/codex-dealer-module`
+- `origin/codex-factory-workshops-module`
+- `origin/codex-factory-portal-module`
+- `origin/codex-worker-portal-module`
+- `origin/codex-tasks-categories-notifications`
+- `origin/codex-settings-module`
+- `origin/codex-auth-module`
+- `origin/codex-dashboard-reporting`
+- `origin/codex-operational-views`
+- `origin/codex-shared-customers-factories-api`
+- `origin/codex-dashboard-shell-sync`
+- `origin/codex-debug-ops-integrations`
 
-1. **Missing auth on 39 API routes** - The following API modules have no authentication check (`getUserFromRequest` / `getSession`):
-   - `/api/categories/*` - Full CRUD without auth
-   - `/api/customers` - No auth
-   - `/api/notifications/*` - No auth
-   - `/api/orders/*` - No auth (including order generation, deletion)
-   - `/api/dashboard/*` - No auth (kpis, chart, activity)
-   - `/api/dealer/*` - No auth (except dealer/orders which has auth)
-   - `/api/settings/*` - Partial: only `users` and `tenants` have auth; `roles`, `password`, `preferences`, `save`, `profile`, `avatar`, `load`, `check-prefix`, `verify-prefix` have NO auth
-   - `/api/tasks/*` - No auth
-   - `/api/test/db` - Debug route exposed without auth
-   - `/api/ppt-fetch` - No auth
-   - Auth routes (`/api/auth/*`) are correctly unauthenticated
+Task 08's own branch is `codex-release-integration`.
 
-2. **No tenant isolation on key routes** - Categories, tasks, notifications, and most order endpoints ignore `tenant_id` filtering, potentially allowing cross-tenant data access.
+## Changes
 
-3. **In-memory session store** (`src/lib/auth.ts`) - All sessions, users, and tokens are stored in `Map` objects. This:
-   - Loses all data on server restart
-   - Does not scale across multiple instances
-   - Contains hardcoded demo credentials (`demo@example.com` / `demo123`)
+### Database and Supabase foundation
 
-### HIGH
+- Aligns database schema and relation definitions.
+- Adds `DATABASE.md` documentation covering schema principles, Supabase access patterns, environment variables, and initialization notes.
+- Adds Supabase environment helper script and `.env.example`.
 
-4. **32 `@typescript-eslint/no-explicit-any` errors** across 17 files:
-   - `src/db/client.ts` - 1 `no-explicit-any` + 1 `no-require-imports`
-   - `src/app/api/factory/orders/route.ts` - 8 `: any` usages
-   - `src/app/api/dealer/orders/route.ts` - 8 `: any` usages
-   - `src/app/api/worker/tasks/route.ts` - 3 `: any` usages
-   - `src/app/api/factories/route.ts` - 2 `: any` usages
-   - `src/app/factory/workshops/components/factory-form.tsx` - 10 `as any` usages
-   - `src/app/orders/components/create-order-dialog.tsx` - 1 `as any` usage
-   - Plus `: any` in auth routes, debug routes, settings routes
+### Core ERP modules
 
-5. **Schema/DB inconsistency** - `src/db/schema.ts` (Drizzle) is missing table definitions for:
-   - `suppliers` - Used extensively in `src/app/api/supplier/*`
-   - `workers` - Used extensively in `src/app/api/workers/*`
-   - `sys_roles` - Used in `src/app/api/settings/roles`
-   - `sequences` - Used in `src/app/api/orders/generate`
-   These tables are accessed directly via Supabase client without Drizzle type safety.
+- Stabilizes orders, customers, factories, production progress, workers, suppliers, dealers, factory portal, worker portal, tasks, categories, notifications, settings, auth, dashboard reporting, operational views, debug/test APIs, and integration helpers.
+- Adds shared customer and factory API behavior used by order creation and factory selection flows.
+- Adds dashboard shell/sync page updates.
 
-6. **`src/server.ts` has untyped parameters** - `req: any`, `res: any`, `err: any` in the custom server.
+### Test coverage
 
-### MEDIUM
+- Refreshes `src/__tests__/**` for the latest integrated modules.
+- Adds schema and pure logic coverage for orders, progress, workers, suppliers, dealers, factory workshops, and settings.
+- Keeps tests independent from real Supabase network access.
 
-7. **4 `react/no-unescaped-entities` errors** - Unescaped quotes in JSX text in `login/page.tsx` and `finance/page.tsx`.
+### Review/GitHub delivery
 
-8. **2 `@typescript-eslint/no-require-imports` errors** - In `src/db/client.ts` (line 19).
+- Updates this PR description to reflect the actual integrated branch state.
+- Records known merge handling and validation status.
 
-9. **Test coverage is minimal** - Only 3 test files exist:
-   - `progress-schemas.test.ts` (16 tests)
-   - `progress-logic.test.ts` (12 tests)
-   - `utils.test.ts` (5 tests)
-   No tests for API routes, auth, orders, workers, suppliers, or factory modules.
+## Conflict Handling Notes
 
-10. **`src/lib/auth-utils.ts` uses Chinese role string** - `'订单管理'` as role identifier is fragile and locale-dependent.
+During the upstream integration into `codex-test-coverage-core-flows`, these conflicts were resolved before Task 08 merged that branch:
 
-11. **Inconsistent Supabase client creation** - Some routes use `createClient()` from `@supabase/supabase-js`, while others use `src/lib/db.ts` helper functions, and some use `src/db/client.ts`. This fragmentation leads to inconsistent error handling and auth patterns.
+- `DATABASE.md`: preserved both schema constraints and Supabase data access documentation.
+- `src/__tests__/progress-logic.test.ts`: preserved runtime-aligned progress workflow tests and added broader transition coverage.
+- `src/__tests__/progress-schemas.test.ts`: preserved enum/schema alignment checks and action/status regression checks.
+- `src/app/api/factories/route.ts`: preserved role compatibility, `data`/`factories` dual response shape, config load metrics, and order-based load metrics.
+- `src/app/api/customers/route.ts`: preserved tenant isolation, customer deduplication, and compatible customer fields.
+- Dashboard shell unrelated-history merge: kept current dependency/config files while taking dashboard shell entry files from the shell-sync branch.
 
-### LOW
+## Review Focus
 
-12. **42 lint warnings** - Mostly `no-unused-vars` across multiple files:
-    - `src/db/relations.ts` - Unused imports: `customers`, `userSettings`, `orderPrefixes`
-    - `src/components/sidebar.tsx` - Unused: `Bell`
-    - `src/app/workers/components/stats-cards.tsx` - Unused: `WORKER_STATUSES`
+### Worker scope review
+
+The integrated branches generally follow the intended module ownership model. The notable overlap areas were shared APIs and shared shell files, which were resolved in the integration branch:
+
+- `src/app/api/customers/route.ts`
+- `src/app/api/factories/route.ts`
+- `src/app/api/progress/**`
+- `src/__tests__/**`
+- Dashboard shell entry files under `src/app/(dashboard)/**`, `src/app/layout.tsx`, `src/app/page.tsx`, and `src/components/sidebar.tsx`
+
+### Schema/API/frontend consistency
+
+- Order status names include both `producing` and `in_production` where compatibility is required.
+- Progress status names are aligned around `pending`, `scheduling`, `producing`, `inspecting`, `stored`, and `aborted`.
+- Dashboard reporting APIs now provide stable fallback behavior and align chart/status data consumption.
+- Customer and factory shared APIs return shapes compatible with multiple consumers.
+
+### Auth, permission, and tenant isolation risks
+
+- Many routes now include stronger auth and tenant handling, especially auth, settings, customers, factories, debug APIs, and module-specific routes.
+- Remaining risk: because many workers touched auth and tenant logic independently, final validation should include route-level smoke checks before merging to `main`.
+- Debug/test routes were hardened, but production deployment should still verify environment guards and secret redaction.
+
+### Type safety and formatting risks
+
+- Some modules intentionally use broad `Record<string, unknown>` style handling around Supabase responses.
+- Final lint may still surface `any`, unused imports, or formatting warnings after integration.
+- No dependency or lockfile changes were introduced by Task 08 itself.
+
+## Validation
+
+Not run in this Task 08 pass.
+
+Reason: this Codex session is following the repository workflow requested by the user and avoiding test/validation execution unless explicitly requested. The required final validation commands should be run before merge:
+
+```bash
+pnpm ts-check
+pnpm test
+pnpm lint
+```
+
+Suggested order:
+
+1. `pnpm test`
+2. `pnpm ts-check`
+3. `pnpm lint`
 
 ## Risks
 
-| Risk | Severity | Likelihood | Impact |
-|------|----------|------------|--------|
-| Unauthenticated API access | CRITICAL | High | Data breach, unauthorized operations |
-| Cross-tenant data leakage | CRITICAL | High | Data privacy violation |
-| In-memory auth (data loss on restart) | HIGH | Certain | All users logged out, demo credentials exposed |
-| Missing Drizzle schema for 4 tables | HIGH | Medium | No compile-time type safety, schema drift |
-| 32 `any` type usages | MEDIUM | Medium | Runtime type errors, refactoring hazards |
-| Minimal test coverage | MEDIUM | High | Regression risk on changes |
+- The release integration branch is large: it merges many worker branches and touches database schema, auth, API routes, frontend pages, and tests.
+- `codex-dashboard-shell-sync` had unrelated history and required special merge handling; shell/UI entry files deserve manual UI smoke testing.
+- Shared customer/factory APIs had multiple worker edits and should be smoke tested from order creation, dealer flow, and factory portal flow.
+- Auth and tenant isolation should be manually reviewed before production deployment.
+- Validation has not yet been run in this Task 08 pass.
 
-## Changes in This PR
+## PR Description Draft
 
-This PR adds only the review report (`docs/review/PR-DESCRIPTION.md`). No business code is modified, consistent with the review-agent mandate.
+### Summary
 
-## Unrun Tests & Explanation
+Finalize ERP worker branch integration and prepare release delivery documentation.
 
-- **API integration tests**: Not run because the local Supabase instance is not available; all API routes depend on `COZE_SUPABASE_URL` and `COZE_SUPABASE_SERVICE_ROLE_KEY` environment variables.
-- **E2E tests**: No E2E test infrastructure exists in the project.
-- **Worker branch merge tests**: Could not be performed because none of the 7 worker branches exist in the remote repository.
+### Changes
 
-## Recommended Next Steps
+- Merge completed worker branches through `codex-test-coverage-core-flows`.
+- Include database/schema alignment, Supabase client cleanup, orders, progress, workers, suppliers, dealer/factory/worker portals, tasks, settings, auth, dashboard reporting, operational views, shared APIs, dashboard shell sync, debug API hardening, and refreshed tests.
+- Update release integration documentation and PR description.
 
-1. **Add authentication middleware** to all unprotected API routes (P0)
-2. **Add tenant_id filtering** to all multi-tenant routes (P0)
-3. **Replace in-memory auth** with database-backed sessions (P1)
-4. **Complete Drizzle schema** with `suppliers`, `workers`, `sys_roles`, `sequences` tables (P1)
-5. **Eliminate `as any` / `: any`** across all files (P2)
-6. **Add API route tests** for core flows (P2)
-7. **Consolidate Supabase client** into a single pattern (P3)
+### Validation
+
+Not run in this pass.
+
+Recommended before merge:
+
+```bash
+pnpm test
+pnpm ts-check
+pnpm lint
+```
+
+### Risks
+
+- Large integration branch with many touched modules.
+- Dashboard shell branch had unrelated history and needs UI smoke testing.
+- Shared API conflict resolutions should be manually checked in order creation and factory selection flows.
+- Auth and tenant isolation should receive final human review.
