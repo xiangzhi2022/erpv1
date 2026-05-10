@@ -1,13 +1,9 @@
-import { Sidebar } from '@/components/sidebar';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
 
 export default function SupplierLoading() {
   return (
-    <div className="flex min-h-screen bg-background">
-      <Sidebar />
-
-      <main className="flex-1 p-6 ml-64">
+    <>
         {/* 标题骨架 */}
         <div className="mb-6">
           <Skeleton className="h-8 w-48 mb-2" />
@@ -65,7 +61,6 @@ export default function SupplierLoading() {
             </div>
           ))}
         </div>
-      </main>
-    </div>
+      </>
   );
 }

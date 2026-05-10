@@ -1,7 +1,6 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { Sidebar } from "@/components/sidebar";
 import {
   Package,
   Users,
@@ -118,13 +117,10 @@ export default function FactoryDashboard() {
     : 0;
 
   return (
-    <div className="flex min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900">
-      <Sidebar />
-
-      <main className="flex-1 p-8 ml-64">
+    <div className="space-y-6">
         <div className="mb-8">
-          <h1 className="text-3xl font-bold text-white">工厂管理后台</h1>
-          <p className="text-slate-400 mt-2">生产调度看板，管理订单和工序</p>
+          <h1 className="text-3xl font-bold">工厂管理后台</h1>
+          <p className="text-muted-foreground mt-2">生产调度看板，管理订单和工序</p>
         </div>
 
         {/* 统计卡片 */}
@@ -304,7 +300,6 @@ export default function FactoryDashboard() {
             )}
           </div>
         </div>
-      </main>
-    </div>
+      </div>
   );
 }

@@ -1,7 +1,6 @@
 "use client";
 
 import { useState, useEffect, useCallback, useRef } from "react";
-import { Sidebar } from "@/components/sidebar";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -547,10 +546,7 @@ export default function TasksPage() {
   };
 
   return (
-    <div className="flex min-h-screen bg-background">
-      <Sidebar />
-
-      <main className="flex-1 overflow-hidden">
+    <>
         <div className="h-full flex flex-col">
           {/* Header */}
           <div className="border-b px-6 py-4 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
@@ -1025,7 +1021,6 @@ export default function TasksPage() {
             )}
           </div>
         </div>
-      </main>
 
       {/* Task Create/Edit Sheet */}
       <Sheet open={sheetOpen} onOpenChange={setSheetOpen}>
@@ -1290,6 +1285,6 @@ export default function TasksPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-    </div>
+    </>
   );
 }

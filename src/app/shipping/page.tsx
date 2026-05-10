@@ -2,7 +2,6 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
-import { Sidebar } from '@/components/sidebar';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -140,10 +139,7 @@ export default function ShippingPage() {
   };
 
   return (
-    <div className="flex min-h-screen bg-background">
-      <Sidebar />
-
-      <main className="flex-1 p-8">
+    <>
         <div className="max-w-7xl mx-auto space-y-6">
           <div className="flex items-center justify-between">
             <div>
@@ -260,7 +256,6 @@ export default function ShippingPage() {
             </CardContent>
           </Card>
         </div>
-      </main>
 
       {/* Ship Dialog */}
       <Dialog open={shipDialogOpen} onOpenChange={setShipDialogOpen}>
@@ -346,6 +341,6 @@ export default function ShippingPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-    </div>
+    </>
   );
 }

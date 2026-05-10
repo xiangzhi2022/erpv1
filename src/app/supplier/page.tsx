@@ -1,7 +1,6 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-import { Sidebar } from '@/components/sidebar';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { toast } from 'sonner';
 import { Truck, ShieldCheck, ShieldAlert, UserCheck, Clock } from 'lucide-react';
@@ -210,10 +209,7 @@ export default function SupplierPage() {
   };
 
   return (
-    <div className="flex min-h-screen bg-background">
-      <Sidebar />
-
-      <main className="flex-1 p-6 ml-64">
+    <>
         {/* 页面标题 */}
         <div className="flex justify-between items-center mb-6">
           <div>
@@ -329,7 +325,6 @@ export default function SupplierPage() {
           onConfirm={handleDeleteConfirm}
           loading={submitting}
         />
-      </main>
-    </div>
+      </>
   );
 }
