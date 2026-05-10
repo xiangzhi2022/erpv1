@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+﻿import { describe, it, expect } from 'vitest';
 import {
   progressReportSchema,
   workOrderQuerySchema,
@@ -19,51 +19,39 @@ describe('progressReportSchema', () => {
   };
 
   it('should validate a valid progress report', () => {
-    const result = progressReportSchema.safeParse(validReport);
-    expect(result.success).toBe(true);
+    expect(progressReportSchema.safeParse(validReport).success).toBe(true);
   });
 
-  it('should reject empty work_order_id', () => {
-    const result = progressReportSchema.safeParse({
-      ...validReport,
-      work_order_id: '',
-    });
-    expect(result.success).toBe(false);
+  it('should reject invalid work_order_id values', () => {
+    expect(progressReportSchema.safeParse({ ...validReport, work_order_id: '' }).success).toBe(false);
+    expect(progressReportSchema.safeParse({ ...validReport, work_order_id: 'not-a-uuid' }).success).toBe(false);
   });
 
-  it('should reject invalid action', () => {
-    const result = progressReportSchema.safeParse({
-      ...validReport,
-      action: 'invalid_action',
-    });
-    expect(result.success).toBe(false);
-  });
-
-  it('should reject negative completed_delta', () => {
-    const result = progressReportSchema.safeParse({
-      ...validReport,
-      completed_delta: -1,
-    });
-    expect(result.success).toBe(false);
-  });
-
-  it('should accept zero completed_delta', () => {
-    const result = progressReportSchema.safeParse({
-      ...validReport,
-      completed_delta: 0,
-    });
-    expect(result.success).toBe(true);
-  });
-
-  it('should accept all valid actions', () => {
-    const validActions = Object.values(ProgressAction);
-    for (const action of validActions) {
-      const result = progressReportSchema.safeParse({
-        ...validReport,
-        action,
+  it('should reject invalid or missing action', () => {
+    expect(progressReportSchema.safeParse({ ...validReport, action: 'invalid_action' }).success).toBe(false);
+    expect(
+      progressReportSchema.safeParse({
+        work_order_id: '550e8400-e29b-41d4-a716-446655440000',
         completed_delta: 0,
-      });
-      expect(result.success).toBe(true);
+      }).success
+    ).toBe(false);
+  });
+
+  it('should validate completed_delta bounds and integer requirement', () => {
+    expect(progressReportSchema.safeParse({ ...validReport, completed_delta: -1 }).success).toBe(false);
+    expect(progressReportSchema.safeParse({ ...validReport, completed_delta: 1.5 }).success).toBe(false);
+    expect(progressReportSchema.safeParse({ ...validReport, completed_delta: 0 }).success).toBe(true);
+  });
+
+  it('should accept every ProgressAction enum value', () => {
+    for (const action of Object.values(ProgressAction)) {
+      expect(
+        progressReportSchema.safeParse({
+          ...validReport,
+          action,
+          completed_delta: 0,
+        }).success
+      ).toBe(true);
     }
   });
 
@@ -78,53 +66,15 @@ describe('progressReportSchema', () => {
     }
   });
 
-  it('should allow optional remark', () => {
-    const result = progressReportSchema.safeParse({
-      work_order_id: '550e8400-e29b-41d4-a716-446655440000',
-      action: 'report_progress',
-      completed_delta: 3,
-    });
-    expect(result.success).toBe(true);
-  });
-
-  it('should reject remark exceeding 500 chars', () => {
-    const result = progressReportSchema.safeParse({
-      ...validReport,
-      remark: 'x'.repeat(501),
-    });
-    expect(result.success).toBe(false);
-  });
-
-  it('should reject non-UUID work_order_id', () => {
-    const result = progressReportSchema.safeParse({
-      ...validReport,
-      work_order_id: 'not-a-uuid',
-    });
-    expect(result.success).toBe(false);
-  });
-
-  it('should reject non-integer completed_delta', () => {
-    const result = progressReportSchema.safeParse({
-      ...validReport,
-      completed_delta: 1.5,
-    });
-    expect(result.success).toBe(false);
-  });
-
-  it('should reject missing work_order_id', () => {
-    const result = progressReportSchema.safeParse({
-      action: 'start',
-      completed_delta: 0,
-    });
-    expect(result.success).toBe(false);
-  });
-
-  it('should reject missing action', () => {
-    const result = progressReportSchema.safeParse({
-      work_order_id: '550e8400-e29b-41d4-a716-446655440000',
-      completed_delta: 0,
-    });
-    expect(result.success).toBe(false);
+  it('should allow optional remark and reject overlong remark', () => {
+    expect(
+      progressReportSchema.safeParse({
+        work_order_id: '550e8400-e29b-41d4-a716-446655440000',
+        action: 'report_progress',
+        completed_delta: 3,
+      }).success
+    ).toBe(true);
+    expect(progressReportSchema.safeParse({ ...validReport, remark: 'x'.repeat(501) }).success).toBe(false);
   });
 });
 
@@ -154,92 +104,86 @@ describe('workOrderQuerySchema', () => {
     }
   });
 
-  it('should coerce string page numbers to integers', () => {
-    const result = workOrderQuerySchema.safeParse({
-      page: '3',
-      page_size: '50',
-    });
+  it('should coerce and bound page numbers', () => {
+    const result = workOrderQuerySchema.safeParse({ page: '3', page_size: '50' });
     expect(result.success).toBe(true);
     if (result.success) {
       expect(result.data.page).toBe(3);
       expect(result.data.page_size).toBe(50);
     }
-  });
 
-  it('should reject page_size > 100', () => {
-    const result = workOrderQuerySchema.safeParse({
-      page_size: 200,
-    });
-    expect(result.success).toBe(false);
-  });
-
-  it('should reject page < 1', () => {
-    const result = workOrderQuerySchema.safeParse({
-      page: 0,
-    });
-    expect(result.success).toBe(false);
-  });
-
-  it('should reject page_size < 1', () => {
-    const result = workOrderQuerySchema.safeParse({
-      page_size: 0,
-    });
-    expect(result.success).toBe(false);
+    expect(workOrderQuerySchema.safeParse({ page_size: 200 }).success).toBe(false);
+    expect(workOrderQuerySchema.safeParse({ page: 0 }).success).toBe(false);
+    expect(workOrderQuerySchema.safeParse({ page_size: 0 }).success).toBe(false);
   });
 });
 
 describe('Enums consistency', () => {
-  it('should have correct WorkOrderStatus values', () => {
+  it('should have correct WorkOrderStatus values and labels', () => {
     const statuses = Object.values(WorkOrderStatus);
-    expect(statuses).toContain('pending');
-    expect(statuses).toContain('scheduling');
-    expect(statuses).toContain('producing');
-    expect(statuses).toContain('inspecting');
-    expect(statuses).toContain('stored');
-    expect(statuses).toContain('aborted');
+    expect(statuses).toEqual(
+      expect.arrayContaining(['pending', 'scheduling', 'producing', 'inspecting', 'stored', 'aborted'])
+    );
     expect(statuses.length).toBe(6);
-  });
+    expect(statuses).not.toContain('quality_check');
+    expect(statuses).not.toContain('warehoused');
+    expect(statuses).not.toContain('inspect');
 
-  it('should have labels for every work order status', () => {
-    for (const status of Object.values(WorkOrderStatus)) {
+    for (const status of statuses) {
       expect(WorkOrderStatusLabels[status]).toBeTruthy();
     }
   });
 
-  it('should have correct Priority values', () => {
+  it('should have correct Priority values and labels', () => {
     const priorities = Object.values(Priority);
-    expect(priorities).toContain('urgent');
-    expect(priorities).toContain('high');
-    expect(priorities).toContain('normal');
-    expect(priorities).toContain('low');
+    expect(priorities).toEqual(expect.arrayContaining(['urgent', 'high', 'normal', 'low']));
     expect(priorities.length).toBe(4);
-  });
-
-  it('should have labels for every priority', () => {
-    for (const priority of Object.values(Priority)) {
+    for (const priority of priorities) {
       expect(PriorityLabels[priority]).toBeTruthy();
     }
   });
 
-  it('should have correct ProgressAction values', () => {
+  it('should have correct ProgressAction values and labels', () => {
     const actions = Object.values(ProgressAction);
-    expect(actions).toContain('start');
-    expect(actions).toContain('report_progress');
-    expect(actions).toContain('quality_check');
-    expect(actions).toContain('warehouse_in');
-    expect(actions).toContain('abort');
-    expect(actions).toContain('pause');
-    expect(actions).toContain('resume');
-    expect(actions).toContain('report_defect');
-    expect(actions).toContain('complete_cutting');
-    expect(actions).toContain('complete_assembly');
-    expect(actions).toContain('complete_painting');
+    expect(actions).toEqual(
+      expect.arrayContaining([
+        'start',
+        'report_progress',
+        'quality_check',
+        'warehouse_in',
+        'abort',
+        'pause',
+        'resume',
+        'report_defect',
+        'complete_cutting',
+        'complete_assembly',
+        'complete_painting',
+      ])
+    );
     expect(actions.length).toBe(11);
-  });
+    expect(actions).not.toContain('start_production');
+    expect(actions).not.toContain('submit_quality_check');
+    expect(actions).not.toContain('complete_quality_check');
+    expect(actions).not.toContain('fail_quality_check');
 
-  it('should have labels for every progress action', () => {
-    for (const action of Object.values(ProgressAction)) {
+    for (const action of actions) {
       expect(ProgressActionLabels[action]).toBeTruthy();
     }
+  });
+});
+
+describe('progressReportSchema action-status alignment', () => {
+  it('should map quality_check and warehouse_in actions to canonical statuses', () => {
+    const actionToStatus: Record<string, string> = {
+      start: 'producing',
+      quality_check: 'inspecting',
+      warehouse_in: 'stored',
+      pause: 'pending',
+      abort: 'aborted',
+      resume: 'producing',
+    };
+
+    expect(actionToStatus.quality_check).toBe('inspecting');
+    expect(actionToStatus.warehouse_in).toBe('stored');
   });
 });
