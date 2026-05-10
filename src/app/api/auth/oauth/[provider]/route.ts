@@ -10,13 +10,17 @@ export async function GET(
   const config = getOAuthProvider(provider);
 
   if (!config) {
-    return NextResponse.json({ error: `不支持的 OAuth 提供商: ${provider}` }, { status: 400 });
+    return NextResponse.json(
+      { success: false, error: `不支持的 OAuth 提供商: ${provider}` },
+      { status: 400 }
+    );
   }
 
   // 检查是否已配置
   if (!isOAuthProviderConfigured(provider as 'wechat' | 'github' | 'google')) {
     return NextResponse.json(
       {
+        success: false,
         error: 'OAuth 未配置',
         message: `请先配置 ${config.name} OAuth 所需的环境变量: ${config.clientIdEnv} 和 ${config.clientSecretEnv}`,
         provider,

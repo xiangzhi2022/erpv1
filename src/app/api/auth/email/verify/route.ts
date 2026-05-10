@@ -3,7 +3,7 @@ import { getSupabaseClient } from '@/db/client';
 
 export async function POST(request: NextRequest) {
   try {
-    const { email, code } = await request.json();
+    const { email, code } = await request.json() as { email?: string; code?: string };
 
     if (!email || !code) {
       return NextResponse.json(
@@ -28,11 +28,11 @@ export async function POST(request: NextRequest) {
 
     const supabase = getSupabaseClient();
 
-    // 查询最新未使用的验证码
+    // 查询最新未使用的验证码（phone 字段存储邮箱）
     const { data, error } = await supabase
       .from('sms_codes')
       .select('*')
-      .eq('phone', email)  // 使用 phone 字段存储邮箱
+      .eq('phone', email)
       .eq('code', code)
       .eq('used', false)
       .eq('type', 'email_verify')
@@ -41,7 +41,7 @@ export async function POST(request: NextRequest) {
       .limit(1);
 
     if (error) {
-      console.error('查询验证码失败:', error);
+      console.error('查询验证码失败:', error.message);
       return NextResponse.json(
         { success: false, error: '验证码验证失败' },
         { status: 500 }
@@ -65,9 +65,9 @@ export async function POST(request: NextRequest) {
       success: true,
       message: '验证成功',
     });
-
   } catch (error) {
-    console.error('验证失败:', error);
+    const message = error instanceof Error ? error.message : '未知错误';
+    console.error('验证失败:', message);
     return NextResponse.json(
       { success: false, error: '验证失败，请稍后重试' },
       { status: 500 }
