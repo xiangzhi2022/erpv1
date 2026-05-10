@@ -76,3 +76,31 @@
 - 不要多个 worker 同时修改同一个文件。
 - 不要提交 `.env` 或密钥。
 - Worker 不做最终合并，最终集成由 review/github agent 处理。
+
+## Smoke Fix Dispatch - 2026-05-10
+
+Source report: `docs/review/SMOKE-TEST-RESULTS.md`
+
+These tasks are follow-up smoke blockers discovered after the original 01-20 integration. Dispatch them from `origin/main` into independent branches. Do not reuse the removed `21-lint-blockers.md` task.
+
+### Dispatch order
+
+1. Dispatch `21-smoke-dashboard-shell.md` first to unblock page rendering failures.
+2. Dispatch `22-smoke-auth-session.md` second because order and progress write flows depend on normal login sessions.
+3. Dispatch `23-smoke-orders-flow.md` after Task 22, or in parallel only if the worker can test with an equivalent authenticated session.
+4. Dispatch `24-smoke-progress-flow.md` after Task 22, or in parallel only if the worker can test with a UUID-compatible authenticated session.
+5. Dispatch `25-smoke-portals-routing.md` in parallel with Tasks 23-24.
+6. Dispatch `26-smoke-tasks-notifications-api.md` in parallel with Tasks 23-24 after auth expectations are clear.
+7. Dispatch `27-smoke-regression-verification.md` only after Tasks 21-26 are integrated.
+
+### Smoke task index
+
+| File | Suggested Branch | Worker | Scope |
+| --- | --- | --- | --- |
+| `21-smoke-dashboard-shell.md` | `codex/smoke-dashboard-shell` | `frontend-agent` | SidebarProvider/runtime 500s for dashboard, supplier, settings, factory |
+| `22-smoke-auth-session.md` | `codex/smoke-auth-session` | `backend-agent` | `auth_session` API auth unification and UUID-compatible demo identity |
+| `23-smoke-orders-flow.md` | `codex/smoke-orders-flow` | `backend-agent` | Order creation schema mismatch and status flow |
+| `24-smoke-progress-flow.md` | `codex/smoke-progress-flow` | `backend-agent` | Work order creation and progress report UUID failures |
+| `25-smoke-portals-routing.md` | `codex/smoke-portals-routing` | `frontend-agent` | Factory and worker portal 404 routing |
+| `26-smoke-tasks-notifications-api.md` | `codex/smoke-tasks-notifications-api` | `backend-agent` | Categories, tasks, notifications API 500s |
+| `27-smoke-regression-verification.md` | `codex/smoke-regression-verification` | `test-agent` | Final smoke rerun and documentation update |
