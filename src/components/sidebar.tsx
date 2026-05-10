@@ -6,6 +6,8 @@ import {
   LayoutDashboard,
   FolderTree,
   RefreshCw,
+  Factory,
+  HardHat,
   ChevronLeft,
   ChevronRight,
 } from 'lucide-react';
@@ -41,6 +43,19 @@ const navItems = [
     title: '数据同步',
     href: '/sync',
     icon: RefreshCw,
+  },
+] as const;
+
+const portalItems = [
+  {
+    title: '工厂端',
+    href: '/factory/portal',
+    icon: Factory,
+  },
+  {
+    title: '工人端',
+    href: '/worker/portal',
+    icon: HardHat,
   },
 ] as const;
 
@@ -89,6 +104,27 @@ export function AppSidebar() {
                   item.href === '/'
                     ? pathname === '/' || pathname === ''
                     : pathname.startsWith(item.href);
+
+                return (
+                  <SidebarMenuItem key={item.href}>
+                    <SidebarMenuButton asChild isActive={isActive}>
+                      <Link href={item.href}>
+                        <item.icon className="h-4 w-4" />
+                        <span>{item.title}</span>
+                      </Link>
+                    </SidebarMenuButton>
+                  </SidebarMenuItem>
+                );
+              })}
+            </SidebarMenu>
+          </SidebarGroupContent>
+        </SidebarGroup>
+        <SidebarGroup>
+          <SidebarGroupLabel>门户入口</SidebarGroupLabel>
+          <SidebarGroupContent>
+            <SidebarMenu>
+              {portalItems.map((item) => {
+                const isActive = pathname.startsWith(item.href);
 
                 return (
                   <SidebarMenuItem key={item.href}>
