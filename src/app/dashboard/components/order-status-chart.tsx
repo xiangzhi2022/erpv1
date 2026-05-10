@@ -21,6 +21,7 @@ import { PieChart as PieChartIcon } from 'lucide-react';
 
 interface StatusDataItem {
   name: string;
+  label?: string;
   value: number;
   fill: string;
 }
@@ -54,29 +55,23 @@ export function OrderStatusChart() {
 
   const fetchData = useCallback(async () => {
     try {
-      const res = await fetch('/api/orders');
+      const res = await fetch('/api/dashboard/chart');
       if (res.ok) {
         const result = await res.json();
-        const orders = result.data || [];
-
-        // 按状态聚合
-        const statusCount: Record<string, number> = {};
-        for (const order of orders) {
-          const status = order.status || 'pending';
-          statusCount[status] = (statusCount[status] || 0) + 1;
-        }
-
-        const chartData = Object.entries(statusCount)
-          .filter(([, count]) => count > 0)
-          .sort(([, a], [, b]) => b - a)
-          .map(([status, count]) => ({
-            name: status,
-            value: count,
-            fill: statusColorMap[status] || 'hsl(var(--muted))',
+        const statusDistribution = Array.isArray(result.statusDistribution)
+          ? result.statusDistribution
+          : [];
+        const chartData = statusDistribution
+          .filter((item: StatusDataItem) => Number(item.value) > 0)
+          .map((item: StatusDataItem) => ({
+            name: item.name,
+            label: item.label,
+            value: Number(item.value) || 0,
+            fill: item.fill || statusColorMap[item.name] || 'hsl(var(--muted))',
           }));
 
         setData(chartData);
-        setTotal(orders.length);
+        setTotal(chartData.reduce((sum: number, item: StatusDataItem) => sum + item.value, 0));
       }
     } catch (err) {
       console.error('Fetch order status error:', err);
