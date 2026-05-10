@@ -1,29 +1,12 @@
 import { getSupabaseClient } from '@/db/client';
-import { cookies } from 'next/headers';
+import { getUserFromRequest } from '@/lib/auth';
 
 const getServiceClient = () => getSupabaseClient();
-
-interface CurrentUser {
-  id: string;
-  role: string;
-  tenant_id?: string;
-}
-
-async function getCurrentUser(): Promise<CurrentUser | null> {
-  const cookieStore = await cookies();
-  const userStr = cookieStore.get('erp_user')?.value;
-  if (!userStr) return null;
-  try {
-    return JSON.parse(userStr);
-  } catch {
-    return null;
-  }
-}
 
 // GET /api/orders/sequence - Get next order sequence number for current tenant
 export async function GET(request: Request) {
   try {
-    const user = await getCurrentUser();
+    const user = await getUserFromRequest(request);
     if (!user) {
       return Response.json({ success: false, error: '请先登录' }, { status: 401 });
     }
