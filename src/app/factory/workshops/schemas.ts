@@ -73,9 +73,10 @@ export const workshopFormSchema = z.object({
 export type WorkshopFormValues = z.infer<typeof workshopFormSchema>;
 
 /**
- * 车间数据类型（来自API）
+ * 车间数据类型（来自API列表响应）
+ * 与 API 返回字段保持一致，包含计算字段 load_percentage
  */
-export interface Workshop {
+export interface WorkshopData {
   id: string;
   factory_code: string;
   name: string;
@@ -101,4 +102,22 @@ export interface WorkshopStats {
   stopped: number;
   totalCapacity: number;
   totalLoad: number;
+}
+
+/**
+ * 列表 API 响应类型
+ */
+export interface WorkshopsResponse {
+  success: boolean;
+  workshops: WorkshopData[];
+  stats: WorkshopStats;
+}
+
+/**
+ * 计算 load_percentage，上限 100
+ * 与后端 calcLoadPercentage 逻辑保持一致
+ */
+export function calcLoadPercentage(currentLoad: number, capacity: number): number {
+  if (!capacity || capacity <= 0) return 0;
+  return Math.min(Math.round((currentLoad / capacity) * 100), 100);
 }
