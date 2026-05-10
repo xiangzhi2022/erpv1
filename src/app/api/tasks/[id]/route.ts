@@ -42,7 +42,20 @@ export async function PATCH(
       return NextResponse.json({ success: true, data: task });
     }
 
-    const task = await updateTask(id, body);
+    // Whitelist allowed update fields to prevent arbitrary data injection
+    const allowedFields = [
+      "title", "description", "status", "priority",
+      "category_id", "assignee_id", "assignee_name", "assignee_avatar",
+      "completed", "due_date",
+    ];
+    const updateData: Record<string, unknown> = {};
+    for (const key of allowedFields) {
+      if (key in body) {
+        updateData[key] = body[key];
+      }
+    }
+
+    const task = await updateTask(id, updateData);
 
     // 如果更新了指派负责人，创建分配通知
     if (body.assignee_name && body.assignee_id) {
@@ -81,7 +94,20 @@ export async function PUT(
       return NextResponse.json({ success: true, data: task });
     }
 
-    const task = await updateTask(id, body);
+    // Whitelist allowed update fields
+    const allowedFields = [
+      "title", "description", "status", "priority",
+      "category_id", "assignee_id", "assignee_name", "assignee_avatar",
+      "completed", "due_date",
+    ];
+    const updateData: Record<string, unknown> = {};
+    for (const key of allowedFields) {
+      if (key in body) {
+        updateData[key] = body[key];
+      }
+    }
+
+    const task = await updateTask(id, updateData);
     return NextResponse.json({ success: true, data: task });
   } catch (e: unknown) {
     const message = e instanceof Error ? e.message : "更新任务失败";

@@ -1,6 +1,6 @@
 'use client';
 
-import { WorkerStats, WORKER_STATUSES } from '../schemas';
+import { WorkerStats } from '../schemas';
 import { Users, UserCheck, UserX, TrendingUp } from 'lucide-react';
 
 export function StatsCards({ stats }: { stats: WorkerStats }) {

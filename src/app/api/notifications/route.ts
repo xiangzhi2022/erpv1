@@ -38,8 +38,8 @@ export async function POST(request: Request) {
     const body = await request.json();
 
     if (body.action === "markAllRead") {
-      await markAllNotificationsRead();
-      return NextResponse.json({ success: true });
+      const count = await markAllNotificationsRead();
+      return NextResponse.json({ success: true, markedCount: count });
     }
 
     if (body.action === "checkOverdue") {

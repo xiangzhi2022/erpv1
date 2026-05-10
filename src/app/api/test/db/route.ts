@@ -1,33 +1,41 @@
 import { NextResponse } from 'next/server';
 import { getSupabaseClient } from '@/db/client';
+import { requireDevEnv, safeErrorMessage } from '../../debug/_lib/env-guard';
 
+/**
+ * Test endpoint: verifies database connectivity only.
+ * Only available in development. Performs a minimal read query
+ * without exposing any user data.
+ */
 export async function GET() {
+  const guard = requireDevEnv();
+  if (guard) return guard;
+
   try {
     const supabase = getSupabaseClient();
-    
-    const { data, error } = await supabase
+
+    // Minimal connectivity check — select only the count, no user data
+    const { error } = await supabase
       .from('users')
-      .select('*')
-      .eq('phone', 'admin');
-    
+      .select('id', { count: 'exact', head: true });
+
     if (error) {
-      return NextResponse.json({ 
-        success: false, 
-        error: error.message,
-        details: error 
+      return NextResponse.json({
+        success: false,
+        connected: false,
+        error: 'Database query failed',
       });
     }
-    
-    return NextResponse.json({ 
-      success: true, 
-      data,
-      count: data?.length || 0
+
+    return NextResponse.json({
+      success: true,
+      connected: true,
     });
   } catch (err: unknown) {
-    const error = err as Error;
-    return NextResponse.json({ 
-      success: false, 
-      error: error.message 
+    return NextResponse.json({
+      success: false,
+      connected: false,
+      error: safeErrorMessage(err),
     });
   }
 }

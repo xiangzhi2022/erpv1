@@ -3,7 +3,7 @@ import { getSupabaseClient } from '@/db/client';
 
 export async function POST(request: NextRequest) {
   try {
-    const { phone, code } = await request.json();
+    const { phone, code } = await request.json() as { phone?: string; code?: string };
 
     if (!phone || !code) {
       return NextResponse.json(
@@ -41,7 +41,7 @@ export async function POST(request: NextRequest) {
       .limit(1);
 
     if (error) {
-      console.error('查询验证码失败:', error);
+      console.error('查询验证码失败:', error.message);
       return NextResponse.json(
         { success: false, error: '验证码验证失败' },
         { status: 500 }
@@ -63,11 +63,11 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({
       success: true,
-      message: '验证码验证成功'
+      message: '验证码验证成功',
     });
-
   } catch (error) {
-    console.error('验证验证码失败:', error);
+    const message = error instanceof Error ? error.message : '未知错误';
+    console.error('验证验证码失败:', message);
     return NextResponse.json(
       { success: false, error: '验证失败，请稍后重试' },
       { status: 500 }

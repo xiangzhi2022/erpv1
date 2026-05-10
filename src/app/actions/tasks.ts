@@ -44,7 +44,9 @@ export async function getTasks(filters?: {
     query = query.eq("assignee_id", filters.assignee_id);
   }
   if (filters?.search) {
-    query = query.or(`title.ilike.%${filters.search}%,assignee_name.ilike.%${filters.search}%,description.ilike.%${filters.search}%`);
+    // Escape special ILIKE characters % and _ to prevent pattern injection
+    const escaped = filters.search.replace(/[%_]/g, (ch) => `\\${ch}`);
+    query = query.or(`title.ilike.%${escaped}%,assignee_name.ilike.%${escaped}%,description.ilike.%${escaped}%`);
   }
 
   const { data, error, count } = await query;
@@ -160,10 +162,17 @@ export async function getTaskStats(): Promise<{
     .neq("status", "completed");
   if (overdueError) throw new Error(`统计过期任务失败: ${overdueError.message}`);
 
+  // Query pending count directly to avoid negative values from subtraction
+  const { count: pendingCount, error: pendingError } = await client
+    .from("tasks")
+    .select("*", { count: "exact", head: true })
+    .eq("status", "pending");
+  if (pendingError) throw new Error(`统计待办任务失败: ${pendingError.message}`);
+
   return {
     total: total ?? 0,
     completed: completed ?? 0,
-    pending: (total ?? 0) - (completed ?? 0) - (inProgress ?? 0),
+    pending: pendingCount ?? 0,
     in_progress: inProgress ?? 0,
     overdue: overdue ?? 0,
   };
@@ -211,23 +220,29 @@ export async function getNotifications(filters?: {
 }
 
 // 标记通知为已读
-export async function markNotificationRead(id: string): Promise<void> {
+export async function markNotificationRead(id: string): Promise<Notification> {
   const client = getSupabaseClient();
-  const { error } = await client
+  const { data, error } = await client
     .from("notifications")
     .update({ read: true })
-    .eq("id", id);
+    .eq("id", id)
+    .select("id, task_id, type, title, message, read, created_at")
+    .maybeSingle();
   if (error) throw new Error(`标记通知失败: ${error.message}`);
+  if (!data) throw new Error("通知不存在");
+  return data as Notification;
 }
 
 // 标记所有通知为已读
-export async function markAllNotificationsRead(): Promise<void> {
+export async function markAllNotificationsRead(): Promise<number> {
   const client = getSupabaseClient();
-  const { error } = await client
+  const { data, error } = await client
     .from("notifications")
     .update({ read: true })
-    .eq("read", false);
+    .eq("read", false)
+    .select("id");
   if (error) throw new Error(`标记全部通知失败: ${error.message}`);
+  return data?.length ?? 0;
 }
 
 // 获取未读通知数量

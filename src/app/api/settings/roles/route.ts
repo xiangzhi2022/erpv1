@@ -1,25 +1,35 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { NextResponse } from 'next/server';
 import { getSupabaseClient } from '@/db/client';
+import { cookies } from 'next/headers';
 
-export async function GET(request: NextRequest) {
+async function getAuthUser() {
+  const cookieStore = await cookies();
+  const token = cookieStore.get('erp_user');
+  if (!token) return null;
   try {
-    const supabase = getSupabaseClient();
-    
-    // 测试连接
-    const { data: testData, error: testError } = await supabase.from('sys_roles').select('id').limit(1);
-    
-    if (testError) {
-      console.error('Supabase connection test error:', testError);
-      return NextResponse.json({ success: false, error: testError.message }, { status: 500 });
+    return JSON.parse(token.value);
+  } catch {
+    return null;
+  }
+}
+
+export async function GET() {
+  try {
+    const user = await getAuthUser();
+    if (!user) {
+      return NextResponse.json({ success: false, error: '未登录' }, { status: 401 });
     }
-    
+
+    const supabase = getSupabaseClient();
+
     const { data: roles, error } = await supabase
       .from('sys_roles')
       .select('id, role_name, dept')
       .order('sort_order');
 
     if (error) {
-      return NextResponse.json({ success: false, error: error.message }, { status: 500 });
+      console.error('获取角色列表失败:', error);
+      return NextResponse.json({ success: false, error: '获取角色列表失败' }, { status: 500 });
     }
 
     return NextResponse.json({ success: true, roles });

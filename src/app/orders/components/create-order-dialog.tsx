@@ -96,19 +96,19 @@ export function CreateOrderDialog({ open, onOpenChange, onSuccess }: CreateOrder
   }, [open, fetchCustomers]);
 
   // Generate order number
-  const generateOrderNo = async () => {
+  const generateOrderNo = useCallback(async () => {
     setGeneratingOrderNo(true);
     try {
       const res = await fetch('/api/orders/generate', { method: 'POST' });
       const data = await res.json();
       if (data.success) {
-        form.setValue('order_no', data.orderNo);
+        form.setValue('order_no', data.data?.order_no || data.orderNo || '');
       } else {
         // Fallback: use sequence API
         const seqRes = await fetch('/api/orders/sequence');
         const seqData = await seqRes.json();
         if (seqData.success) {
-          form.setValue('order_no', seqData.orderNo);
+          form.setValue('order_no', seqData.data?.order_no || seqData.orderNo || '');
         }
       }
     } catch {
@@ -120,14 +120,14 @@ export function CreateOrderDialog({ open, onOpenChange, onSuccess }: CreateOrder
     } finally {
       setGeneratingOrderNo(false);
     }
-  };
+  }, [form]);
 
   // Auto-generate order number on open
   useEffect(() => {
     if (open && !form.getValues('order_no')) {
       generateOrderNo();
     }
-  }, [open]);
+  }, [open, form, generateOrderNo]);
 
   // Select customer
   const selectCustomer = (customer: Customer) => {

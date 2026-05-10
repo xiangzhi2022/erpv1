@@ -2,11 +2,13 @@ import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { getSession } from '@/lib/auth';
 
-const supabaseUrl = process.env.COZE_SUPABASE_URL || 'https://cdcnjtgabgjkouavwxsl.supabase.co';
-const supabaseServiceKey = process.env.COZE_SUPABASE_SERVICE_ROLE_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNkY25qdGdhYmdqa291YXZ3eHNsIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3Nzg1MjM0MSwiZXhwIjoyMDkzNDI4MzQxfQ.LzvwvnkQx_lIjIjsZd8FxyXRaDwTPyiVELyTEuTacmE';
-
 function getSupabaseAdmin() {
-  return createClient(supabaseUrl, supabaseServiceKey, { auth: { persistSession: false } });
+  const url = process.env.COZE_SUPABASE_URL;
+  const key = process.env.COZE_SUPABASE_SERVICE_ROLE_KEY;
+  if (!url || !key) {
+    throw new Error('Missing Supabase environment variables');
+  }
+  return createClient(url, key, { auth: { persistSession: false } });
 }
 
 async function getAuthUser() {
@@ -42,7 +44,7 @@ export async function GET() {
 
     const craftDistribution: Record<string, number> = {};
     workers.forEach((w: { craft_type: string | null }) => {
-      const craft = w.craft_type || '未分配';
+      const craft = w.craft_type || 'unassigned';
       craftDistribution[craft] = (craftDistribution[craft] || 0) + 1;
     });
 

@@ -26,7 +26,7 @@ export const GENDERS = [
   { value: 'female', label: '女' },
 ] as const;
 
-// 工人表单 Schema - 使用更宽松的类型定义避免 TS 兼容问题
+// 工人表单 Schema - snake_case 与数据库字段一致
 export const workerFormSchema = z.object({
   worker_no: z.string(),
   name: z.string().min(1, '姓名不能为空').max(100, '姓名不能超过100字'),
@@ -42,10 +42,10 @@ export const workerFormSchema = z.object({
 
 export type WorkerFormValues = z.infer<typeof workerFormSchema>;
 
-// 工人类型
+// 工人类型 - 与 API 返回字段一致（snake_case）
 export interface Worker {
   id: string;
-  worker_no: string | null;
+  worker_no: string;
   name: string;
   phone: string | null;
   gender: string | null;
@@ -69,6 +69,20 @@ export interface WorkerStats {
   resigned: number;
   activeRate: number;
   craftDistribution: Record<string, number>;
+}
+
+// 安全解析 skill_tags JSON 字符串
+export function safeParseTags(skillTags: string | null): string[] {
+  if (!skillTags) return [];
+  try {
+    const parsed = JSON.parse(skillTags);
+    if (Array.isArray(parsed)) {
+      return parsed.filter((item: unknown): item is string => typeof item === 'string');
+    }
+    return [];
+  } catch {
+    return [];
+  }
 }
 
 // 辅助函数

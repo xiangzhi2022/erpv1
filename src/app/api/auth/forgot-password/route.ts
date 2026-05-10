@@ -7,16 +7,16 @@ export async function POST(request: NextRequest) {
     const { email } = body as { email?: string };
 
     if (!email) {
-      return NextResponse.json({ error: '请输入邮箱地址' }, { status: 400 });
+      return NextResponse.json({ success: false, error: '请输入邮箱地址' }, { status: 400 });
     }
 
     // 邮箱格式校验
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     if (!emailRegex.test(email)) {
-      return NextResponse.json({ error: '邮箱格式不正确' }, { status: 400 });
+      return NextResponse.json({ success: false, error: '邮箱格式不正确' }, { status: 400 });
     }
 
-    // 生成重置令牌
+    // 生成重置令牌（无论邮箱是否存在，都返回相同响应，避免用户枚举）
     const token = generateResetToken(email);
 
     // 构建重置链接
@@ -26,9 +26,10 @@ export async function POST(request: NextRequest) {
     // ===== 邮件发送逻辑 =====
     // 生产环境应接入邮件服务（SMTP / SendGrid / Resend 等）
     // 当前为开发模式：将重置链接输出到控制台，方便调试
-    console.log(`[DEV] 密码重置链接: ${resetUrl}`);
-    console.log(`[DEV] 收件人: ${email}`);
-    console.log(`[DEV] Token: ${token}`);
+    if (process.env.COZE_PROJECT_ENV === 'DEV') {
+      console.log(`[DEV] Password reset link: ${resetUrl}`);
+      console.log(`[DEV] Recipient: ${email}`);
+    }
 
     // 检查是否配置了邮件服务
     const smtpHost = process.env.SMTP_HOST;
@@ -66,19 +67,19 @@ export async function POST(request: NextRequest) {
 
         return NextResponse.json({ success: true, message: '重置邮件已发送，请查收' });
       } catch (mailErr) {
-        console.error('邮件发送失败:', mailErr);
-        return NextResponse.json({ error: '邮件发送失败，请稍后重试' }, { status: 500 });
+        console.error('邮件发送失败:', mailErr instanceof Error ? mailErr.message : '未知错误');
+        return NextResponse.json({ success: false, error: '邮件发送失败，请稍后重试' }, { status: 500 });
       }
     }
 
     // 开发模式：返回提示（包含重置链接用于测试）
     return NextResponse.json({
       success: true,
-      message: '重置链接已生成',
-      // 开发模式下返回重置链接，生产环境应移除
+      message: '如果该邮箱已注册，重置链接已发送',
+      // 仅开发模式下返回重置链接
       ...(process.env.COZE_PROJECT_ENV === 'DEV' ? { devResetUrl: resetUrl } : {}),
     });
   } catch {
-    return NextResponse.json({ error: '服务器内部错误' }, { status: 500 });
+    return NextResponse.json({ success: false, error: '服务器内部错误' }, { status: 500 });
   }
 }

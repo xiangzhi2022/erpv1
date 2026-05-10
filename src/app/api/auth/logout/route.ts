@@ -1,23 +1,22 @@
 import { NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
+import { deleteSession, buildClearSessionCookie, isProduction, SESSION_COOKIE_NAME } from '@/lib/auth';
 
 export async function POST() {
   try {
     const cookieStore = await cookies();
-    const sessionId = cookieStore.get('auth_session')?.value;
+    const sessionId = cookieStore.get(SESSION_COOKIE_NAME)?.value;
 
+    // 清除服务端会话
     if (sessionId) {
-      // 清除服务端会话（内存存储中无需额外操作，Cookie 清除即可）
+      deleteSession(sessionId);
     }
 
     const response = NextResponse.json({ success: true });
-    response.headers.set(
-      'Set-Cookie',
-      'auth_session=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0'
-    );
+    response.headers.set('Set-Cookie', buildClearSessionCookie(isProduction()));
 
     return response;
   } catch {
-    return NextResponse.json({ error: '退出登录失败' }, { status: 500 });
+    return NextResponse.json({ success: false, error: '退出登录失败' }, { status: 500 });
   }
 }

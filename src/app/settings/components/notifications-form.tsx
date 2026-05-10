@@ -11,40 +11,40 @@ import { toast } from 'sonner';
 import { Loader2, Bell, Mail, Package, Factory, Settings } from 'lucide-react';
 
 interface NotificationSettings {
-  orderNotification: boolean;
-  productionNotification: boolean;
-  systemNotification: boolean;
-  emailNotification: boolean;
+  order_notification: boolean;
+  production_notification: boolean;
+  system_notification: boolean;
+  email_notification: boolean;
 }
 
 const defaultSettings: NotificationSettings = {
-  orderNotification: true,
-  productionNotification: true,
-  systemNotification: true,
-  emailNotification: false,
+  order_notification: true,
+  production_notification: true,
+  system_notification: true,
+  email_notification: false,
 };
 
 const notificationItems = [
   {
-    key: 'orderNotification' as const,
+    key: 'order_notification' as const,
     title: '订单通知',
     description: '接收新订单、订单状态变更等通知',
     icon: Package,
   },
   {
-    key: 'productionNotification' as const,
+    key: 'production_notification' as const,
     title: '生产通知',
     description: '接收生产任务、进度更新等通知',
     icon: Factory,
   },
   {
-    key: 'systemNotification' as const,
+    key: 'system_notification' as const,
     title: '系统通知',
     description: '接收系统维护、安全提醒等通知',
     icon: Settings,
   },
   {
-    key: 'emailNotification' as const,
+    key: 'email_notification' as const,
     title: '邮件通知',
     description: '同时将通知发送到您的邮箱',
     icon: Mail,
@@ -70,17 +70,17 @@ export function NotificationsForm() {
         const data = await res.json();
         if (data.success && data.preferences) {
           const loaded: NotificationSettings = { ...defaultSettings };
-          if (data.preferences.orderNotification !== undefined) {
-            loaded.orderNotification = data.preferences.orderNotification === 'true';
+          if (data.preferences.order_notification !== undefined) {
+            loaded.order_notification = data.preferences.order_notification === 'true';
           }
-          if (data.preferences.productionNotification !== undefined) {
-            loaded.productionNotification = data.preferences.productionNotification === 'true';
+          if (data.preferences.production_notification !== undefined) {
+            loaded.production_notification = data.preferences.production_notification === 'true';
           }
-          if (data.preferences.systemNotification !== undefined) {
-            loaded.systemNotification = data.preferences.systemNotification === 'true';
+          if (data.preferences.system_notification !== undefined) {
+            loaded.system_notification = data.preferences.system_notification === 'true';
           }
-          if (data.preferences.emailNotification !== undefined) {
-            loaded.emailNotification = data.preferences.emailNotification === 'true';
+          if (data.preferences.email_notification !== undefined) {
+            loaded.email_notification = data.preferences.email_notification === 'true';
           }
           setSettings(loaded);
         }

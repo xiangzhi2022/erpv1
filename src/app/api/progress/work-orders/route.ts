@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { getSupabaseClient } from '@/db/client';
 import { getUserFromRequest } from '@/lib/auth';
-import { workOrderQuerySchema, type ProgressStats, type WorkOrder } from '@/app/progress/schemas';
+import { workOrderQuerySchema, WorkOrderStatus, type ProgressStats, type WorkOrder } from '@/app/progress/schemas';
 
 export async function GET(request: Request) {
   try {
@@ -69,7 +69,7 @@ export async function GET(request: Request) {
       throw new Error(`统计失败: ${countError.message}`);
     }
 
-    // Get status distribution for stats
+    // Get status distribution for stats - aligned with canonical status names
     const { data: allOrders, error: statsError } = await supabase
       .from('work_orders')
       .select('status, expected_end_date, completed_quantity, target_quantity');
@@ -81,14 +81,14 @@ export async function GET(request: Request) {
     const now = new Date();
     const stats: ProgressStats = {
       total: allOrders?.length || 0,
-      pending: allOrders?.filter((o: Record<string, unknown>) => o.status === 'pending').length || 0,
-      producing: allOrders?.filter((o: Record<string, unknown>) => o.status === 'producing').length || 0,
-      inspecting: allOrders?.filter((o: Record<string, unknown>) => o.status === 'inspecting').length || 0,
-      stored: allOrders?.filter((o: Record<string, unknown>) => o.status === 'stored').length || 0,
-      aborted: allOrders?.filter((o: Record<string, unknown>) => o.status === 'aborted').length || 0,
+      pending: allOrders?.filter((o: Record<string, unknown>) => o.status === WorkOrderStatus.PENDING).length || 0,
+      producing: allOrders?.filter((o: Record<string, unknown>) => o.status === WorkOrderStatus.PRODUCING).length || 0,
+      inspecting: allOrders?.filter((o: Record<string, unknown>) => o.status === WorkOrderStatus.INSPECTING).length || 0,
+      stored: allOrders?.filter((o: Record<string, unknown>) => o.status === WorkOrderStatus.STORED).length || 0,
+      aborted: allOrders?.filter((o: Record<string, unknown>) => o.status === WorkOrderStatus.ABORTED).length || 0,
       overdue:
         allOrders?.filter((o: Record<string, unknown>) => {
-          if (!o.expected_end_date || o.status === 'stored' || o.status === 'aborted')
+          if (!o.expected_end_date || o.status === WorkOrderStatus.STORED || o.status === WorkOrderStatus.ABORTED)
             return false;
           return new Date(String(o.expected_end_date)) < now;
         }).length || 0,
@@ -131,6 +131,7 @@ export async function POST(request: Request) {
 
     const supabase = getSupabaseClient();
 
+    // Create work order with initial status 'pending'
     const { data, error } = await supabase
       .from('work_orders')
       .insert({
@@ -140,20 +141,24 @@ export async function POST(request: Request) {
         product_name,
         target_quantity,
         completed_quantity: 0,
-        status: 'pending',
+        status: WorkOrderStatus.PENDING,
         priority: priority || 'normal',
         expected_end_date: expected_end_date || null,
         remark: remark || null,
         created_by: user.id,
       })
       .select()
-      .single();
+      .maybeSingle();
 
     if (error) {
       throw new Error(`创建工单失败: ${error.message}`);
     }
 
-    // Auto-create a progress log
+    if (!data) {
+      throw new Error('创建工单失败: 未返回数据');
+    }
+
+    // Write initial progress log on work order creation
     const { error: logError } = await supabase.from('progress_logs').insert({
       work_order_id: data.id,
       operator_id: user.id,
@@ -165,6 +170,7 @@ export async function POST(request: Request) {
 
     if (logError) {
       console.error('创建进度日志失败:', logError.message);
+      // Non-fatal: work order is created, log failure should not block
     }
 
     return NextResponse.json({ success: true, data });

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { Sidebar } from '@/components/sidebar';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -9,6 +9,19 @@ import { Progress } from '@/components/ui/progress';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { ArrowUpRight, ArrowDownRight, Package, Clock, Truck, CheckCircle2 } from 'lucide-react';
+
+// Aligned with ORDER_STATUS_CONFIG in orders/schemas.ts
+interface OrderStats {
+  total: number;
+  pending: number;
+  returned: number;
+  confirmed: number;
+  pool: number;
+  producing: number;
+  shipped: number;
+  completed: number;
+  cancelled: number;
+}
 
 interface Order {
   id: string;
@@ -19,39 +32,58 @@ interface Order {
   customer_name: string;
 }
 
+const defaultStats: OrderStats = {
+  total: 0,
+  pending: 0,
+  returned: 0,
+  confirmed: 0,
+  pool: 0,
+  producing: 0,
+  shipped: 0,
+  completed: 0,
+  cancelled: 0,
+};
+
 export default function BoardPage() {
   const router = useRouter();
   const [orders, setOrders] = useState<Order[]>([]);
+  const [stats, setStats] = useState<OrderStats>(defaultStats);
   const [loading, setLoading] = useState(true);
+  const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
-    fetchData();
+    setMounted(true);
   }, []);
 
-  const fetchData = async () => {
+  const fetchData = useCallback(async () => {
     try {
       const res = await fetch('/api/orders');
       if (res.ok) {
         const data = await res.json();
-        setOrders(data.data || []);
+        if (data.success) {
+          setOrders(data.data || []);
+          setStats(data.stats || defaultStats);
+        }
       }
     } catch (error) {
       console.error('获取数据失败:', error);
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
 
-  // 从真实数据计算统计
-  const today = new Date().toISOString().split('T')[0];
-  const todayOrders = orders.filter(o => o.created_at?.startsWith(today));
-  const todayCompleted = orders.filter(o => (o.status === 'completed' || o.status === 'shipped') && o.created_at?.startsWith(today));
+  useEffect(() => {
+    fetchData();
+  }, [fetchData]);
+
+  // Producing count includes both 'producing' and 'in_production' statuses
+  const producingCount = stats.producing + orders.filter(o => o.status === 'in_production').length;
 
   const dailyStats = [
     {
       label: '今日订单',
-      value: todayOrders.length,
-      change: orders.length > 0 ? `总${orders.length}单` : '',
+      value: stats.total,
+      change: stats.total > 0 ? `总${stats.total}单` : '',
       trend: 'up' as const,
       icon: Package,
       color: 'text-blue-500',
@@ -59,26 +91,26 @@ export default function BoardPage() {
     },
     {
       label: '生产中',
-      value: orders.filter(o => o.status === 'producing').length,
-      change: orders.filter(o => o.status === 'confirmed').length > 0 ? `待排${orders.filter(o => o.status === 'confirmed').length}单` : '',
+      value: producingCount,
+      change: stats.confirmed > 0 ? `待排${stats.confirmed}单` : '',
       trend: 'up' as const,
       icon: Clock,
       color: 'text-amber-500',
       href: '/progress',
     },
     {
-      label: '今日发货',
-      value: orders.filter(o => o.status === 'shipped' && o.created_at?.startsWith(today)).length,
-      change: orders.filter(o => o.status === 'shipped').length > 0 ? `累计${orders.filter(o => o.status === 'shipped').length}单` : '',
+      label: '已发货',
+      value: stats.shipped,
+      change: stats.shipped > 0 ? `累计${stats.shipped}单` : '',
       trend: 'down' as const,
       icon: Truck,
       color: 'text-purple-500',
       href: '/shipping',
     },
     {
-      label: '今日完工',
-      value: todayCompleted.length,
-      change: orders.filter(o => o.status === 'completed').length > 0 ? `累计${orders.filter(o => o.status === 'completed').length}单` : '',
+      label: '已完成',
+      value: stats.completed,
+      change: stats.completed > 0 ? `累计${stats.completed}单` : '',
       trend: 'up' as const,
       icon: CheckCircle2,
       color: 'text-green-500',
@@ -86,10 +118,12 @@ export default function BoardPage() {
     },
   ];
 
-  // 按日期统计最近7天数据
-  const getLast7Days = () => {
-    const days: { date: string; label: string }[] = [];
+  // Compute last 7 days data only after mount to avoid hydration mismatch
+  const weeklyData = useMemo(() => {
+    if (!mounted) return [];
+
     const weekDays = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'];
+    const days: { date: string; label: string }[] = [];
     for (let i = 6; i >= 0; i--) {
       const d = new Date();
       d.setDate(d.getDate() - i);
@@ -98,32 +132,33 @@ export default function BoardPage() {
         label: i === 0 ? '今天' : i === 1 ? '昨天' : weekDays[d.getDay()],
       });
     }
-    return days;
-  };
 
-  const last7Days = getLast7Days();
-  const weeklyData = last7Days.map(day => {
-    const dayOrders = orders.filter(o => o.created_at?.startsWith(day.date));
-    return {
-      day: day.label,
-      orders: dayOrders.length,
-      production: dayOrders.filter(o => o.status === 'producing' || o.status === 'completed').length,
-      shipped: dayOrders.filter(o => o.status === 'shipped').length,
-    };
-  });
+    return days.map(day => {
+      const dayOrders = orders.filter(o => o.created_at?.startsWith(day.date));
+      return {
+        day: day.label,
+        orders: dayOrders.length,
+        production: dayOrders.filter(o => o.status === 'producing' || o.status === 'in_production' || o.status === 'completed').length,
+        shipped: dayOrders.filter(o => o.status === 'shipped').length,
+      };
+    });
+  }, [mounted, orders]);
 
-  // 按状态分组统计
+  // Aligned with ORDER_STATUS_CONFIG in orders/schemas.ts
   const statusGroups = [
-    { status: 'pending', label: '待接收', count: orders.filter(o => o.status === 'pending').length },
-    { status: 'confirmed', label: '已接收', count: orders.filter(o => o.status === 'confirmed').length },
-    { status: 'producing', label: '生产中', count: orders.filter(o => o.status === 'producing').length },
-    { status: 'shipped', label: '已发货', count: orders.filter(o => o.status === 'shipped').length },
-    { status: 'completed', label: '已完成', count: orders.filter(o => o.status === 'completed').length },
+    { status: 'pending', label: '待接收', count: stats.pending },
+    { status: 'confirmed', label: '已接收', count: stats.confirmed },
+    { status: 'pool', label: '订单池', count: stats.pool },
+    { status: 'producing', label: '生产中', count: producingCount },
+    { status: 'shipped', label: '已发货', count: stats.shipped },
+    { status: 'completed', label: '已完成', count: stats.completed },
+    { status: 'returned', label: '已退回', count: stats.returned },
+    { status: 'cancelled', label: '已取消', count: stats.cancelled },
   ];
 
   const maxOrders = Math.max(...weeklyData.map(d => d.orders), 1);
 
-  // 质量统计
+  // Quality stats are placeholders (not from API)
   const qualityStats = [
     { label: '合格率', value: 98.5, target: 95 },
     { label: '准时交付率', value: 92.3, target: 90 },
@@ -134,7 +169,7 @@ export default function BoardPage() {
   return (
     <div className="flex min-h-screen bg-background">
       <Sidebar />
-      
+
       <main className="flex-1 p-8">
         <div className="max-w-7xl mx-auto space-y-6">
           <div className="flex items-center justify-between">
@@ -202,7 +237,7 @@ export default function BoardPage() {
                     </div>
                   </CardHeader>
                   <CardContent>
-                    {loading ? (
+                    {loading || !mounted ? (
                       <div className="space-y-4">
                         {Array.from({ length: 7 }).map((_, i) => (
                           <Skeleton key={i} className="h-12 w-full" />
@@ -258,7 +293,7 @@ export default function BoardPage() {
                       </div>
                     ) : (
                       <div className="space-y-6">
-                        {statusGroups.map((group) => (
+                        {statusGroups.filter(g => g.count > 0).map((group) => (
                           <div key={group.status}>
                             <div className="flex justify-between mb-2">
                               <span
@@ -270,7 +305,7 @@ export default function BoardPage() {
                               <span className="text-sm text-muted-foreground">{group.count} 单</span>
                             </div>
                             <Progress
-                              value={orders.length > 0 ? (group.count / orders.length) * 100 : 0}
+                              value={stats.total > 0 ? (group.count / stats.total) * 100 : 0}
                               className="h-3 cursor-pointer"
                               onClick={() => router.push(`/orders?status=${group.status}`)}
                             />
@@ -300,7 +335,7 @@ export default function BoardPage() {
                         <Skeleton key={i} className="h-16 w-full" />
                       ))}
                     </div>
-                  ) : orders.length === 0 ? (
+                  ) : stats.total === 0 ? (
                     <div className="text-center py-12 text-muted-foreground">
                       <Package className="h-12 w-12 mx-auto mb-4 opacity-50" />
                       <p>暂无生产数据</p>
@@ -320,7 +355,7 @@ export default function BoardPage() {
                             <div>
                               <p className="font-medium">{group.label}</p>
                               <p className="text-sm text-muted-foreground">
-                                占比 {orders.length > 0 ? ((group.count / orders.length) * 100).toFixed(1) : 0}%
+                                占比 {stats.total > 0 ? ((group.count / stats.total) * 100).toFixed(1) : 0}%
                               </p>
                             </div>
                           </div>
