@@ -147,6 +147,44 @@ CREATE TABLE IF NOT EXISTS order_prefixes (
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
+-- 11. 创建分类表 (categories)
+CREATE TABLE IF NOT EXISTS categories (
+  id VARCHAR(36) PRIMARY KEY DEFAULT gen_random_uuid(),
+  name VARCHAR(128) NOT NULL,
+  color VARCHAR(7) NOT NULL DEFAULT '#6366f1',
+  description TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- 12. 创建任务表 (tasks)
+CREATE TABLE IF NOT EXISTS tasks (
+  id VARCHAR(36) PRIMARY KEY DEFAULT gen_random_uuid(),
+  title VARCHAR(255) NOT NULL,
+  description TEXT,
+  status VARCHAR(20) NOT NULL DEFAULT 'pending',
+  priority INTEGER NOT NULL DEFAULT 0,
+  category_id VARCHAR(36) REFERENCES categories(id) ON DELETE CASCADE,
+  assignee_id VARCHAR(36),
+  assignee_name VARCHAR(128),
+  assignee_avatar VARCHAR(512),
+  due_date TIMESTAMPTZ,
+  completed BOOLEAN NOT NULL DEFAULT false,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- 13. 创建通知表 (notifications)
+CREATE TABLE IF NOT EXISTS notifications (
+  id VARCHAR(36) PRIMARY KEY DEFAULT gen_random_uuid(),
+  task_id VARCHAR(36) REFERENCES tasks(id) ON DELETE CASCADE,
+  type VARCHAR(30) NOT NULL DEFAULT 'assignment',
+  title VARCHAR(255) NOT NULL,
+  message TEXT,
+  read BOOLEAN NOT NULL DEFAULT false,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
 -- ============================================
 -- 创建索引
 -- ============================================
@@ -159,6 +197,40 @@ CREATE INDEX IF NOT EXISTS idx_customers_tenant_id ON customers(tenant_id);
 CREATE INDEX IF NOT EXISTS idx_production_tasks_tenant_id ON production_tasks(tenant_id);
 CREATE INDEX IF NOT EXISTS idx_production_tasks_order_id ON production_tasks(order_id);
 CREATE INDEX IF NOT EXISTS idx_production_tasks_workshop_id ON production_tasks(workshop_id);
+CREATE INDEX IF NOT EXISTS idx_categories_name ON categories(name);
+CREATE INDEX IF NOT EXISTS idx_tasks_category_id ON tasks(category_id);
+CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status);
+CREATE INDEX IF NOT EXISTS idx_tasks_completed ON tasks(completed);
+CREATE INDEX IF NOT EXISTS idx_tasks_created_at ON tasks(created_at);
+CREATE INDEX IF NOT EXISTS idx_tasks_assignee_id ON tasks(assignee_id);
+CREATE INDEX IF NOT EXISTS idx_tasks_priority ON tasks(priority);
+CREATE INDEX IF NOT EXISTS idx_tasks_due_date ON tasks(due_date);
+CREATE INDEX IF NOT EXISTS idx_notifications_task_id ON notifications(task_id);
+CREATE INDEX IF NOT EXISTS idx_notifications_type ON notifications(type);
+CREATE INDEX IF NOT EXISTS idx_notifications_read ON notifications(read);
+CREATE INDEX IF NOT EXISTS idx_notifications_created_at ON notifications(created_at);
+
+-- ============================================
+-- 启用 RLS 并创建 anon 访问策略
+-- ============================================
+ALTER TABLE categories ENABLE ROW LEVEL SECURITY;
+ALTER TABLE tasks ENABLE ROW LEVEL SECURITY;
+ALTER TABLE notifications ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "allow_anon_select_categories" ON categories FOR SELECT TO anon USING (true);
+CREATE POLICY "allow_anon_insert_categories" ON categories FOR INSERT TO anon WITH CHECK (true);
+CREATE POLICY "allow_anon_update_categories" ON categories FOR UPDATE TO anon USING (true) WITH CHECK (true);
+CREATE POLICY "allow_anon_delete_categories" ON categories FOR DELETE TO anon USING (true);
+
+CREATE POLICY "allow_anon_select_tasks" ON tasks FOR SELECT TO anon USING (true);
+CREATE POLICY "allow_anon_insert_tasks" ON tasks FOR INSERT TO anon WITH CHECK (true);
+CREATE POLICY "allow_anon_update_tasks" ON tasks FOR UPDATE TO anon USING (true) WITH CHECK (true);
+CREATE POLICY "allow_anon_delete_tasks" ON tasks FOR DELETE TO anon USING (true);
+
+CREATE POLICY "allow_anon_select_notifications" ON notifications FOR SELECT TO anon USING (true);
+CREATE POLICY "allow_anon_insert_notifications" ON notifications FOR INSERT TO anon WITH CHECK (true);
+CREATE POLICY "allow_anon_update_notifications" ON notifications FOR UPDATE TO anon USING (true) WITH CHECK (true);
+CREATE POLICY "allow_anon_delete_notifications" ON notifications FOR DELETE TO anon USING (true);
 
 -- ============================================
 -- 创建更新时间戳函数
@@ -200,6 +272,12 @@ CREATE TRIGGER update_production_tasks_updated_at BEFORE UPDATE ON production_ta
 
 DROP TRIGGER IF EXISTS update_user_settings_updated_at ON user_settings;
 CREATE TRIGGER update_user_settings_updated_at BEFORE UPDATE ON user_settings FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+DROP TRIGGER IF EXISTS update_categories_updated_at ON categories;
+CREATE TRIGGER update_categories_updated_at BEFORE UPDATE ON categories FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+DROP TRIGGER IF EXISTS update_tasks_updated_at ON tasks;
+CREATE TRIGGER update_tasks_updated_at BEFORE UPDATE ON tasks FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
 -- ============================================
 -- 插入超级管理员账号
