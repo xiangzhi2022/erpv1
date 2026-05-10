@@ -3,8 +3,11 @@ import {
   progressReportSchema,
   workOrderQuerySchema,
   WorkOrderStatus,
+  WorkOrderStatusLabels,
   Priority,
+  PriorityLabels,
   ProgressAction,
+  ProgressActionLabels,
 } from '@/app/progress/schemas';
 
 describe('progressReportSchema', () => {
@@ -197,6 +200,12 @@ describe('Enums consistency', () => {
     expect(statuses.length).toBe(6);
   });
 
+  it('should have labels for every work order status', () => {
+    for (const status of Object.values(WorkOrderStatus)) {
+      expect(WorkOrderStatusLabels[status]).toBeTruthy();
+    }
+  });
+
   it('should have correct Priority values', () => {
     const priorities = Object.values(Priority);
     expect(priorities).toContain('urgent');
@@ -204,6 +213,12 @@ describe('Enums consistency', () => {
     expect(priorities).toContain('normal');
     expect(priorities).toContain('low');
     expect(priorities.length).toBe(4);
+  });
+
+  it('should have labels for every priority', () => {
+    for (const priority of Object.values(Priority)) {
+      expect(PriorityLabels[priority]).toBeTruthy();
+    }
   });
 
   it('should have correct ProgressAction values', () => {
@@ -220,5 +235,11 @@ describe('Enums consistency', () => {
     expect(actions).toContain('complete_assembly');
     expect(actions).toContain('complete_painting');
     expect(actions.length).toBe(11);
+  });
+
+  it('should have labels for every progress action', () => {
+    for (const action of Object.values(ProgressAction)) {
+      expect(ProgressActionLabels[action]).toBeTruthy();
+    }
   });
 });

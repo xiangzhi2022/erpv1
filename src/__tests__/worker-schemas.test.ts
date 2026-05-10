@@ -114,6 +114,10 @@ describe('getCraftLabel', () => {
     expect(getCraftLabel(null)).toBe('未分配');
   });
 
+  it('should return "未分配" for empty string', () => {
+    expect(getCraftLabel('')).toBe('未分配');
+  });
+
   it('should return the raw value for unknown craft type', () => {
     expect(getCraftLabel('unknown_craft')).toBe('unknown_craft');
   });
@@ -192,6 +196,29 @@ describe('workerFormSchema', () => {
       status: 'unknown',
     });
     expect(result.success).toBe(false);
+  });
+
+  it('should accept optional operational strings as empty values', () => {
+    const result = workerFormSchema.safeParse({
+      ...validForm,
+      worker_no: '',
+      phone: '',
+      gender: '',
+      craft_type: '',
+      workshop_id: '',
+      skill_tags: '',
+      hire_date: '',
+      remark: '',
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it('should reject unsupported gender only through downstream business rules, not schema', () => {
+    const result = workerFormSchema.safeParse({
+      ...validForm,
+      gender: 'unknown',
+    });
+    expect(result.success).toBe(true);
   });
 
   it('should accept all valid statuses', () => {

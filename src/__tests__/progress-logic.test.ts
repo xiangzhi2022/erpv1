@@ -30,6 +30,20 @@ const STATUS_TRANSITIONS: Record<string, Record<string, string>> = {
 };
 
 describe('Work order status transitions', () => {
+  it('should keep scheduling aligned with pending start and abort behavior', () => {
+    expect(STATUS_TRANSITIONS.scheduling).toEqual({
+      start: 'producing',
+      abort: 'aborted',
+    });
+  });
+
+  it('should not use removed quality_check or warehoused status names', () => {
+    expect(Object.keys(STATUS_TRANSITIONS)).not.toContain('quality_check');
+    expect(Object.keys(STATUS_TRANSITIONS)).not.toContain('warehoused');
+    expect(Object.values(STATUS_TRANSITIONS.producing)).not.toContain('quality_check');
+    expect(Object.values(STATUS_TRANSITIONS.inspecting)).not.toContain('warehoused');
+  });
+
   it('should allow pending -> producing via start', () => {
     expect(STATUS_TRANSITIONS.pending.start).toBe('producing');
   });
@@ -134,6 +148,14 @@ describe('Progress calculation', () => {
     expect(validateQuantity(95, 10, 100)).toBe(false);
     expect(validateQuantity(100, 0, 100)).toBe(true);
     expect(validateQuantity(100, 1, 100)).toBe(false);
+  });
+
+  it('should reject negative progress deltas before calculating totals', () => {
+    const validateQuantity = (completed: number, delta: number, target: number) =>
+      delta >= 0 && completed + delta <= target;
+
+    expect(validateQuantity(10, -1, 100)).toBe(false);
+    expect(validateQuantity(10, 0, 100)).toBe(true);
   });
 
   it('should auto-transition to inspecting when target reached', () => {

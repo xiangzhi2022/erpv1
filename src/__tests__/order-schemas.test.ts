@@ -26,6 +26,21 @@ const ORDER_STATUS_TRANSITIONS: Record<string, string[]> = {
 };
 
 describe('Order status transitions', () => {
+  it('should keep returned orders recoverable only to pending or cancelled', () => {
+    expect(ORDER_STATUS_TRANSITIONS.returned).toEqual(['pending', 'cancelled']);
+  });
+
+  it('should keep confirmed orders out of direct production', () => {
+    expect(ORDER_STATUS_TRANSITIONS.confirmed).not.toContain('producing');
+    expect(ORDER_STATUS_TRANSITIONS.confirmed).not.toContain('in_production');
+  });
+
+  it('should allow pool to support both current and legacy production status names', () => {
+    expect(ORDER_STATUS_TRANSITIONS.pool).toEqual(
+      expect.arrayContaining(['producing', 'in_production', 'cancelled'])
+    );
+  });
+
   it('should allow pending -> confirmed', () => {
     expect(ORDER_STATUS_TRANSITIONS.pending).toContain('confirmed');
   });
@@ -105,6 +120,7 @@ describe('ORDER_TABS', () => {
   it('should include producing tab with both producing and in_production', () => {
     const producingTab = ORDER_TABS.find(t => t.value === 'producing');
     expect(producingTab).toBeDefined();
+    expect(producingTab!.statuses).toContain('pool');
     expect(producingTab!.statuses).toContain('producing');
     expect(producingTab!.statuses).toContain('in_production');
   });
@@ -168,6 +184,25 @@ describe('orderItemSchema', () => {
       unit_price: -1,
     });
     expect(result.success).toBe(false);
+  });
+
+  it('should reject fractional quantity', () => {
+    const result = orderItemSchema.safeParse({
+      ...validItem,
+      quantity: 1.5,
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it('should coerce string unit_price to number', () => {
+    const result = orderItemSchema.safeParse({
+      ...validItem,
+      unit_price: '12.5',
+    });
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.unit_price).toBe(12.5);
+    }
   });
 
   it('should accept zero unit_price', () => {
@@ -243,6 +278,20 @@ describe('orderFormSchema', () => {
       remark: '',
     });
     expect(result.success).toBe(true);
+  });
+
+  it('should reject forms when any nested item is invalid', () => {
+    const result = orderFormSchema.safeParse({
+      ...validForm,
+      items: [
+        validForm.items[0],
+        {
+          ...validForm.items[0],
+          quantity: 0,
+        },
+      ],
+    });
+    expect(result.success).toBe(false);
   });
 });
 

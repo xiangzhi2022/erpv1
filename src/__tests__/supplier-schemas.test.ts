@@ -150,6 +150,26 @@ describe('supplierFormSchema', () => {
     expect(result.success).toBe(false);
   });
 
+  it('should accept empty optional contact fields', () => {
+    const result = supplierFormSchema.safeParse({
+      ...validForm,
+      contactPerson: '',
+      phone: '',
+      email: '',
+      address: '',
+      remark: '',
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it('should reject contact person exceeding 100 chars', () => {
+    const result = supplierFormSchema.safeParse({
+      ...validForm,
+      contactPerson: 'x'.repeat(101),
+    });
+    expect(result.success).toBe(false);
+  });
+
   it('should reject phone exceeding 20 chars', () => {
     const result = supplierFormSchema.safeParse({
       ...validForm,
@@ -201,6 +221,19 @@ describe('supplierFormSchema', () => {
         status: status.value,
       });
       expect(result.success).toBe(true);
+    }
+  });
+
+  it('should keep supplier statuses terminal for blacklisted suppliers', () => {
+    const validTransitions: Record<SupplierStatus, SupplierStatus[]> = {
+      active: ['inspecting', 'blacklisted'],
+      inspecting: ['active', 'blacklisted'],
+      blacklisted: [],
+    };
+
+    expect(validTransitions.blacklisted).toHaveLength(0);
+    for (const status of supplierStatuses) {
+      expect(validTransitions[status.value]).toBeDefined();
     }
   });
 });
