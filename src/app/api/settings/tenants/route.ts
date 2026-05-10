@@ -1,15 +1,7 @@
-import { createClient } from '@supabase/supabase-js';
 import { NextRequest, NextResponse } from 'next/server';
+import { getSupabaseClient } from '@/db/client';
+import { isUserAdmin } from '@/lib/auth-utils';
 import { cookies } from 'next/headers';
-
-const supabaseUrl = process.env.COZE_SUPABASE_URL || '';
-const supabaseServiceKey = process.env.COZE_SUPABASE_SERVICE_ROLE_KEY || '';
-
-function getSupabaseAdmin() {
-  return createClient(supabaseUrl, supabaseServiceKey, {
-    auth: { persistSession: false }
-  });
-}
 
 async function getAuthUser() {
   const cookieStore = await cookies();
@@ -22,6 +14,7 @@ async function getAuthUser() {
   }
 }
 
+// GET - 获取租户列表（仅管理员）
 export async function GET() {
   try {
     const user = await getAuthUser();
@@ -29,14 +22,19 @@ export async function GET() {
       return NextResponse.json({ success: false, error: '未登录' }, { status: 401 });
     }
 
-    const supabase = getSupabaseAdmin();
+    if (!isUserAdmin(user)) {
+      return NextResponse.json({ success: false, error: '无权限查看租户列表' }, { status: 403 });
+    }
+
+    const supabase = getSupabaseClient();
     const { data, error } = await supabase
       .from('tenants')
       .select('*')
       .order('created_at', { ascending: false });
 
     if (error) {
-      return NextResponse.json({ success: false, error: error.message }, { status: 500 });
+      console.error('获取租户列表失败:', error);
+      return NextResponse.json({ success: false, error: '获取租户列表失败' }, { status: 500 });
     }
 
     return NextResponse.json({ success: true, tenants: data || [] });
@@ -46,6 +44,7 @@ export async function GET() {
   }
 }
 
+// POST - 创建租户（仅超级管理员）
 export async function POST(request: NextRequest) {
   try {
     const user = await getAuthUser();
@@ -53,7 +52,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ success: false, error: '未登录' }, { status: 401 });
     }
 
-    // 只有官方管理员可以创建租户
+    // 只有超级管理员可以创建租户
     if (user.role !== 'super_admin') {
       return NextResponse.json({ success: false, error: '只有管理员可以创建租户' }, { status: 403 });
     }
@@ -69,7 +68,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ success: false, error: '无效的租户类型' }, { status: 400 });
     }
 
-    const supabase = getSupabaseAdmin();
+    const supabase = getSupabaseClient();
 
     // 如果提供了前缀，检查是否已存在
     if (prefix) {
@@ -78,7 +77,7 @@ export async function POST(request: NextRequest) {
         .select('id')
         .eq('prefix', prefix)
         .single();
-      
+
       if (existing) {
         return NextResponse.json({ success: false, error: '该前缀已被使用' }, { status: 400 });
       }
@@ -98,7 +97,8 @@ export async function POST(request: NextRequest) {
       .single();
 
     if (error) {
-      return NextResponse.json({ success: false, error: error.message }, { status: 500 });
+      console.error('创建租户失败:', error);
+      return NextResponse.json({ success: false, error: '创建租户失败' }, { status: 500 });
     }
 
     return NextResponse.json({ success: true, tenant: data });
@@ -108,6 +108,7 @@ export async function POST(request: NextRequest) {
   }
 }
 
+// PUT - 更新租户（仅超级管理员）
 export async function PUT(request: NextRequest) {
   try {
     const user = await getAuthUser();
@@ -126,7 +127,7 @@ export async function PUT(request: NextRequest) {
       return NextResponse.json({ success: false, error: '租户ID必填' }, { status: 400 });
     }
 
-    const supabase = getSupabaseAdmin();
+    const supabase = getSupabaseClient();
 
     // 如果更新前缀，检查是否与其他租户冲突
     if (prefix) {
@@ -136,19 +137,18 @@ export async function PUT(request: NextRequest) {
         .eq('prefix', prefix)
         .neq('id', id)
         .single();
-      
+
       if (existing) {
         return NextResponse.json({ success: false, error: '该前缀已被其他租户使用' }, { status: 400 });
       }
     }
 
-    const updateData: Record<string, string> = {};
+    const updateData: Record<string, unknown> = { updated_at: new Date().toISOString() };
     if (company_name) updateData.company_name = company_name;
     if (contact_phone !== undefined) updateData.contact_phone = contact_phone;
     if (address !== undefined) updateData.address = address;
     if (prefix !== undefined) updateData.prefix = prefix;
     if (status) updateData.status = status;
-    updateData.updated_at = new Date().toISOString();
 
     const { data, error } = await supabase
       .from('tenants')
@@ -158,7 +158,8 @@ export async function PUT(request: NextRequest) {
       .single();
 
     if (error) {
-      return NextResponse.json({ success: false, error: error.message }, { status: 500 });
+      console.error('更新租户失败:', error);
+      return NextResponse.json({ success: false, error: '更新租户失败' }, { status: 500 });
     }
 
     return NextResponse.json({ success: true, tenant: data });
@@ -168,6 +169,7 @@ export async function PUT(request: NextRequest) {
   }
 }
 
+// DELETE - 删除租户（仅超级管理员）
 export async function DELETE(request: NextRequest) {
   try {
     const user = await getAuthUser();
@@ -186,7 +188,7 @@ export async function DELETE(request: NextRequest) {
       return NextResponse.json({ success: false, error: '租户ID必填' }, { status: 400 });
     }
 
-    const supabase = getSupabaseAdmin();
+    const supabase = getSupabaseClient();
 
     // 不允许删除官方管理员
     const { data: tenant } = await supabase
@@ -205,7 +207,8 @@ export async function DELETE(request: NextRequest) {
       .eq('id', id);
 
     if (error) {
-      return NextResponse.json({ success: false, error: error.message }, { status: 500 });
+      console.error('删除租户失败:', error);
+      return NextResponse.json({ success: false, error: '删除租户失败' }, { status: 500 });
     }
 
     return NextResponse.json({ success: true });
