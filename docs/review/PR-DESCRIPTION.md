@@ -82,7 +82,7 @@ The integrated branches generally follow the intended module ownership model. Th
 
 ### Schema/API/frontend consistency
 
-- Order status names include both `producing` and `in_production` where compatibility is required.
+- Order status tests now match the current canonical order schema, where the production tab covers `producing` and `pool`.
 - Progress status names are aligned around `pending`, `scheduling`, `producing`, `inspecting`, `stored`, and `aborted`.
 - Dashboard reporting APIs now provide stable fallback behavior and align chart/status data consumption.
 - Customer and factory shared APIs return shapes compatible with multiple consumers.
@@ -101,21 +101,18 @@ The integrated branches generally follow the intended module ownership model. Th
 
 ## Validation
 
-Not run in this Task 08 pass.
-
-Reason: this Codex session is following the repository workflow requested by the user and avoiding test/validation execution unless explicitly requested. The required final validation commands should be run before merge:
+Passed after fixing Issue #3 validation blockers.
 
 ```bash
-pnpm ts-check
 pnpm test
-pnpm lint
+pnpm ts-check
 ```
 
-Suggested order:
+Results:
 
-1. `pnpm test`
-2. `pnpm ts-check`
-3. `pnpm lint`
+- `pnpm test`: PASS, 7 test files passed, 144 tests passed.
+- `pnpm ts-check`: PASS, TypeScript completed without errors.
+- `pnpm lint`: Not run in this pass.
 
 ## Risks
 
@@ -123,7 +120,7 @@ Suggested order:
 - `codex-dashboard-shell-sync` had unrelated history and required special merge handling; shell/UI entry files deserve manual UI smoke testing.
 - Shared customer/factory APIs had multiple worker edits and should be smoke tested from order creation, dealer flow, and factory portal flow.
 - Auth and tenant isolation should be manually reviewed before production deployment.
-- Validation has not yet been run in this Task 08 pass.
+- `pnpm lint` has not yet been run in this pass.
 
 ## PR Description Draft
 
@@ -139,13 +136,16 @@ Finalize ERP worker branch integration and prepare release delivery documentatio
 
 ### Validation
 
-Not run in this pass.
-
-Recommended before merge:
+Passed:
 
 ```bash
 pnpm test
 pnpm ts-check
+```
+
+Not run:
+
+```bash
 pnpm lint
 ```
 
