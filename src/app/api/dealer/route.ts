@@ -35,9 +35,10 @@ export async function GET(request: Request) {
       .select('*', { count: 'exact' })
       .order('created_at', { ascending: false });
 
-    // 关键字搜索（名称或联系人）
+    // 关键字搜索（名称、联系人或电话）— 转义特殊字符防注入
     if (keyword) {
-      query = query.or(`name.ilike.%${keyword}%,contact_name.ilike.%${keyword}%,phone.ilike.%${keyword}%`);
+      const safe = keyword.replace(/[%_\\]/g, '\\$&');
+      query = query.or(`name.ilike.%${safe}%,contact_name.ilike.%${safe}%,phone.ilike.%${safe}%`);
     }
 
     // 地区过滤
@@ -97,6 +98,11 @@ export async function POST(request: Request) {
       return Response.json({ success: false, error: '经销商名称至少2个字符' }, { status: 400 });
     }
 
+    const validStatuses = ['active', 'inactive'] as const;
+    if (status && !validStatuses.includes(status)) {
+      return Response.json({ success: false, error: '状态值无效，仅支持 active/inactive' }, { status: 400 });
+    }
+
     const supabase = getClient();
     const { data, error } = await supabase
       .from('dealers')
@@ -105,7 +111,7 @@ export async function POST(request: Request) {
         contact_name: contactName?.trim() || null,
         phone: phone?.trim() || null,
         region: region?.trim() || null,
-        status: status || 'active',
+        status: validStatuses.includes(status) ? status : 'active',
         remark: remark?.trim() || null,
         created_by: user.id,
       })

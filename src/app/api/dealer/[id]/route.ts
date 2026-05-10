@@ -33,6 +33,11 @@ export async function PUT(
       return Response.json({ success: false, error: '经销商名称至少2个字符' }, { status: 400 });
     }
 
+    const validStatuses = ['active', 'inactive'] as const;
+    if (status && !validStatuses.includes(status)) {
+      return Response.json({ success: false, error: '状态值无效，仅支持 active/inactive' }, { status: 400 });
+    }
+
     const supabase = getClient();
 
     // 权限检查：非管理员只能编辑自己创建的
@@ -42,7 +47,10 @@ export async function PUT(
         .select('created_by')
         .eq('id', id)
         .single();
-      if (existing && existing.created_by !== user.id) {
+      if (!existing) {
+        return Response.json({ success: false, error: '经销商不存在' }, { status: 404 });
+      }
+      if (existing.created_by !== user.id) {
         return Response.json({ success: false, error: '无权限编辑此经销商' }, { status: 403 });
       }
     }
@@ -54,7 +62,7 @@ export async function PUT(
         contact_name: contactName?.trim() || null,
         phone: phone?.trim() || null,
         region: region?.trim() || null,
-        status: status || 'active',
+        status: validStatuses.includes(status) ? status : 'active',
         remark: remark?.trim() || null,
         updated_at: new Date().toISOString(),
       })
@@ -91,14 +99,20 @@ export async function DELETE(
     const { id } = await params;
     const supabase = getClient();
 
+    // 先检查经销商是否存在
+    const { data: existing } = await supabase
+      .from('dealers')
+      .select('id, created_by')
+      .eq('id', id)
+      .single();
+
+    if (!existing) {
+      return Response.json({ success: false, error: '经销商不存在' }, { status: 404 });
+    }
+
     // 权限检查：非管理员只能删除自己创建的
     if (user.role !== 'super_admin' && user.role !== 'saas_admin') {
-      const { data: existing } = await supabase
-        .from('dealers')
-        .select('created_by')
-        .eq('id', id)
-        .single();
-      if (existing && existing.created_by !== user.id) {
+      if (existing.created_by !== user.id) {
         return Response.json({ success: false, error: '无权限删除此经销商' }, { status: 403 });
       }
     }

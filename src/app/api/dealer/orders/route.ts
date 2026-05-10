@@ -1,32 +1,67 @@
 import { NextResponse } from "next/server";
 import { getSupabaseClient } from "@/db/client";
-import { getUserFromRequest } from "@/lib/auth";
+import { cookies } from "next/headers";
+
+async function getCurrentUser() {
+  const cookieStore = await cookies();
+  const userStr = cookieStore.get("erp_user")?.value;
+  if (!userStr) return null;
+  try {
+    return JSON.parse(userStr);
+  } catch {
+    return null;
+  }
+}
 
 export async function GET(request: Request) {
   try {
-    const user = await getUserFromRequest(request);
-    
+    const user = await getCurrentUser();
+
     if (!user) {
       return NextResponse.json({ success: false, error: "请先登录" }, { status: 401 });
     }
 
-    if (!["dealer_admin", "super_admin"].includes(user.role)) {
+    // 权限检查：经销商管理员或系统管理员可访问
+    const allowedRoles = ["dealer_admin", "super_admin", "saas_admin"];
+    if (!allowedRoles.includes(user.role)) {
       return NextResponse.json({ success: false, error: "无权限访问" }, { status: 403 });
     }
 
     const supabase = getSupabaseClient();
 
-    // 获取经销商的订单
-    const { data: orders, error } = await supabase
+    // 构建订单查询 — 字段与 Drizzle schema 对齐
+    let query = supabase
       .from("orders")
-      .select(`
-        *,
-        factory:tenants!orders_target_factory_id_fkey(id, name),
-        items:order_items(id, product_name, quantity, subtotal),
-        tasks:production_tasks(id, station, progress)
-      `)
-      .eq("dealer_id", user.tenant_id || "")
+      .select("*, items:order_items(*)", { count: "exact" })
       .order("created_at", { ascending: false });
+
+    // 权限过滤：经销商管理员只看自己租户的订单
+    if (user.role === "dealer_admin") {
+      if (!user.tenant_id) {
+        return NextResponse.json(
+          { success: false, error: "用户未关联经销商租户" },
+          { status: 400 }
+        );
+      }
+      query = query.eq("tenant_id", user.tenant_id);
+    }
+
+    const { searchParams } = new URL(request.url);
+    const status = searchParams.get("status");
+    const page = Math.max(1, parseInt(searchParams.get("page") || "1", 10));
+    const pageSize = Math.min(100, Math.max(1, parseInt(searchParams.get("pageSize") || "20", 10)));
+
+    // 状态过滤
+    if (status && status !== "all") {
+      query = query.eq("status", status);
+    }
+
+    // 分页
+    const from = (page - 1) * pageSize;
+    const to = from + pageSize - 1;
+    query = query.range(from, to);
+
+    const { data: orders, error, count } = await query;
 
     if (error) {
       console.error("获取订单失败:", error);
@@ -35,31 +70,25 @@ export async function GET(request: Request) {
 
     const orderList = orders || [];
 
-    // 计算每个订单的进度
-    const ordersWithProgress = orderList.map((o: any) => {
-      const totalTasks = o.tasks?.length || 0;
-      const completedTasks = o.tasks?.filter((t: any) => t.progress === "completed").length || 0;
-      return {
-        ...o,
-        total_tasks: totalTasks,
-        completed_tasks: completedTasks,
-        progress: totalTasks > 0 ? Math.round((completedTasks / totalTasks) * 100) : 0,
-      };
-    });
-
     // 统计
     const statusStats = {
-      pending: ordersWithProgress.filter((o: any) => o.status === "pending").length,
-      confirmed: ordersWithProgress.filter((o: any) => o.status === "confirmed").length,
-      producing: ordersWithProgress.filter((o: any) => o.status === "producing").length,
-      shipped: ordersWithProgress.filter((o: any) => o.status === "shipped").length,
-      completed: ordersWithProgress.filter((o: any) => o.status === "completed").length,
+      pending: orderList.filter((o: Record<string, unknown>) => o.status === "pending").length,
+      confirmed: orderList.filter((o: Record<string, unknown>) => o.status === "confirmed").length,
+      producing: orderList.filter((o: Record<string, unknown>) => o.status === "producing").length,
+      shipped: orderList.filter((o: Record<string, unknown>) => o.status === "shipped").length,
+      completed: orderList.filter((o: Record<string, unknown>) => o.status === "completed").length,
     };
 
-    return NextResponse.json({ 
-      success: true, 
-      orders: ordersWithProgress,
+    return NextResponse.json({
+      success: true,
+      orders: orderList,
       stats: statusStats,
+      pagination: {
+        page,
+        pageSize,
+        total: count || 0,
+        totalPages: Math.ceil((count || 0) / pageSize),
+      },
     });
   } catch (error) {
     console.error("获取订单失败:", error);
