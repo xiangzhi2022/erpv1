@@ -126,8 +126,8 @@ export default function OrdersPage() {
 
     setStatusLoading(true);
     try {
-      const res = await fetch('/api/orders', {
-        method: 'PUT',
+      const res = await fetch(`/api/orders/${orderId}`, {
+        method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ id: orderId, status, notes }),
       });
@@ -159,8 +159,8 @@ export default function OrdersPage() {
     if (!selectedOrder) return;
     setStatusLoading(true);
     try {
-      const res = await fetch('/api/orders', {
-        method: 'PUT',
+      const res = await fetch(`/api/orders/${selectedOrder.id}`, {
+        method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ id: selectedOrder.id, status: 'returned', notes: reason }),
       });

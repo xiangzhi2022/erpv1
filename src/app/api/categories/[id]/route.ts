@@ -34,7 +34,39 @@ export async function PUT(
   try {
     const { id } = await params;
     const body = await request.json();
-    const category = await updateCategory(id, body);
+    // Whitelist allowed update fields
+    const allowedFields = ["name", "color", "description"];
+    const updateData: Record<string, unknown> = {};
+    for (const key of allowedFields) {
+      if (key in body) {
+        updateData[key] = body[key];
+      }
+    }
+    const category = await updateCategory(id, updateData);
+    return NextResponse.json({ success: true, data: category });
+  } catch (e: unknown) {
+    const message = e instanceof Error ? e.message : "更新分类失败";
+    return NextResponse.json({ success: false, error: message }, { status: 500 });
+  }
+}
+
+// PATCH /api/categories/[id] - 部分更新分类
+export async function PATCH(
+  request: Request,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  try {
+    const { id } = await params;
+    const body = await request.json();
+    // Whitelist allowed update fields
+    const allowedFields = ["name", "color", "description"];
+    const updateData: Record<string, unknown> = {};
+    for (const key of allowedFields) {
+      if (key in body) {
+        updateData[key] = body[key];
+      }
+    }
+    const category = await updateCategory(id, updateData);
     return NextResponse.json({ success: true, data: category });
   } catch (e: unknown) {
     const message = e instanceof Error ? e.message : "更新分类失败";

@@ -1,5 +1,6 @@
 import { cookies } from 'next/headers';
 import crypto from 'crypto';
+import { getSupabaseClient } from '@/db/client';
 
 // ===================== 类型定义 =====================
 
@@ -15,6 +16,31 @@ export interface User {
 export interface Session {
   user: User;
   expiresAt: number;
+}
+
+// ===================== 密码哈希 =====================
+
+const SALT_LENGTH = 16;
+const KEY_LENGTH = 64;
+
+export function hashPassword(password: string): string {
+  const salt = crypto.randomBytes(SALT_LENGTH).toString('hex');
+  const derivedKey = crypto.scryptSync(password, salt, KEY_LENGTH).toString('hex');
+  return `${salt}:${derivedKey}`;
+}
+
+export function verifyPassword(password: string, hashed: string): boolean {
+  const [salt, derivedKey] = hashed.split(':');
+  if (!salt || !derivedKey) return false;
+  const candidateKey = crypto.scryptSync(password, salt, KEY_LENGTH).toString('hex');
+  return crypto.timingSafeEqual(Buffer.from(derivedKey, 'hex'), Buffer.from(candidateKey, 'hex'));
+}
+
+/**
+ * 检测密码是否为明文（旧格式），用于向后兼容迁移
+ */
+export function isPlaintextPassword(stored: string): boolean {
+  return !stored.includes(':');
 }
 
 // ===================== 内存存储（生产环境应替换为数据库）=====================
@@ -34,13 +60,14 @@ const sessionStore = new Map<string, Session>();
 // 用户存储（演示用，生产应替换为数据库）
 const userStore = new Map<string, { password: string; user: User }>();
 
-// 初始化演示用户
+// 初始化演示用户（密码已哈希）
+const DEMO_PASSWORD_HASH = hashPassword('demo123');
 userStore.set('demo@example.com', {
-  password: 'demo123',
+  password: DEMO_PASSWORD_HASH,
   user: { id: '1', email: 'demo@example.com', name: '演示用户', provider: 'credentials' },
 });
 userStore.set('13800138000', {
-  password: 'demo123',
+  password: DEMO_PASSWORD_HASH,
   user: { id: '2', phone: '13800138000', name: '手机用户', provider: 'credentials' },
 });
 
@@ -85,10 +112,31 @@ export function consumeResetToken(token: string): string | null {
 }
 
 export function updateUserPassword(email: string, newPassword: string): boolean {
+  const hashedPassword = hashPassword(newPassword);
   const existing = userStore.get(email);
-  if (!existing) return false;
-  existing.password = newPassword;
-  return true;
+  if (existing) {
+    existing.password = hashedPassword;
+    return true;
+  }
+  return false;
+}
+
+/**
+ * 更新 Supabase 数据库中的用户密码
+ */
+export async function updateUserPasswordInDB(email: string, newPassword: string): Promise<boolean> {
+  try {
+    const supabase = getSupabaseClient();
+    const hashedPassword = hashPassword(newPassword);
+    const { error } = await supabase
+      .from('users')
+      .update({ password: hashedPassword })
+      .eq('email', email);
+
+    return !error;
+  } catch {
+    return false;
+  }
 }
 
 // ===================== OAuth State =====================
@@ -112,12 +160,34 @@ export function verifyOAuthState(state: string): { provider: string; redirectUrl
 
 // ===================== 会话管理 =====================
 
-const SESSION_COOKIE_NAME = 'auth_session';
+export const SESSION_COOKIE_NAME = 'auth_session';
 const SESSION_DURATION = 7 * 24 * 60 * 60 * 1000; // 7 天
+const SESSION_DEFAULT_MAX_AGE = 7 * 24 * 60 * 60; // 7 天（秒）
 
-export async function createSession(user: User): Promise<string> {
+export interface CookieOptions {
+  maxAge?: number; // 秒
+  secure?: boolean;
+}
+
+export function buildSessionCookie(sessionId: string, options: CookieOptions = {}): string {
+  const maxAge = options.maxAge ?? SESSION_DEFAULT_MAX_AGE;
+  const secure = options.secure ? '; Secure' : '';
+  return `${SESSION_COOKIE_NAME}=${sessionId}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${maxAge}${secure}`;
+}
+
+export function buildClearSessionCookie(secure = false): string {
+  const secureFlag = secure ? '; Secure' : '';
+  return `${SESSION_COOKIE_NAME}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0${secureFlag}`;
+}
+
+export function isProduction(): boolean {
+  return process.env.COZE_PROJECT_ENV === 'PROD';
+}
+
+export async function createSession(user: User, maxAgeMs?: number): Promise<string> {
   const sessionId = crypto.randomBytes(32).toString('hex');
-  const session: Session = { user, expiresAt: Date.now() + SESSION_DURATION };
+  const duration = maxAgeMs ?? SESSION_DURATION;
+  const session: Session = { user, expiresAt: Date.now() + duration };
   sessionStore.set(sessionId, session);
   return sessionId;
 }
@@ -134,8 +204,8 @@ export async function getSession(): Promise<Session | null> {
   return session;
 }
 
-export function setSessionCookie(sessionId: string): string {
-  return `${SESSION_COOKIE_NAME}=${sessionId}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${Math.floor(SESSION_DURATION / 1000)}`;
+export function deleteSession(sessionId: string): void {
+  sessionStore.delete(sessionId);
 }
 
 // ===================== 从请求中获取用户 =====================
@@ -162,11 +232,82 @@ export async function getUserFromRequest(request: Request): Promise<AuthUser | n
 
 // ===================== 用户认证 =====================
 
-export function authenticateUser(account: string, password: string): User | null {
+export function authenticateUserFromStore(account: string, password: string): User | null {
   const stored = userStore.get(account);
   if (!stored) return null;
-  if (stored.password !== password) return null;
+
+  // 向后兼容：支持明文密码和哈希密码
+  const passwordMatch = isPlaintextPassword(stored.password)
+    ? stored.password === password
+    : verifyPassword(password, stored.password);
+
+  if (!passwordMatch) return null;
+
+  // 如果是明文密码，自动升级为哈希密码
+  if (isPlaintextPassword(stored.password)) {
+    stored.password = hashPassword(password);
+  }
+
   return stored.user;
+}
+
+/**
+ * 从 Supabase 数据库认证用户
+ */
+export async function authenticateUserFromDB(account: string, password: string): Promise<User | null> {
+  try {
+    const supabase = getSupabaseClient();
+
+    // 尝试通过手机号查找
+    const isPhone = /^1[3-9]\d{9}$/.test(account);
+    const queryField = isPhone ? 'phone' : 'email';
+
+    const { data: dbUser, error } = await supabase
+      .from('users')
+      .select('id, phone, email, nickname, password, role, is_active')
+      .eq(queryField, account)
+      .eq('is_active', true)
+      .single();
+
+    if (error || !dbUser) return null;
+
+    // 验证密码（支持明文和哈希两种格式，向后兼容）
+    const passwordMatch = isPlaintextPassword(dbUser.password)
+      ? dbUser.password === password
+      : verifyPassword(password, dbUser.password);
+
+    if (!passwordMatch) return null;
+
+    // 如果是明文密码，自动升级为哈希密码
+    if (isPlaintextPassword(dbUser.password)) {
+      await supabase
+        .from('users')
+        .update({ password: hashPassword(password) })
+        .eq('id', dbUser.id);
+    }
+
+    return {
+      id: dbUser.id,
+      phone: dbUser.phone || undefined,
+      email: dbUser.email || undefined,
+      name: dbUser.nickname || dbUser.phone || dbUser.email || '用户',
+      provider: 'credentials',
+    };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * 认证用户：先查内存 store，再查 Supabase 数据库
+ */
+export async function authenticateUser(account: string, password: string): Promise<User | null> {
+  // 1. 先查内存 store（演示用户等）
+  const memoryUser = authenticateUserFromStore(account, password);
+  if (memoryUser) return memoryUser;
+
+  // 2. 再查 Supabase 数据库（正式注册用户）
+  return authenticateUserFromDB(account, password);
 }
 
 export function findOrCreateOAuthUser(provider: string, providerAccountId: string, profile: { name?: string; email?: string; avatar?: string }): User {

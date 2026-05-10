@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getOAuthProvider, isOAuthProviderConfigured } from '@/lib/oauth';
-import { verifyOAuthState, findOrCreateOAuthUser, createSession } from '@/lib/auth';
+import { verifyOAuthState, findOrCreateOAuthUser, createSession, buildSessionCookie, isProduction } from '@/lib/auth';
 
 interface GitHubUser {
   id: number;
@@ -74,15 +74,14 @@ async function exchangeCodeForToken(
   }
 
   if (!tokenRes.ok) {
-    const errorText = await tokenRes.text();
-    throw new Error(`获取 ${config.name} access_token 失败: ${errorText}`);
+    // 不暴露具体错误内容
+    throw new Error(`获取 access_token 失败`);
   }
 
   const tokenData = await tokenRes.json();
 
-  if (provider === 'wechat') {
-    // 微信返回 openid + access_token
-    return tokenData.access_token;
+  if (!tokenData.access_token) {
+    throw new Error(`获取 access_token 失败`);
   }
 
   return tokenData.access_token;
@@ -101,7 +100,7 @@ async function fetchUserInfo(provider: string, accessToken: string): Promise<{ i
   });
 
   if (!userRes.ok) {
-    throw new Error(`获取 ${config.name} 用户信息失败`);
+    throw new Error(`获取用户信息失败`);
   }
 
   const userData = await userRes.json();
@@ -146,7 +145,7 @@ export async function GET(
   const config = getOAuthProvider(provider);
 
   if (!config) {
-    return NextResponse.json({ error: `不支持的 OAuth 提供商: ${provider}` }, { status: 400 });
+    return NextResponse.redirect(new URL('/login?error=oauth_unsupported_provider', request.url));
   }
 
   if (!isOAuthProviderConfigured(provider as 'wechat' | 'github' | 'google')) {
@@ -187,13 +186,14 @@ export async function GET(
     const response = NextResponse.redirect(new URL(redirectUrl, request.url));
     response.headers.set(
       'Set-Cookie',
-      `auth_session=${sessionId}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${7 * 24 * 60 * 60}`
+      buildSessionCookie(sessionId, { secure: isProduction() })
     );
 
     return response;
   } catch (err) {
+    // 仅记录详细错误到服务端日志，不暴露给客户端
     const message = err instanceof Error ? err.message : 'OAuth 登录失败';
     console.error(`OAuth callback error [${provider}]:`, message);
-    return NextResponse.redirect(new URL(`/login?error=${encodeURIComponent(message)}`, request.url));
+    return NextResponse.redirect(new URL('/login?error=oauth_login_failed', request.url));
   }
 }

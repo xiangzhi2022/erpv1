@@ -1,6 +1,6 @@
 'use client';
 
-import { Worker, getCraftLabel, getStatusInfo, GENDERS } from '../schemas';
+import { Worker, getCraftLabel, getStatusInfo, GENDERS, safeParseTags } from '../schemas';
 import {
   Dialog,
   DialogContent,
@@ -57,7 +57,7 @@ export function WorkerDetailDialog({ worker, open, onOpenChange }: WorkerDetailD
               <Tag className="h-4 w-4 text-muted-foreground flex-shrink-0 mt-0.5" />
               <span className="text-muted-foreground w-20">技能标签</span>
               <div className="flex flex-wrap gap-1">
-                {JSON.parse(worker.skill_tags).map((tag: string) => (
+                {safeParseTags(worker.skill_tags).map((tag: string) => (
                   <Badge key={tag} variant="outline">{tag}</Badge>
                 ))}
               </div>

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { Sidebar } from '@/components/sidebar';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -26,6 +26,36 @@ import {
   RefreshCw,
 } from 'lucide-react';
 
+// Status labels aligned with ORDER_STATUS_CONFIG in orders/schemas.ts
+const ORDER_STATUS_LABELS: Record<string, string> = {
+  pending: '待接收',
+  returned: '已退回',
+  confirmed: '已接收',
+  pool: '订单池',
+  producing: '生产中',
+  in_production: '生产中',
+  shipped: '已发货',
+  completed: '已完成',
+  cancelled: '已取消',
+};
+
+// Completed-like statuses for revenue calculation
+const REVENUE_STATUSES = ['shipped', 'completed'];
+// In-progress statuses for pending revenue
+const PENDING_REVENUE_STATUSES = ['confirmed', 'producing', 'in_production', 'pool'];
+
+interface OrderStats {
+  total: number;
+  pending: number;
+  returned: number;
+  confirmed: number;
+  pool: number;
+  producing: number;
+  shipped: number;
+  completed: number;
+  cancelled: number;
+}
+
 interface Order {
   id: string;
   order_no: string;
@@ -35,49 +65,72 @@ interface Order {
   created_at: string;
 }
 
+const defaultStats: OrderStats = {
+  total: 0,
+  pending: 0,
+  returned: 0,
+  confirmed: 0,
+  pool: 0,
+  producing: 0,
+  shipped: 0,
+  completed: 0,
+  cancelled: 0,
+};
+
 export default function FinancePage() {
   const router = useRouter();
   const [orders, setOrders] = useState<Order[]>([]);
+  const [stats, setStats] = useState<OrderStats>(defaultStats);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState('overview');
   const [exporting, setExporting] = useState(false);
+  const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
-    fetchOrders();
+    setMounted(true);
   }, []);
 
-  const fetchOrders = async () => {
+  const fetchOrders = useCallback(async () => {
     try {
       setLoading(true);
       const res = await fetch('/api/orders');
       if (res.ok) {
         const data = await res.json();
-        setOrders(data.data || []);
+        if (data.success) {
+          setOrders(data.data || []);
+          setStats(data.stats || defaultStats);
+        }
       }
     } catch (error) {
       console.error('获取数据失败:', error);
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
 
-  // 从订单数据计算财务统计
+  useEffect(() => {
+    fetchOrders();
+  }, [fetchOrders]);
+
+  // Compute revenue from full order list
   const totalRevenue = orders
-    .filter(o => ['shipped', 'completed'].includes(o.status))
+    .filter(o => REVENUE_STATUSES.includes(o.status))
     .reduce((sum, o) => sum + (o.total_amount || 0), 0);
 
   const pendingRevenue = orders
-    .filter(o => ['confirmed', 'producing'].includes(o.status))
+    .filter(o => PENDING_REVENUE_STATUSES.includes(o.status))
     .reduce((sum, o) => sum + (o.total_amount || 0), 0);
 
-  const completedOrders = orders.filter(o => o.status === 'completed' || o.status === 'shipped');
-  const pendingOrders = orders.filter(o => ['pending', 'confirmed', 'producing'].includes(o.status));
+  const completedOrdersCount = stats.shipped + stats.completed;
+  // Producing includes in_production
+  const producingCount = stats.producing + orders.filter(o => o.status === 'in_production').length;
+  const pendingOrdersCount = stats.pending + stats.confirmed + producingCount + stats.pool;
 
   const summaryData = [
     {
       title: '已完成金额',
       value: `¥${(totalRevenue / 100).toLocaleString('zh-CN', { minimumFractionDigits: 2 })}`,
-      subtitle: `${completedOrders.length} 笔订单`,
+      subtitle: `${completedOrdersCount} 笔订单`,
       trend: 'up' as const,
       icon: TrendingUp,
       color: 'text-green-500',
@@ -86,7 +139,7 @@ export default function FinancePage() {
     {
       title: '待收款金额',
       value: `¥${(pendingRevenue / 100).toLocaleString('zh-CN', { minimumFractionDigits: 2 })}`,
-      subtitle: `${orders.filter(o => o.status === 'shipped').length} 笔待确认`,
+      subtitle: `${stats.shipped} 笔待确认`,
       trend: 'neutral' as const,
       icon: Wallet,
       color: 'text-blue-500',
@@ -94,7 +147,7 @@ export default function FinancePage() {
     },
     {
       title: '进行中订单',
-      value: `${orders.filter(o => o.status === 'producing').length}`,
+      value: `${producingCount}`,
       subtitle: '生产中',
       trend: 'up' as const,
       icon: CreditCard,
@@ -103,7 +156,7 @@ export default function FinancePage() {
     },
     {
       title: '待处理订单',
-      value: `${pendingOrders.length}`,
+      value: `${pendingOrdersCount}`,
       subtitle: '需跟进',
       trend: 'down' as const,
       icon: DollarSign,
@@ -112,37 +165,51 @@ export default function FinancePage() {
     },
   ];
 
-  // 交易记录 - 从订单生成
-  const recentTransactions = orders.slice(0, 10).map(order => ({
-    id: order.id,
-    date: order.created_at ? new Date(order.created_at).toLocaleDateString('zh-CN') : '-',
-    description: `订单 ${order.order_no}`,
-    customer: order.customer_name || '-',
-    amount: order.total_amount / 100,
-    type: (order.status === 'completed' || order.status === 'shipped') ? 'income' as const : 'pending' as const,
-    status: order.status,
-  }));
+  // Format date safely (client-only to avoid hydration mismatch)
+  const formatDateSafe = (dateStr: string | null): string => {
+    if (!dateStr || !mounted) return '-';
+    return new Date(dateStr).toLocaleDateString('zh-CN');
+  };
 
-  // 发票列表 - 已完成/已发货的订单
-  const invoices = orders
-    .filter(o => ['shipped', 'completed'].includes(o.status))
-    .map((order, index) => ({
-      id: `INV-${new Date(order.created_at).getFullYear()}-${String(index + 1).padStart(3, '0')}`,
+  // Transaction records derived from orders
+  const recentTransactions = useMemo(() =>
+    orders.slice(0, 10).map(order => ({
+      id: order.id,
+      date: formatDateSafe(order.created_at),
+      description: `订单 ${order.order_no}`,
       customer: order.customer_name || '-',
       amount: order.total_amount / 100,
-      status: order.status === 'completed' ? 'paid' : 'pending',
-      date: order.created_at ? new Date(order.created_at).toLocaleDateString('zh-CN') : '-',
-      orderNo: order.order_no,
-    }));
+      type: REVENUE_STATUSES.includes(order.status) ? 'income' as const : 'pending' as const,
+      status: order.status,
+    })),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [orders, mounted]
+  );
 
-  // 导出CSV
+  // Invoice list - completed/shipped orders
+  const invoices = useMemo(() =>
+    orders
+      .filter(o => REVENUE_STATUSES.includes(o.status))
+      .map((order, index) => ({
+        id: `INV-${mounted && order.created_at ? new Date(order.created_at).getFullYear() : new Date().getFullYear()}-${String(index + 1).padStart(3, '0')}`,
+        customer: order.customer_name || '-',
+        amount: order.total_amount / 100,
+        status: order.status === 'completed' ? 'paid' : 'pending',
+        date: formatDateSafe(order.created_at),
+        orderNo: order.order_no,
+      })),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [orders, mounted]
+  );
+
+  // Export CSV
   const handleExport = async () => {
     setExporting(true);
     try {
       const csvRows = [
         ['订单编号', '客户名称', '金额', '状态', '创建日期'].join(','),
         ...orders.map(o =>
-          [o.order_no, o.customer_name || '', (o.total_amount / 100).toFixed(2), o.status, o.created_at || ''].join(',')
+          [o.order_no, o.customer_name || '', (o.total_amount / 100).toFixed(2), ORDER_STATUS_LABELS[o.status] || o.status, o.created_at || ''].join(',')
         ),
       ];
       const csvContent = '\uFEFF' + csvRows.join('\n');
@@ -159,6 +226,17 @@ export default function FinancePage() {
       setExporting(false);
     }
   };
+
+  // Amount distribution by status - aligned with orders module labels
+  const amountDistribution = [
+    { status: 'completed', label: '已完成', color: 'bg-green-500' },
+    { status: 'shipped', label: '已发货', color: 'bg-blue-500' },
+    { status: 'producing', label: '生产中', color: 'bg-yellow-500' },
+    { status: 'confirmed', label: '已接收', color: 'bg-purple-500' },
+    { status: 'pending', label: '待接收', color: 'bg-orange-500' },
+    { status: 'returned', label: '已退回', color: 'bg-red-500' },
+    { status: 'cancelled', label: '已取消', color: 'bg-gray-500' },
+  ];
 
   return (
     <div className="flex min-h-screen bg-background">
@@ -257,15 +335,12 @@ export default function FinancePage() {
                     </div>
                   ) : (
                     <div className="space-y-4">
-                      {/* 按状态分组展示金额 */}
-                      {[
-                        { status: 'completed', label: '已完成', color: 'bg-green-500' },
-                        { status: 'shipped', label: '已发货', color: 'bg-blue-500' },
-                        { status: 'producing', label: '生产中', color: 'bg-yellow-500' },
-                        { status: 'confirmed', label: '已确认', color: 'bg-purple-500' },
-                        { status: 'pending', label: '待接收', color: 'bg-orange-500' },
-                      ].map(group => {
-                        const groupOrders = orders.filter(o => o.status === group.status);
+                      {amountDistribution.map(group => {
+                        // Include in_production as producing equivalent
+                        const groupOrders = orders.filter(o =>
+                          o.status === group.status ||
+                          (group.status === 'producing' && o.status === 'in_production')
+                        );
                         const groupTotal = groupOrders.reduce((s, o) => s + (o.total_amount || 0), 0);
                         if (groupOrders.length === 0) return null;
                         return (

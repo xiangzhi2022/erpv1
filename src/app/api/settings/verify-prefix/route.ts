@@ -1,9 +1,30 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseClient } from '@/db/client';
 import { isUserAdmin } from '@/lib/auth-utils';
+import { cookies } from 'next/headers';
 
+async function getAuthUser() {
+  const cookieStore = await cookies();
+  const token = cookieStore.get('erp_user');
+  if (!token) return null;
+  try {
+    return JSON.parse(token.value);
+  } catch {
+    return null;
+  }
+}
+
+// GET - 验证前缀是否可用
 export async function GET(request: NextRequest) {
   try {
+    const user = await getAuthUser();
+    if (!user) {
+      return NextResponse.json(
+        { success: false, error: '请先登录' },
+        { status: 401 }
+      );
+    }
+
     const { searchParams } = new URL(request.url);
     const prefix = searchParams.get('prefix');
 
@@ -16,7 +37,7 @@ export async function GET(request: NextRequest) {
 
     const supabase = getSupabaseClient();
 
-    // 从新的order_prefixes表查询
+    // 从 order_prefixes 表查询
     const { data, error } = await supabase
       .from('order_prefixes')
       .select('prefix, company_name')
@@ -35,15 +56,15 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({
         success: true,
         available: false,
-        message: `该前缀已被"${data.company_name}"使用`,
-        companyName: data.company_name
+        message: `该前缀已被"${data.company_name || '其他公司'}"使用`,
+        companyName: data.company_name,
       });
     }
 
     return NextResponse.json({
       success: true,
       available: true,
-      message: '该前缀可用'
+      message: '该前缀可用',
     });
   } catch (error) {
     console.error('验证前缀出错:', error);
@@ -54,22 +75,17 @@ export async function GET(request: NextRequest) {
   }
 }
 
-// 保存前缀（仅限超级管理员）
+// POST - 保存前缀（仅限管理员）
 export async function POST(request: NextRequest) {
   try {
-    // 获取当前用户
-    const cookieStore = await import('next/headers').then(m => m.cookies());
-    const userCookie = cookieStore.get('erp_user');
-    
-    if (!userCookie) {
+    const user = await getAuthUser();
+    if (!user) {
       return NextResponse.json(
         { success: false, error: '请先登录' },
         { status: 401 }
       );
     }
-    
-    const user = JSON.parse(userCookie.value);
-    
+
     // 使用统一的权限检查函数
     if (!isUserAdmin(user)) {
       return NextResponse.json(
@@ -79,7 +95,7 @@ export async function POST(request: NextRequest) {
     }
 
     const { prefix, companyName, phone, address } = await request.json();
-    
+
     if (!prefix) {
       return NextResponse.json(
         { success: false, error: '请提供前缀' },
@@ -92,7 +108,7 @@ export async function POST(request: NextRequest) {
     // 先检查前缀是否已存在
     const { data: existing } = await supabase
       .from('order_prefixes')
-      .select('id')
+      .select('id, prefix')
       .eq('prefix', prefix.toUpperCase())
       .single();
 
@@ -104,7 +120,6 @@ export async function POST(request: NextRequest) {
           company_name: companyName || null,
           phone: phone || null,
           address: address || null,
-          updated_at: new Date().toISOString()
         })
         .eq('prefix', prefix.toUpperCase());
 
@@ -124,7 +139,6 @@ export async function POST(request: NextRequest) {
           company_name: companyName || null,
           phone: phone || null,
           address: address || null,
-          created_by: user.phone
         });
 
       if (error) {
@@ -138,7 +152,7 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({
       success: true,
-      message: '前缀保存成功'
+      message: '前缀保存成功',
     });
   } catch (error) {
     console.error('保存前缀出错:', error);
@@ -149,21 +163,17 @@ export async function POST(request: NextRequest) {
   }
 }
 
-// 删除前缀（仅限超级管理员）
+// DELETE - 删除前缀（仅限管理员）
 export async function DELETE(request: NextRequest) {
   try {
-    const cookieStore = await import('next/headers').then(m => m.cookies());
-    const userCookie = cookieStore.get('erp_user');
-    
-    if (!userCookie) {
+    const user = await getAuthUser();
+    if (!user) {
       return NextResponse.json(
         { success: false, error: '请先登录' },
         { status: 401 }
       );
     }
-    
-    const user = JSON.parse(userCookie.value);
-    
+
     if (!isUserAdmin(user)) {
       return NextResponse.json(
         { success: false, error: '只有管理员才能删除订单前缀' },
@@ -198,7 +208,7 @@ export async function DELETE(request: NextRequest) {
 
     return NextResponse.json({
       success: true,
-      message: '前缀删除成功'
+      message: '前缀删除成功',
     });
   } catch (error) {
     console.error('删除前缀出错:', error);

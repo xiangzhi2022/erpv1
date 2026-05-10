@@ -1,6 +1,6 @@
 'use client';
 
-import { Worker, getCraftLabel, getStatusInfo } from '../schemas';
+import { Worker, getCraftLabel, getStatusInfo, safeParseTags } from '../schemas';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Pencil, Eye, Trash2, ChevronLeft, ChevronRight } from 'lucide-react';
@@ -80,9 +80,9 @@ export function WorkerTable({
                   </td>
                   <td className="p-3 text-sm">
                     <div className="flex flex-wrap gap-1">
-                      {worker.skill_tags ? JSON.parse(worker.skill_tags).map((tag: string) => (
+                      {safeParseTags(worker.skill_tags).map((tag: string) => (
                         <Badge key={tag} variant="outline" className="text-xs">{tag}</Badge>
-                      )) : null}
+                      ))}
                     </div>
                   </td>
                   <td className="p-3 text-sm text-muted-foreground">

@@ -102,13 +102,13 @@ export function CreateOrderDialog({ open, onOpenChange, onSuccess }: CreateOrder
       const res = await fetch('/api/orders/generate', { method: 'POST' });
       const data = await res.json();
       if (data.success) {
-        form.setValue('order_no', data.orderNo);
+        form.setValue('order_no', data.data?.order_no || data.orderNo || '');
       } else {
         // Fallback: use sequence API
         const seqRes = await fetch('/api/orders/sequence');
         const seqData = await seqRes.json();
         if (seqData.success) {
-          form.setValue('order_no', seqData.orderNo);
+          form.setValue('order_no', seqData.data?.order_no || seqData.orderNo || '');
         }
       }
     } catch {
