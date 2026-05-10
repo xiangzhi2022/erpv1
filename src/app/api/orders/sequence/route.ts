@@ -41,7 +41,7 @@ export async function GET(request: Request) {
       .order('order_no', { ascending: false })
       .limit(1);
 
-    // orders has no created_by column in the current schema; non-platform users
+    // Non-platform users are scoped by tenant_id.
     // are scoped by tenant_id instead of per-user ownership.
     if (user.role !== 'super_admin' && user.role !== 'saas_admin') {
       if (!user.tenant_id) {

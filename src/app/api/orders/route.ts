@@ -55,8 +55,7 @@ export async function GET(request: Request) {
       .order('created_at', { ascending: false })
       .range(from, to);
 
-    // orders has no created_by column in the current schema; non-platform users
-    // are scoped by tenant_id instead of per-user ownership.
+    // Non-platform users are scoped by tenant_id instead of per-user ownership.
     if (!canAccessAllTenants(user)) {
       if (!user.tenant_id) {
         return Response.json({ success: false, error: '当前用户未关联租户' }, { status: 403 });
