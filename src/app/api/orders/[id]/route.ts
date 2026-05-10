@@ -37,7 +37,7 @@ export async function GET(
       .select('*, items:order_items(*)')
       .eq('id', id);
 
-    // orders has no created_by column in the current schema; non-platform users
+    // Non-platform users are scoped by tenant_id.
     // are scoped by tenant_id instead of per-user ownership.
     if (!canAccessAllTenants(user)) {
       if (!user.tenant_id) {
@@ -80,7 +80,7 @@ export async function PATCH(
       .select('id, status, tenant_id')
       .eq('id', id);
 
-    // orders has no created_by column in the current schema; non-platform users
+    // Non-platform users are scoped by tenant_id.
     // are scoped by tenant_id instead of per-user ownership.
     if (!canAccessAllTenants(user)) {
       if (!user.tenant_id) {
