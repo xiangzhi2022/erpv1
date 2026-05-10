@@ -11,7 +11,7 @@ import {
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import {
-  Sidebar,
+  Sidebar as BaseSidebar,
   SidebarContent,
   SidebarGroup,
   SidebarGroupContent,
@@ -68,7 +68,7 @@ export function AppSidebar() {
   const pathname = usePathname();
 
   return (
-    <Sidebar collapsible="icon" className="border-r">
+    <BaseSidebar collapsible="icon" className="border-r">
       <SidebarHeader className="border-b px-4 py-3">
         <div className="flex items-center gap-2">
           <div className="flex h-7 w-7 items-center justify-center rounded-md bg-primary text-primary-foreground text-xs font-bold">
@@ -117,6 +117,8 @@ export function AppSidebar() {
       </SidebarFooter>
 
       <SidebarRail />
-    </Sidebar>
+    </BaseSidebar>
   );
 }
+
+export { AppSidebar as Sidebar };

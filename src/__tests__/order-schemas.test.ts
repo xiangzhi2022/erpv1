@@ -117,12 +117,12 @@ describe('ORDER_TABS', () => {
     expect(allTab!.statuses).toHaveLength(0);
   });
 
-  it('should include producing tab with both producing and in_production', () => {
+  it('should include producing tab with active production statuses', () => {
     const producingTab = ORDER_TABS.find(t => t.value === 'producing');
     expect(producingTab).toBeDefined();
     expect(producingTab!.statuses).toContain('pool');
     expect(producingTab!.statuses).toContain('producing');
-    expect(producingTab!.statuses).toContain('in_production');
+    expect(producingTab!.statuses).not.toContain('in_production');
   });
 
   it('should have no duplicate statuses across non-all tabs', () => {
