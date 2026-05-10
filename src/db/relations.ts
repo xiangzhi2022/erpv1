@@ -1,9 +1,9 @@
 import { relations } from "drizzle-orm/relations";
 import {
-	users, tenants, tenantUsers, orders, orderItems, orderPrefixes,
-	customers, workshops, factoryWorkshops, productionTasks, workOrders, progressLogs,
+	users, tenants, tenantUsers, orders, orderItems,
+	workshops, factoryWorkshops, productionTasks, workOrders, progressLogs,
 	workers, suppliers, dealers,
-	categories, tasks, notifications, userSettings,
+	categories, tasks, notifications,
 } from "./schema";
 
 // ============================================================================

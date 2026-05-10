@@ -1,8 +1,6 @@
 'use client';
 
 import { useState, useEffect, useCallback, useOptimistic, useTransition } from 'react';
-import { Badge } from '@/components/ui/badge';
-import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Progress } from '@/components/ui/progress';
 import { FactoryList } from './components/factory-list';
@@ -13,7 +11,6 @@ import {
   WorkshopStats,
   WorkshopsResponse,
   WorkshopStatusType,
-  statusConfig,
 } from './schemas';
 import {
   Building2,

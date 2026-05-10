@@ -5,7 +5,6 @@ import {
   createSession,
   buildSessionCookie,
   isProduction,
-  SESSION_COOKIE_NAME,
 } from '@/lib/auth';
 
 export async function POST(request: NextRequest) {

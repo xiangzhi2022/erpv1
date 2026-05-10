@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { generateResetToken, updateUserPassword, updateUserPasswordInDB } from '@/lib/auth';
+import { generateResetToken } from '@/lib/auth';
 
 export async function POST(request: NextRequest) {
   try {

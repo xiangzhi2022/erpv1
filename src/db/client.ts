@@ -12,6 +12,7 @@
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import { execSync } from 'child_process';
 import { getReportBuffer, createWrappedFetch } from 'coze-coding-dev-sdk';
+import { config as loadDotenv } from 'dotenv';
 
 // ── 环境变量加载状态 ──────────────────────────────────────────
 let envLoaded = false;
@@ -45,7 +46,7 @@ function loadEnv(): void {
 
   // 尝试 dotenv
   try {
-    require('dotenv').config();
+    loadDotenv();
     if (process.env.COZE_SUPABASE_URL && process.env.COZE_SUPABASE_ANON_KEY) {
       envLoaded = true;
       return;

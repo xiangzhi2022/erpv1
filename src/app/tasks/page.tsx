@@ -1,18 +1,15 @@
 "use client";
 
 import { useState, useEffect, useCallback, useRef } from "react";
-import { useRouter } from "next/navigation";
 import { Sidebar } from "@/components/sidebar";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   Dialog,
   DialogContent,
-  DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle,
@@ -61,12 +58,9 @@ import {
   Flag,
   Bell,
   BellRing,
-  X,
   Trash2,
   Pencil,
   Eye,
-  ChevronRight,
-  Filter,
 } from "lucide-react";
 import type { Task, Category } from "@/db/schema";
 
@@ -102,7 +96,6 @@ const priorityConfig: Record<number, { label: string; color: string; icon: React
 };
 
 export default function TasksPage() {
-  const router = useRouter();
   const [tasks, setTasks] = useState<Task[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
   const [stats, setStats] = useState<TaskStats | null>(null);
@@ -832,7 +825,7 @@ export default function TasksPage() {
               <div className="flex flex-col items-center justify-center py-20 text-muted-foreground">
                 <Circle className="h-12 w-12 mb-4 opacity-30" />
                 <p className="text-lg font-medium">暂无任务</p>
-                <p className="text-sm mt-1">点击"新建任务"开始创建</p>
+                <p className="text-sm mt-1">点击&quot;新建任务&quot;开始创建</p>
               </div>
             ) : viewMode === "kanban" ? (
               /* Kanban View */

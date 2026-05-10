@@ -86,7 +86,6 @@ export default function LoginPage() {
 
   // 检测账号类型
   const isPhone = /^1\d{10,}$/.test(account);
-  const isEmail = /@/.test(account);
 
   // OAuth 错误处理
   const oauthError = searchParams.get('error');

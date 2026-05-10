@@ -19,7 +19,6 @@ import {
 import {
   DollarSign,
   TrendingUp,
-  TrendingDown,
   Wallet,
   CreditCard,
   Download,

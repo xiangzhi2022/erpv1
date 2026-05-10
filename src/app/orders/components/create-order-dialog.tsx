@@ -96,7 +96,7 @@ export function CreateOrderDialog({ open, onOpenChange, onSuccess }: CreateOrder
   }, [open, fetchCustomers]);
 
   // Generate order number
-  const generateOrderNo = async () => {
+  const generateOrderNo = useCallback(async () => {
     setGeneratingOrderNo(true);
     try {
       const res = await fetch('/api/orders/generate', { method: 'POST' });
@@ -120,14 +120,14 @@ export function CreateOrderDialog({ open, onOpenChange, onSuccess }: CreateOrder
     } finally {
       setGeneratingOrderNo(false);
     }
-  };
+  }, [form]);
 
   // Auto-generate order number on open
   useEffect(() => {
     if (open && !form.getValues('order_no')) {
       generateOrderNo();
     }
-  }, [open]);
+  }, [open, form, generateOrderNo]);
 
   // Select customer
   const selectCustomer = (customer: Customer) => {

@@ -1,6 +1,6 @@
 import { getSupabaseClient } from '@/db/client';
 import { cookies } from 'next/headers';
-import { ORDER_STATUSES, STATUS_TRANSITIONS, type OrderStatus } from '@/app/orders/schemas';
+import { ORDER_STATUSES, STATUS_TRANSITIONS } from '@/app/orders/schemas';
 
 const getServiceClient = () => getSupabaseClient();
 

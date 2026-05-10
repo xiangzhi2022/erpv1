@@ -112,7 +112,7 @@ Results:
 
 - `pnpm test`: PASS, 7 test files passed, 144 tests passed.
 - `pnpm ts-check`: PASS, TypeScript completed without errors.
-- `pnpm lint`: Not run in this pass.
+- `pnpm lint`: PASS, ESLint completed without errors or warnings.
 
 ## Risks
 
@@ -120,7 +120,7 @@ Results:
 - `codex-dashboard-shell-sync` had unrelated history and required special merge handling; shell/UI entry files deserve manual UI smoke testing.
 - Shared customer/factory APIs had multiple worker edits and should be smoke tested from order creation, dealer flow, and factory portal flow.
 - Auth and tenant isolation should be manually reviewed before production deployment.
-- `pnpm lint` has not yet been run in this pass.
+- Final automated validation passed.
 
 ## PR Description Draft
 
@@ -142,8 +142,6 @@ Passed:
 pnpm test
 pnpm ts-check
 ```
-
-Not run:
 
 ```bash
 pnpm lint

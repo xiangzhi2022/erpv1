@@ -99,7 +99,7 @@ describe('ORDER_STATUS_CONFIG', () => {
   });
 
   it('should have label, color, and dotColor for each status', () => {
-    for (const [key, config] of Object.entries(ORDER_STATUS_CONFIG)) {
+    for (const [, config] of Object.entries(ORDER_STATUS_CONFIG)) {
       expect(config.label).toBeTruthy();
       expect(config.color).toBeTruthy();
       expect(config.dotColor).toBeTruthy();
