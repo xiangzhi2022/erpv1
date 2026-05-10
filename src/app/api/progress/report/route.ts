@@ -3,6 +3,16 @@ import { getSupabaseClient } from '@/db/client';
 import { getUserFromRequest } from '@/lib/auth';
 import { progressReportSchema, WorkOrderStatus } from '@/app/progress/schemas';
 
+/** Check if a string is a valid UUID v4 format */
+function isValidUUID(value: string): boolean {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value);
+}
+
+/** Safely resolve operator name from user, with fallback chain */
+function resolveOperatorName(user: { nickname?: string; phone?: string; email?: string; name?: string }): string {
+  return user.nickname || user.phone || user.email || user.name || '未知操作人';
+}
+
 // Status transition map: action -> new status
 // Aligned with WorkOrderStatus enum: pending, scheduling, producing, inspecting, stored, aborted
 const ACTION_STATUS_MAP: Record<string, string> = {
@@ -112,16 +122,21 @@ export async function POST(request: Request) {
     }
 
     // Create progress log
+    // operator_id is UUID type — only set if user.id is a valid UUID
+    const logInsertData: Record<string, unknown> = {
+      work_order_id,
+      operator_name: resolveOperatorName(user),
+      action,
+      completed_delta: completed_delta || 0,
+      remark: remark || null,
+    };
+    if (isValidUUID(user.id)) {
+      logInsertData.operator_id = user.id;
+    }
+
     const { data: logData, error: logError } = await supabase
       .from('progress_logs')
-      .insert({
-        work_order_id,
-        operator_id: user.id,
-        operator_name: user.nickname || user.phone,
-        action,
-        completed_delta: completed_delta || 0,
-        remark: remark || null,
-      })
+      .insert(logInsertData)
       .select()
       .maybeSingle();
 

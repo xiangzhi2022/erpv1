@@ -3,6 +3,16 @@ import { getSupabaseClient } from '@/db/client';
 import { getUserFromRequest } from '@/lib/auth';
 import { workOrderQuerySchema, WorkOrderStatus, type ProgressStats, type WorkOrder } from '@/app/progress/schemas';
 
+/** Check if a string is a valid UUID v4 format */
+function isValidUUID(value: string): boolean {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value);
+}
+
+/** Safely resolve operator name from user, with fallback chain */
+function resolveOperatorName(user: { nickname?: string; phone?: string; email?: string; name?: string }): string {
+  return user.nickname || user.phone || user.email || user.name || '未知操作人';
+}
+
 export async function GET(request: Request) {
   try {
     const user = await getUserFromRequest(request);
@@ -120,33 +130,45 @@ export async function POST(request: Request) {
     }
 
     const body = await request.json();
-    const { order_id, order_item_id, workshop_id, product_name, target_quantity, priority, expected_end_date, remark } = body;
+    const { order_id, workshop_id, product_name, target_quantity, priority, expected_end_date, remark } = body;
 
-    if (!order_id || !product_name || target_quantity === undefined) {
+    if (!product_name || target_quantity === undefined) {
       return NextResponse.json(
-        { success: false, error: '缺少必填字段: order_id, product_name, target_quantity' },
+        { success: false, error: '缺少必填字段: product_name, target_quantity' },
+        { status: 400 }
+      );
+    }
+
+    if (target_quantity <= 0) {
+      return NextResponse.json(
+        { success: false, error: '目标数量必须大于0' },
         { status: 400 }
       );
     }
 
     const supabase = getSupabaseClient();
 
+    // Build insert data — only include columns that exist in the DB schema
+    const insertData: Record<string, unknown> = {
+      workshop_id: workshop_id || null,
+      product_name,
+      target_quantity,
+      completed_quantity: 0,
+      status: WorkOrderStatus.PENDING,
+      priority: priority || 'normal',
+      expected_end_date: expected_end_date || null,
+      remark: remark || null,
+    };
+
+    // Only set order_id if it is a valid UUID (the column is UUID type and nullable)
+    if (order_id && isValidUUID(String(order_id))) {
+      insertData.order_id = order_id;
+    }
+
     // Create work order with initial status 'pending'
     const { data, error } = await supabase
       .from('work_orders')
-      .insert({
-        order_id,
-        order_item_id,
-        workshop_id,
-        product_name,
-        target_quantity,
-        completed_quantity: 0,
-        status: WorkOrderStatus.PENDING,
-        priority: priority || 'normal',
-        expected_end_date: expected_end_date || null,
-        remark: remark || null,
-        created_by: user.id,
-      })
+      .insert(insertData)
       .select()
       .maybeSingle();
 
@@ -159,14 +181,19 @@ export async function POST(request: Request) {
     }
 
     // Write initial progress log on work order creation
-    const { error: logError } = await supabase.from('progress_logs').insert({
+    // operator_id is UUID type — only set if user.id is a valid UUID
+    const logInsertData: Record<string, unknown> = {
       work_order_id: data.id,
-      operator_id: user.id,
-      operator_name: user.nickname || user.phone,
+      operator_name: resolveOperatorName(user),
       action: 'start',
       completed_delta: 0,
       remark: '工单创建',
-    });
+    };
+    if (isValidUUID(user.id)) {
+      logInsertData.operator_id = user.id;
+    }
+
+    const { error: logError } = await supabase.from('progress_logs').insert(logInsertData);
 
     if (logError) {
       console.error('创建进度日志失败:', logError.message);
