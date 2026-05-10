@@ -13,10 +13,33 @@
  */
 
 const { createClient } = require('@supabase/supabase-js');
+const fs = require('fs');
+const path = require('path');
 
-// Supabase 配置
-const supabaseUrl = process.env.COZE_SUPABASE_URL || 'https://cdcnjtgabgjkouavwxsl.supabase.co';
-const supabaseKey = process.env.COZE_SUPABASE_SERVICE_ROLE_KEY || '';
+// Load .env file if environment variables are not set
+function loadDotenv() {
+  const envPath = path.join(__dirname, '..', '.env');
+  if (fs.existsSync(envPath)) {
+    const content = fs.readFileSync(envPath, 'utf8');
+    content.split('\n').forEach(line => {
+      const trimmed = line.trim();
+      if (!trimmed || trimmed.startsWith('#')) return;
+      const eqIndex = trimmed.indexOf('=');
+      if (eqIndex > 0) {
+        const key = trimmed.substring(0, eqIndex).trim();
+        const value = trimmed.substring(eqIndex + 1).trim();
+        if (!process.env[key]) {
+          process.env[key] = value;
+        }
+      }
+    });
+  }
+}
+loadDotenv();
+
+// Supabase 配置 - COZE_SUPABASE_* 优先，SUPABASE_* 兼容
+const supabaseUrl = process.env.COZE_SUPABASE_URL || process.env.SUPABASE_URL || '';
+const supabaseKey = process.env.COZE_SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY || '';
 
 const supabase = createClient(supabaseUrl, supabaseKey);
 
@@ -520,7 +543,29 @@ async function initDatabase() {
     }
   }
 
-  // 3. 创建索引
+  // 3. 启用 RLS 并创建 anon 访问策略
+  console.log('\n📦 启用 RLS 并创建访问策略...');
+  const rlsTables = [
+    'users', 'tenants', 'tenant_users', 'customers', 'orders', 'order_items',
+    'workshops', 'factory_workshops', 'production_tasks', 'work_orders',
+    'progress_logs', 'workers', 'suppliers', 'dealers',
+    'categories', 'tasks', 'notifications', 'user_settings', 'order_prefixes',
+  ];
+  for (const table of rlsTables) {
+    await executeSQL(`ALTER TABLE ${table} ENABLE ROW LEVEL SECURITY;`);
+    // Create permissive policies for anon key access (service_role bypasses RLS automatically)
+    const ops = ['SELECT', 'INSERT', 'UPDATE', 'DELETE'];
+    for (const op of ops) {
+      const policyName = `allow_anon_${op.toLowerCase()}_${table}`;
+      const usingClause = op === 'INSERT' ? `WITH CHECK (true)` : op === 'UPDATE' ? `USING (true) WITH CHECK (true)` : `USING (true)`;
+      await executeSQL(
+        `DROP POLICY IF EXISTS "${policyName}" ON ${table}; CREATE POLICY "${policyName}" ON ${table} FOR ${op} TO anon ${usingClause};`
+      );
+    }
+    console.log(`  ✅ ${table} RLS 已启用，anon 策略已创建`);
+  }
+
+  // 4. 创建索引
   console.log('\n📦 创建索引...');
   for (const idx of indexes) {
     const sql = `CREATE INDEX IF NOT EXISTS ${idx.name} ON ${idx.table} ${idx.columns};`;
@@ -528,13 +573,13 @@ async function initDatabase() {
     console.log(`  ✅ 索引 ${idx.name} 已创建`);
   }
 
-  // 4. 创建触发器
+  // 5. 创建触发器
   console.log('\n📦 创建触发器...');
   await executeSQL(triggerFunction);
   const triggerTables = [
     'users', 'tenants', 'tenant_users', 'customers', 'orders', 'order_items',
     'workshops', 'factory_workshops', 'production_tasks', 'work_orders',
-    'workers', 'suppliers', 'dealers', 'categories', 'tasks', 'user_settings',
+    'workers', 'suppliers', 'dealers', 'categories', 'tasks', 'notifications', 'user_settings',
   ];
   for (const table of triggerTables) {
     const sql = `DROP TRIGGER IF EXISTS update_${table}_updated_at ON ${table}; CREATE TRIGGER update_${table}_updated_at BEFORE UPDATE ON ${table} FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();`;
