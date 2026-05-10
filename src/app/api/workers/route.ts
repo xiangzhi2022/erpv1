@@ -1,49 +1,25 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
-import { cookies } from 'next/headers';
-
-const supabaseUrl = process.env.COZE_SUPABASE_URL || 'https://cdcnjtgabgjkouavwxsl.supabase.co';
-const supabaseServiceKey = process.env.COZE_SUPABASE_SERVICE_ROLE_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNkY25qdGdhYmdqa291YXZ3eHNsIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3Nzg1MjM0MSwiZXhwIjoyMDkzNDI4MzQxfQ.LzvwvnkQx_lIjIjsZd8FxyXRaDwTPyiVELyTEuTacmE';
+import { getSession } from '@/lib/auth';
 
 function getSupabaseAdmin() {
-  return createClient(supabaseUrl, supabaseServiceKey, { auth: { persistSession: false } });
+  const url = process.env.COZE_SUPABASE_URL;
+  const key = process.env.COZE_SUPABASE_SERVICE_ROLE_KEY;
+  if (!url || !key) {
+    throw new Error('Missing Supabase environment variables');
+  }
+  return createClient(url, key, { auth: { persistSession: false } });
 }
 
-async function getAuthUser(request: Request) {
-  // 从 cookie 中获取 auth_session
-  const cookieHeader = request.headers.get('cookie') || '';
-  const cookies = Object.fromEntries(
-    cookieHeader.split('; ').map((c: string) => {
-      const [key, ...val] = c.split('=');
-      return [key, val.join('=')];
-    })
-  );
-  const sessionId = cookies['auth_session'];
-  if (!sessionId) return null;
-
-  // 使用项目的 session 机制
+async function getAuthUser() {
   try {
-    const { getSession } = await import('@/lib/auth');
-    // getSession uses cookies() internally, but we can also check via the session store
-    // Since we have the sessionId, let's use a direct approach
     const session = await getSession();
     if (session?.user) {
       return { id: session.user.id, role: 'admin', name: session.user.name };
     }
   } catch {
-    // Fallback: check erp_user cookie (legacy)
+    // ignore
   }
-
-  // Legacy: check erp_user cookie
-  const erpUserCookie = cookies['erp_user'];
-  if (erpUserCookie) {
-    try {
-      return JSON.parse(decodeURIComponent(erpUserCookie));
-    } catch {
-      return null;
-    }
-  }
-
   return null;
 }
 
@@ -70,21 +46,24 @@ async function generateWorkerNo(): Promise<string> {
   return `${prefix}${String(seq).padStart(3, '0')}`;
 }
 
+const VALID_STATUSES = ['active', 'on_leave', 'resigned'] as const;
+const VALID_CRAFT_TYPES = ['cutting', 'sewing', 'qc', 'packaging', 'ironing', 'pattern', 'cutting_die', 'assembly', 'other'] as const;
+
 // GET - 获取工人列表
 export async function GET(request: Request) {
   try {
-    const user = await getAuthUser(request);
+    const user = await getAuthUser();
     if (!user) {
       return NextResponse.json({ success: false, error: '请先登录' }, { status: 401 });
     }
     const supabase = getSupabaseAdmin();
     const { searchParams } = new URL(request.url);
-    const keyword = searchParams.get('keyword') || '';
+    const keyword = (searchParams.get('keyword') || '').trim();
     const craftType = searchParams.get('craft_type') || '';
     const status = searchParams.get('status') || '';
     const workshopId = searchParams.get('workshop_id') || '';
-    const page = parseInt(searchParams.get('page') || '1', 10);
-    const pageSize = parseInt(searchParams.get('page_size') || '20', 10);
+    const page = Math.max(1, parseInt(searchParams.get('page') || '1', 10));
+    const pageSize = Math.min(100, Math.max(1, parseInt(searchParams.get('page_size') || '20', 10)));
 
     let query = supabase
       .from('workers')
@@ -94,10 +73,10 @@ export async function GET(request: Request) {
     if (keyword) {
       query = query.or(`name.ilike.%${keyword}%,worker_no.ilike.%${keyword}%`);
     }
-    if (craftType) {
+    if (craftType && (VALID_CRAFT_TYPES as readonly string[]).includes(craftType)) {
       query = query.eq('craft_type', craftType);
     }
-    if (status) {
+    if (status && (VALID_STATUSES as readonly string[]).includes(status)) {
       query = query.eq('status', status);
     }
     if (workshopId) {
@@ -128,7 +107,7 @@ export async function GET(request: Request) {
 // POST - 创建工人
 export async function POST(request: Request) {
   try {
-    const user = await getAuthUser(request);
+    const user = await getAuthUser();
     if (!user) {
       return NextResponse.json({ success: false, error: '请先登录' }, { status: 401 });
     }
@@ -137,6 +116,16 @@ export async function POST(request: Request) {
 
     if (!name || !name.trim()) {
       return NextResponse.json({ success: false, error: '姓名不能为空' }, { status: 400 });
+    }
+
+    // 校验 status 值
+    if (status && !(VALID_STATUSES as readonly string[]).includes(status)) {
+      return NextResponse.json({ success: false, error: '无效的状态值' }, { status: 400 });
+    }
+
+    // 校验 craft_type 值
+    if (craft_type && !(VALID_CRAFT_TYPES as readonly string[]).includes(craft_type)) {
+      return NextResponse.json({ success: false, error: '无效的工种值' }, { status: 400 });
     }
 
     const supabase = getSupabaseAdmin();
