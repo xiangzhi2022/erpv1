@@ -1,6 +1,6 @@
-# DATABASE.md
+﻿# DATABASE.md
 
-云 Supabase 数据库约束与表结构原则文档。
+云 Supabase 数据库约束、表结构原则与数据访问层文档。
 
 ## 基本约束
 
@@ -44,10 +44,10 @@
 **orders.status** 枚举: `pending`, `returned`, `confirmed`, `pool`, `producing`, `in_production`, `shipped`, `completed`, `cancelled`
 
 **关键外键**:
-- `order_items.order_id` → `orders.id` (CASCADE)
-- `orders.tenant_id` → `tenants.id` (SET NULL)
-- `orders.target_factory_id` → `tenants.id` (无 FK 约束，逻辑关联)
-- `orders.dealer_id` → `tenants.id` (无 FK 约束，逻辑关联)
+- `order_items.order_id` -> `orders.id` (CASCADE)
+- `orders.tenant_id` -> `tenants.id` (SET NULL)
+- `orders.target_factory_id` -> `tenants.id` (无 FK 约束，逻辑关联)
+- `orders.dealer_id` -> `tenants.id` (无 FK 约束，逻辑关联)
 
 ### 生产与车间
 
@@ -84,7 +84,7 @@
 
 **workers.status** 枚举: `active`, `on_leave`, `resigned`
 
-**workers.workshop_id** → `workshops.id` (逻辑关联，无 FK 约束)
+**workers.workshop_id** -> `workshops.id` (逻辑关联，无 FK 约束)
 
 ### 供应商管理
 
@@ -109,7 +109,7 @@
 | notifications | 通知表 | VARCHAR(36) |
 | user_settings | 用户设置表 | UUID |
 
-**tasks.category_id** → `categories.id` (CASCADE)
+**tasks.category_id** -> `categories.id` (CASCADE)
 
 ## Schema 对齐原则
 
@@ -118,6 +118,76 @@
 3. **API 字段对齐**: API 中使用的 snake_case 字段必须在 schema 或初始化脚本中有对应定义。
 4. **Relations 只补充真实关系**: 不虚构完整性关系，只添加代码中实际使用的关联。
 5. **避免 as any**: Schema 类型推断应能覆盖所有业务需求，不需要 `as any` 逃逸。
+
+## 数据访问层架构
+
+```text
+业务代码层
+src/app/actions/*.ts  src/app/api/**/route.ts
+        |
+        v
+src/db/client.ts              src/lib/db.ts
+Supabase Client               REST API 直接操作
+getSupabaseServiceClient()    execSql()
+getSupabaseClient()           insertData() / selectData() / deleteData()
+        |
+        v
+getSupabaseCredentials()
+环境变量优先级: COZE_SUPABASE_* > SUPABASE_*
+拒绝 localhost / 127.0.0.1 / ::1 / *.local
+```
+
+### 服务端管理操作（绕过 RLS）
+
+```typescript
+import { getSupabaseServiceClient } from '@/db/client';
+
+const supabase = getSupabaseServiceClient();
+const { data, error } = await supabase.from('users').select('*');
+```
+
+### 匿名/用户级操作
+
+```typescript
+import { getSupabaseClient } from '@/db/client';
+
+const supabase = getSupabaseClient();
+const supabaseWithToken = getSupabaseClient(userToken);
+```
+
+### REST API 直接操作（src/lib/db.ts）
+
+```typescript
+import { execSql, insertData, selectData, deleteData } from '@/lib/db';
+
+const result = await execSql({ sql: 'SELECT * FROM users LIMIT 10' });
+await insertData('users', { name: 'test', phone: '123' });
+const rows = await selectData('users', { status: 'active' }, 'id,name');
+await deleteData('users', { id: '123' });
+```
+
+## 环境变量
+
+| 变量名 | 必填 | 说明 |
+|--------|------|------|
+| `COZE_SUPABASE_URL` | 是 | 云 Supabase 实例 URL（如 `https://xxx.supabase.co`） |
+| `COZE_SUPABASE_ANON_KEY` | 是 | 匿名访问 Key |
+| `COZE_SUPABASE_SERVICE_ROLE_KEY` | 是* | 服务端管理 Key（绕过 RLS） |
+
+* 服务端管理操作必须设置，否则 `getSupabaseServiceClient()` 和 `src/lib/db.ts` 的函数会抛出明确错误。
+
+### Legacy 兼容
+
+如果 `COZE_SUPABASE_*` 未设置，系统会回退读取 `SUPABASE_*` 变量。建议全部迁移到 `COZE_*` 命名。
+
+### 本地 URL 拒绝
+
+以下 URL 会被明确拒绝，项目不支持本地 Supabase：
+
+- `http://localhost:*`
+- `http://127.0.0.1:*`
+- `http://[::1]:*`
+- `*.local`
 
 ## 初始化脚本
 
@@ -130,6 +200,20 @@ node scripts/init-database.js
 - 创建索引（IF NOT EXISTS）
 - 创建 `updated_at` 自动更新触发器
 - 使用 `supabase.rpc('exec', { sql })` 执行 DDL
+
+## 环境检查工具
+
+```bash
+node scripts/supabase-env.js check
+node scripts/supabase-env.js print
+node scripts/supabase-env.js export
+```
+
+## RLS 策略
+
+- RLS 已启用，后端使用 `service_role_key` 绕过
+- 无需创建额外的 RLS policy
+- 业务代码中所有写操作通过 `getSupabaseServiceClient()` 执行
 
 ## 注意事项
 
