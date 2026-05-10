@@ -1,81 +1,81 @@
-# Agent 任务派发表
+﻿# Agent 浠诲姟娲惧彂琛?
 
-这些文件是当前项目的多 agent 开发任务单。每个 Coze/Codex/Claude 窗口只引用一个任务文件，并按其中的边界执行。
+杩欎簺鏂囦欢鏄綋鍓嶉」鐩殑澶?agent 寮€鍙戜换鍔″崟銆傛瘡涓?Coze/Codex/Claude 绐楀彛鍙紩鐢ㄤ竴涓换鍔℃枃浠讹紝骞舵寜鍏朵腑鐨勮竟鐣屾墽琛屻€?
 
-## 派发顺序
+## 娲惧彂椤哄簭
 
-1. 先派发 `01-database-schema-alignment.md`。
-2. 再派发 `02-db-client-cleanup.md`。
-3. `03-orders-module.md`、`04-progress-workflow.md`、`05-workers-module.md`、`06-supplier-module.md` 和 `09` 到 `18` 可按依赖分批并行派发。
-4. `19-dashboard-shell-sync-module.md` 和 `20-debug-ops-integrations.md` 可独立派发。
-5. `07-test-coverage.md` 在业务任务基本完成后派发。
-6. `08-review-and-github.md` 最后派发，负责集成检查和 PR 交付。
+1. 鍏堟淳鍙?`01-database-schema-alignment.md`銆?
+2. 鍐嶆淳鍙?`02-db-client-cleanup.md`銆?
+3. `03-orders-module.md`銆乣04-progress-workflow.md`銆乣05-workers-module.md`銆乣06-supplier-module.md` 鍜?`09` 鍒?`18` 鍙寜渚濊禆鍒嗘壒骞惰娲惧彂銆?
+4. `19-dashboard-shell-sync-module.md` 鍜?`20-debug-ops-integrations.md` 鍙嫭绔嬫淳鍙戙€?
+5. `07-test-coverage.md` 鍦ㄤ笟鍔′换鍔″熀鏈畬鎴愬悗娲惧彂銆?
+6. `08-review-and-github.md` 鏈€鍚庢淳鍙戯紝璐熻矗闆嗘垚妫€鏌ュ拰 PR 浜や粯銆?
 
-## 任务索引
+## 浠诲姟绱㈠紩
 
-| 文件 | 建议分支 | Worker | 覆盖范围 |
+| 鏂囦欢 | 寤鸿鍒嗘敮 | Worker | 瑕嗙洊鑼冨洿 |
 | --- | --- | --- | --- |
-| `01-database-schema-alignment.md` | `codex-db-schema-alignment` | `database-agent` | Drizzle schema、relations、初始化脚本 |
-| `02-db-client-cleanup.md` | `codex-db-client-cleanup` | `backend-agent` | Supabase client、环境变量、数据库访问 |
-| `03-orders-module.md` | `codex-orders-module-hardening` | `backend-agent` | 订单页面与订单 API |
-| `04-progress-workflow.md` | `codex-progress-workflow` | `backend-agent` | 生产进度工单、上报、日志 |
-| `05-workers-module.md` | `codex-workers-module` | `backend-agent` | 工人档案管理 |
-| `06-supplier-module.md` | `codex-supplier-module` | `backend-agent` | 供应商档案与供应商订单 |
-| `07-test-coverage.md` | `codex-test-coverage-core-flows` | `test-agent` | 核心流程测试补齐 |
-| `08-review-and-github.md` | `codex-release-integration` | `review-agent + github-agent` | 最终 review、集成、PR |
-| `09-dealer-module.md` | `codex-dealer-module` | `backend-agent` | 经销商页面与 API |
-| `10-factory-workshops-module.md` | `codex-factory-workshops-module` | `backend-agent` | 工厂车间管理 |
-| `11-factory-portal-module.md` | `codex-factory-portal-module` | `backend-agent` | 工厂端订单池与任务统计 |
-| `12-worker-portal-module.md` | `codex-worker-portal-module` | `backend-agent` | 工人端任务与上报 |
-| `13-tasks-categories-notifications-module.md` | `codex-tasks-categories-notifications` | `backend-agent` | 任务、分类、通知 |
-| `14-settings-module.md` | `codex-settings-module` | `backend-agent` | 设置中心 |
-| `15-auth-module.md` | `codex-auth-module` | `backend-agent` | 认证、验证码、OAuth、密码重置 |
-| `16-dashboard-reporting-module.md` | `codex-dashboard-reporting` | `backend-agent` | 仪表盘与统计报表 |
-| `17-operational-views-module.md` | `codex-operational-views` | `frontend-agent` | 看板、财务、发货轻量视图 |
-| `18-customers-factories-shared-api.md` | `codex-shared-customers-factories-api` | `backend-agent` | 客户与工厂共享 API |
-| `19-dashboard-shell-sync-module.md` | `codex-dashboard-shell-sync` | `frontend-agent` | 旧 dashboard 分组与同步页 |
-| `20-debug-ops-integrations.md` | `codex-debug-ops-integrations` | `backend-agent` | debug/test/ppt-fetch 辅助 API |
+| `01-database-schema-alignment.md` | `codex-db-schema-alignment` | `database-agent` | Drizzle schema銆乺elations銆佸垵濮嬪寲鑴氭湰 |
+| `02-db-client-cleanup.md` | `codex-db-client-cleanup` | `backend-agent` | Supabase client銆佺幆澧冨彉閲忋€佹暟鎹簱璁块棶 |
+| `03-orders-module.md` | `codex-orders-module-hardening` | `backend-agent` | 璁㈠崟椤甸潰涓庤鍗?API |
+| `04-progress-workflow.md` | `codex-progress-workflow` | `backend-agent` | 鐢熶骇杩涘害宸ュ崟銆佷笂鎶ャ€佹棩蹇?|
+| `05-workers-module.md` | `codex-workers-module` | `backend-agent` | 宸ヤ汉妗ｆ绠＄悊 |
+| `06-supplier-module.md` | `codex-supplier-module` | `backend-agent` | 渚涘簲鍟嗘。妗堜笌渚涘簲鍟嗚鍗?|
+| `07-test-coverage.md` | `codex-test-coverage-core-flows` | `test-agent` | 鏍稿績娴佺▼娴嬭瘯琛ラ綈 |
+| `08-review-and-github.md` | `codex-release-integration` | `review-agent + github-agent` | 鏈€缁?review銆侀泦鎴愩€丳R |
+| `09-dealer-module.md` | `codex-dealer-module` | `backend-agent` | 缁忛攢鍟嗛〉闈笌 API |
+| `10-factory-workshops-module.md` | `codex-factory-workshops-module` | `backend-agent` | 宸ュ巶杞﹂棿绠＄悊 |
+| `11-factory-portal-module.md` | `codex-factory-portal-module` | `backend-agent` | 宸ュ巶绔鍗曟睜涓庝换鍔＄粺璁?|
+| `12-worker-portal-module.md` | `codex-worker-portal-module` | `backend-agent` | 宸ヤ汉绔换鍔′笌涓婃姤 |
+| `13-tasks-categories-notifications-module.md` | `codex-tasks-categories-notifications` | `backend-agent` | 浠诲姟銆佸垎绫汇€侀€氱煡 |
+| `14-settings-module.md` | `codex-settings-module` | `backend-agent` | 璁剧疆涓績 |
+| `15-auth-module.md` | `codex-auth-module` | `backend-agent` | 璁よ瘉銆侀獙璇佺爜銆丱Auth銆佸瘑鐮侀噸缃?|
+| `16-dashboard-reporting-module.md` | `codex-dashboard-reporting` | `backend-agent` | 浠〃鐩樹笌缁熻鎶ヨ〃 |
+| `17-operational-views-module.md` | `codex-operational-views` | `frontend-agent` | 鐪嬫澘銆佽储鍔°€佸彂璐ц交閲忚鍥?|
+| `18-customers-factories-shared-api.md` | `codex-shared-customers-factories-api` | `backend-agent` | 瀹㈡埛涓庡伐鍘傚叡浜?API |
+| `19-dashboard-shell-sync-module.md` | `codex-dashboard-shell-sync` | `frontend-agent` | 鏃?dashboard 鍒嗙粍涓庡悓姝ラ〉 |
+| `20-debug-ops-integrations.md` | `codex-debug-ops-integrations` | `backend-agent` | debug/test/ppt-fetch 杈呭姪 API |
 
-## Worker 启动规则
+## Worker 鍚姩瑙勫垯
 
-- 每个 worker 先同步最新 `main`，再创建独立分支。
-- 如果工作区不干净，停止并汇报，不要覆盖已有改动。
-- 每个 worker 只提交任务范围内文件。
-- 每个 worker 推送到自己的 `origin/<branch>`，不要合并 `main`。
+- 姣忎釜 worker 鍏堝悓姝ユ渶鏂?`main`锛屽啀鍒涘缓鐙珛鍒嗘敮銆?
+- 濡傛灉宸ヤ綔鍖轰笉骞插噣锛屽仠姝㈠苟姹囨姤锛屼笉瑕佽鐩栧凡鏈夋敼鍔ㄣ€?
+- 姣忎釜 worker 鍙彁浜や换鍔¤寖鍥村唴鏂囦欢銆?
+- 姣忎釜 worker 鎺ㄩ€佸埌鑷繁鐨?`origin/<branch>`锛屼笉瑕佸悎骞?`main`銆?
 
-## 当前基线
+## 褰撳墠鍩虹嚎
 
-- `pnpm ts-check` 当前通过。
-- `pnpm test` 当前通过，3 个测试文件，33 个测试。
-- 当前工作区已有未提交改动。Worker 不要回滚、不覆盖、不格式化无关文件。
+- `pnpm ts-check` 褰撳墠閫氳繃銆?
+- `pnpm test` 褰撳墠閫氳繃锛? 涓祴璇曟枃浠讹紝33 涓祴璇曘€?
+- 褰撳墠宸ヤ綔鍖哄凡鏈夋湭鎻愪氦鏀瑰姩銆俉orker 涓嶈鍥炴粴銆佷笉瑕嗙洊銆佷笉鏍煎紡鍖栨棤鍏虫枃浠躲€?
 
-## 通用交付格式
+## 閫氱敤浜や粯鏍煎紡
 
-每个 worker 完成后只返回：
+姣忎釜 worker 瀹屾垚鍚庡彧杩斿洖锛?
 
 ```text
-## 修改文件
+## 淇敼鏂囦欢
 - ...
 
-## 实现说明
+## 瀹炵幇璇存槑
 - ...
 
-## 验证
-- 已运行: ...
-- 未运行及原因: ...
+## 楠岃瘉
+- 宸茶繍琛? ...
+- 鏈繍琛屽強鍘熷洜: ...
 
-## 风险
+## 椋庨櫓
 - ...
 ```
 
-## 硬规则
+## 纭鍒?
 
-- 只能使用 `pnpm`。
-- 不要使用 `npm` 或 `yarn`。
-- 不要使用隐式 `any` 或 `as any`。
-- 不要多个 worker 同时修改同一个文件。
-- 不要提交 `.env` 或密钥。
-- Worker 不做最终合并，最终集成由 review/github agent 处理。
+- 鍙兘浣跨敤 `pnpm`銆?
+- 涓嶈浣跨敤 `npm` 鎴?`yarn`銆?
+- 涓嶈浣跨敤闅愬紡 `any` 鎴?`as any`銆?
+- 涓嶈澶氫釜 worker 鍚屾椂淇敼鍚屼竴涓枃浠躲€?
+- 涓嶈鎻愪氦 `.env` 鎴栧瘑閽ャ€?
+- Worker 涓嶅仛鏈€缁堝悎骞讹紝鏈€缁堥泦鎴愮敱 review/github agent 澶勭悊銆?
 
 ## Smoke Fix Dispatch - 2026-05-10
 
@@ -91,7 +91,6 @@ These tasks are follow-up smoke blockers discovered after the original 01-20 int
 4. Dispatch `24-smoke-progress-flow.md` after Task 22, or in parallel only if the worker can test with a UUID-compatible authenticated session.
 5. Dispatch `25-smoke-portals-routing.md` in parallel with Tasks 23-24.
 6. Dispatch `26-smoke-tasks-notifications-api.md` in parallel with Tasks 23-24 after auth expectations are clear.
-7. Dispatch `27-smoke-regression-verification.md` only after Tasks 21-26 are integrated.
 
 ### Smoke task index
 
@@ -103,4 +102,3 @@ These tasks are follow-up smoke blockers discovered after the original 01-20 int
 | `24-smoke-progress-flow.md` | `codex/smoke-progress-flow` | `backend-agent` | Work order creation and progress report UUID failures |
 | `25-smoke-portals-routing.md` | `codex/smoke-portals-routing` | `frontend-agent` | Factory and worker portal 404 routing |
 | `26-smoke-tasks-notifications-api.md` | `codex/smoke-tasks-notifications-api` | `backend-agent` | Categories, tasks, notifications API 500s |
-| `27-smoke-regression-verification.md` | `codex/smoke-regression-verification` | `test-agent` | Final smoke rerun and documentation update |
