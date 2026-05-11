@@ -1,5 +1,6 @@
 import { getSupabaseClient } from '@/db/client';
 import { getUserFromRequest } from '@/lib/auth';
+import { isSuperAdmin } from '@/lib/role-access';
 
 const getServiceClient = () => getSupabaseClient();
 
@@ -33,7 +34,7 @@ export async function POST(request: Request) {
       .order('order_no', { ascending: false })
       .limit(1);
 
-    if (user.role !== 'super_admin' && user.role !== 'saas_admin') {
+    if (!isSuperAdmin(user)) {
       if (!user.tenant_id) {
         return Response.json({ success: false, error: '当前用户未关联租户' }, { status: 403 });
       }

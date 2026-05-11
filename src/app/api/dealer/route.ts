@@ -1,23 +1,13 @@
 import { getSupabaseClient } from '@/db/client';
-import { cookies } from 'next/headers';
+import { getUserFromRequest } from '@/lib/auth';
+import { isSuperAdmin } from '@/lib/role-access';
 
 const getClient = () => getSupabaseClient();
-
-async function getCurrentUser() {
-  const cookieStore = await cookies();
-  const userStr = cookieStore.get('erp_user')?.value;
-  if (!userStr) return null;
-  try {
-    return JSON.parse(userStr);
-  } catch {
-    return null;
-  }
-}
 
 // 获取经销商列表（支持分页和过滤）
 export async function GET(request: Request) {
   try {
-    const user = await getCurrentUser();
+    const user = await getUserFromRequest(request);
     if (!user) {
       return Response.json({ success: false, error: '请先登录' }, { status: 401 });
     }
@@ -52,8 +42,9 @@ export async function GET(request: Request) {
     }
 
     // 权限过滤：非管理员只能看自己创建的
-    if (user.role !== 'super_admin' && user.role !== 'saas_admin') {
-      query = query.eq('created_by', user.id);
+    if (!isSuperAdmin(user)) {
+      if (!user.tenant_id) return Response.json({ success: false, error: '当前用户未关联企业' }, { status: 403 });
+      query = query.eq('tenant_id', user.tenant_id);
     }
 
     // 分页
@@ -86,7 +77,7 @@ export async function GET(request: Request) {
 // 新增经销商
 export async function POST(request: Request) {
   try {
-    const user = await getCurrentUser();
+    const user = await getUserFromRequest(request);
     if (!user) {
       return Response.json({ success: false, error: '请先登录' }, { status: 401 });
     }
@@ -114,6 +105,7 @@ export async function POST(request: Request) {
         status: validStatuses.includes(status) ? status : 'active',
         remark: remark?.trim() || null,
         created_by: user.id,
+        tenant_id: user.tenant_id || null,
       })
       .select()
       .single();

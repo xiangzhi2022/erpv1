@@ -1,23 +1,13 @@
-import { SidebarProvider, SidebarInset, SidebarTrigger } from '@/components/ui/sidebar';
-import { AppSidebar } from '@/components/sidebar';
-import { Separator } from '@/components/ui/separator';
+import { ProtectedAppShell } from '@/components/protected-app-shell';
 
-export default function DealerLayout({
+export default function ProtectedLayout({
   children,
 }: Readonly<{
   children: React.ReactNode;
 }>) {
   return (
-    <SidebarProvider>
-      <AppSidebar />
-      <SidebarInset>
-        <header className="flex h-12 shrink-0 items-center gap-2 border-b px-4">
-          <SidebarTrigger className="-ml-1" />
-          <Separator orientation="vertical" className="mr-2 h-4" />
-          <span className="text-sm font-medium">经销商管理</span>
-        </header>
-        <main className="flex-1 overflow-auto p-4 md:p-6">{children}</main>
-      </SidebarInset>
-    </SidebarProvider>
+    <ProtectedAppShell title={'\u7ecf\u9500\u5546\u7ba1\u7406'} path="/dealer">
+      {children}
+    </ProtectedAppShell>
   );
 }

@@ -229,6 +229,7 @@ describe('orderFormSchema', () => {
   const validForm = {
     order_no: 'ORD-2024-001',
     customer_name: '张三',
+    target_factory_id: '11111111-1000-4000-8000-000000000001',
     delivery_date: '2024-12-31',
     remark: '加急',
     items: [

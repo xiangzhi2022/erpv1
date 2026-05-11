@@ -57,6 +57,23 @@ export const tenantUsers = pgTable("tenant_users", {
 	updated_at: timestamp("updated_at", { withTimezone: true }),
 });
 
+export const userPermissions = pgTable(
+	"user_permissions",
+	{
+		id: uuid("id").primaryKey().defaultRandom(),
+		user_id: uuid("user_id").notNull(),
+		tenant_id: uuid("tenant_id"),
+		permission_key: varchar("permission_key", { length: 80 }).notNull(),
+		assigned_by: uuid("assigned_by"),
+		created_at: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+	},
+	(table) => [
+		index("user_permissions_user_id_idx").on(table.user_id),
+		index("user_permissions_tenant_id_idx").on(table.tenant_id),
+		index("user_permissions_permission_key_idx").on(table.permission_key),
+	]
+);
+
 // ============================================================================
 // 订单与客户
 // ============================================================================
@@ -131,6 +148,31 @@ export const orderPrefixes = pgTable("order_prefixes", {
 	tenant_id: uuid("tenant_id"),
 	created_at: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
 });
+
+export const orderExchanges = pgTable(
+	"order_exchanges",
+	{
+		id: uuid("id").primaryKey().defaultRandom(),
+		order_id: uuid("order_id").notNull(),
+		from_tenant_id: uuid("from_tenant_id").notNull(),
+		to_tenant_id: uuid("to_tenant_id").notNull(),
+		from_user_id: uuid("from_user_id").notNull(),
+		status: varchar("status", { length: 40 }).notNull().default("sent"),
+		message: text("message"),
+		proposed_changes: jsonb("proposed_changes"),
+		handled_by: uuid("handled_by"),
+		handled_at: timestamp("handled_at", { withTimezone: true }),
+		created_at: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+		updated_at: timestamp("updated_at", { withTimezone: true }),
+	},
+	(table) => [
+		index("order_exchanges_order_id_idx").on(table.order_id),
+		index("order_exchanges_from_tenant_id_idx").on(table.from_tenant_id),
+		index("order_exchanges_to_tenant_id_idx").on(table.to_tenant_id),
+		index("order_exchanges_status_idx").on(table.status),
+		index("order_exchanges_created_at_idx").on(table.created_at),
+	]
+);
 
 // ============================================================================
 // 生产与车间
@@ -427,10 +469,12 @@ export const userSettings = pgTable("user_settings", {
 export type User = typeof users.$inferSelect;
 export type Tenant = typeof tenants.$inferSelect;
 export type TenantUser = typeof tenantUsers.$inferSelect;
+export type UserPermission = typeof userPermissions.$inferSelect;
 export type Customer = typeof customers.$inferSelect;
 export type Order = typeof orders.$inferSelect;
 export type OrderItem = typeof orderItems.$inferSelect;
 export type OrderPrefix = typeof orderPrefixes.$inferSelect;
+export type OrderExchange = typeof orderExchanges.$inferSelect;
 export type Workshop = typeof workshops.$inferSelect;
 export type FactoryWorkshop = typeof factoryWorkshops.$inferSelect;
 export type ProductionTask = typeof productionTasks.$inferSelect;

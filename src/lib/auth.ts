@@ -1,6 +1,7 @@
 import { cookies } from 'next/headers';
 import crypto from 'crypto';
 import { getSupabaseClient } from '@/db/client';
+import { normalizeAccountRole, type PermissionKey } from '@/lib/role-access';
 
 // ===================== 类型定义 =====================
 
@@ -11,6 +12,12 @@ export interface User {
   name: string;
   avatar?: string;
   provider?: 'credentials' | 'wechat' | 'github' | 'google';
+  role?: string;
+  tenant_id?: string;
+  tenant_type?: string;
+  department?: string;
+  nickname?: string;
+  permissions?: PermissionKey[];
 }
 
 export interface Session {
@@ -45,17 +52,24 @@ export function isPlaintextPassword(stored: string): boolean {
 
 // ===================== 内存存储（生产环境应替换为数据库）=====================
 
+const globalAuthState = globalThis as typeof globalThis & {
+  __erpCaptchaStore?: Map<string, { code: string; expiresAt: number }>;
+  __erpResetTokenStore?: Map<string, { email: string; expiresAt: number }>;
+  __erpOAuthStateStore?: Map<string, { provider: string; redirectUrl: string; expiresAt: number }>;
+  __erpSessionStore?: Map<string, Session>;
+};
+
 // 验证码存储: captchaId -> { code, expiresAt }
-const captchaStore = new Map<string, { code: string; expiresAt: number }>();
+const captchaStore = globalAuthState.__erpCaptchaStore ??= new Map<string, { code: string; expiresAt: number }>();
 
 // 密码重置令牌: token -> { email, expiresAt }
-const resetTokenStore = new Map<string, { email: string; expiresAt: number }>();
+const resetTokenStore = globalAuthState.__erpResetTokenStore ??= new Map<string, { email: string; expiresAt: number }>();
 
 // OAuth state 存储: state -> { provider, redirectUrl, expiresAt }
-const oauthStateStore = new Map<string, { provider: string; redirectUrl: string; expiresAt: number }>();
+const oauthStateStore = globalAuthState.__erpOAuthStateStore ??= new Map<string, { provider: string; redirectUrl: string; expiresAt: number }>();
 
 // 会话存储: sessionId -> Session
-const sessionStore = new Map<string, Session>();
+const sessionStore = globalAuthState.__erpSessionStore ??= new Map<string, Session>();
 
 // 用户存储（演示用，生产应替换为数据库）
 const userStore = new Map<string, { password: string; user: User }>();
@@ -219,6 +233,9 @@ export interface AuthUser extends User {
   role: string;
   tenant_id?: string;
   nickname?: string;
+  tenant_type?: string;
+  department?: string;
+  permissions: PermissionKey[];
 }
 
 /**
@@ -226,9 +243,39 @@ export interface AuthUser extends User {
  * was created from the in-memory demo store (which lacks these fields).
  * Results are cached in-memory for the session lifetime.
  */
-const userMetaCache = new Map<string, { role: string; tenant_id?: string; nickname?: string }>();
+type UserMeta = {
+  role: string;
+  tenant_id?: string;
+  nickname?: string;
+  tenant_type?: string;
+  department?: string;
+  permissions: PermissionKey[];
+};
 
-async function resolveUserMeta(user: User): Promise<{ role: string; tenant_id?: string; nickname?: string }> {
+const userMetaCache = new Map<string, UserMeta>();
+
+async function loadUserPermissions(userId: string): Promise<PermissionKey[]> {
+  try {
+    const supabase = getSupabaseClient();
+    const { data, error } = await supabase
+      .from('user_permissions')
+      .select('permission_key')
+      .eq('user_id', userId);
+
+    if (error || !data) return [];
+    return Array.from(
+      new Set(
+        data
+          .map((row: { permission_key?: string | null }) => row.permission_key)
+          .filter((key): key is PermissionKey => Boolean(key))
+      )
+    );
+  } catch {
+    return [];
+  }
+}
+
+async function resolveUserMeta(user: User): Promise<UserMeta> {
   const cached = userMetaCache.get(user.id);
   if (cached) return cached;
 
@@ -236,38 +283,85 @@ async function resolveUserMeta(user: User): Promise<{ role: string; tenant_id?: 
     const supabase = getSupabaseClient();
     const { data } = await supabase
       .from('users')
-      .select('role, tenant_id, nickname')
+      .select('role, tenant_id, tenant_type, real_name, nickname, department')
       .eq('id', user.id)
       .maybeSingle();
 
     if (data) {
-      const meta = { role: data.role || 'user', tenant_id: data.tenant_id || undefined, nickname: data.nickname || undefined };
+      let tenantType: string | undefined = data.tenant_type || undefined;
+      if (data.tenant_id) {
+        const { data: tenantData } = await supabase
+          .from('tenants')
+          .select('tenant_type')
+          .eq('id', data.tenant_id)
+          .maybeSingle();
+        tenantType = tenantData?.tenant_type || tenantType;
+      }
+      const permissions = await loadUserPermissions(user.id);
+
+      const meta = {
+        role: normalizeAccountRole(data.role || user.role || 'employee') === 'guest'
+          ? 'employee'
+          : normalizeAccountRole(data.role || user.role || 'employee'),
+        tenant_id: data.tenant_id || undefined,
+        nickname: data.real_name || data.nickname || undefined,
+        tenant_type: tenantType,
+        department: data.department || undefined,
+        permissions,
+      };
       userMetaCache.set(user.id, meta);
       return meta;
     }
   } catch {
-    // DB not reachable – fall through to defaults
+    // DB not reachable - fall through to defaults.
   }
 
-  // Fallback: demo / memory-store users default to super_admin
-  return { role: 'super_admin' };
+  return {
+    role: normalizeAccountRole(user.role || 'employee') === 'guest'
+      ? 'employee'
+      : normalizeAccountRole(user.role || 'employee'),
+    tenant_id: user.tenant_id,
+    nickname: user.nickname || user.name,
+    tenant_type: user.tenant_type,
+    department: user.department,
+    permissions: user.permissions || [],
+  };
+}
+
+async function resolveSessionUser(sessionId: string | undefined): Promise<AuthUser | null> {
+  if (!sessionId) return null;
+  const session = sessionStore.get(sessionId);
+  if (!session || Date.now() > session.expiresAt) {
+    if (sessionId) sessionStore.delete(sessionId);
+    return null;
+  }
+
+  const meta = await resolveUserMeta(session.user);
+  return {
+    ...session.user,
+    role: meta.role,
+    tenant_id: meta.tenant_id,
+    nickname: meta.nickname || session.user.name,
+    tenant_type: meta.tenant_type,
+    department: meta.department,
+    permissions: meta.permissions,
+  };
+}
+
+export async function getCurrentAuthUser(): Promise<AuthUser | null> {
+  try {
+    const cookieStore = await cookies();
+    return resolveSessionUser(cookieStore.get(SESSION_COOKIE_NAME)?.value);
+  } catch {
+    return null;
+  }
 }
 
 export async function getUserFromRequest(request: Request): Promise<AuthUser | null> {
   try {
     const cookieHeader = request.headers.get('cookie') || '';
     const sessionMatch = cookieHeader.match(new RegExp(`${SESSION_COOKIE_NAME}=([^;]+)`));
-    if (!sessionMatch) return null;
-    const session = sessionStore.get(sessionMatch[1]);
-    if (!session || Date.now() > session.expiresAt) return null;
-
-    const meta = await resolveUserMeta(session.user);
-    return {
-      ...session.user,
-      role: meta.role,
-      tenant_id: meta.tenant_id,
-      nickname: meta.nickname || session.user.name,
-    };
+    return resolveSessionUser(sessionMatch?.[1]);
   } catch {
     return null;
   }
@@ -300,50 +394,61 @@ export function authenticateUserFromStore(account: string, password: string): Us
 export async function authenticateUserFromDB(account: string, password: string): Promise<User | null> {
   try {
     const supabase = getSupabaseClient();
-
-    // 尝试通过手机号查找
     const isPhone = /^1[3-9]\d{9}$/.test(account);
-    const queryField = isPhone ? 'phone' : 'email';
+    if (!isPhone) return null;
 
     const { data: dbUser, error } = await supabase
       .from('users')
-      .select('id, phone, email, nickname, password, role, is_active')
-      .eq(queryField, account)
+      .select('id, phone, real_name, nickname, avatar_url, password, role, is_active, tenant_id, tenant_type, department')
+      .eq('phone', account)
       .eq('is_active', true)
-      .single();
+      .maybeSingle();
 
     if (error || !dbUser) return null;
 
-    // 验证密码（支持明文和哈希两种格式，向后兼容）
     const passwordMatch = isPlaintextPassword(dbUser.password)
       ? dbUser.password === password
       : verifyPassword(password, dbUser.password);
 
     if (!passwordMatch) return null;
 
-    // 如果是明文密码，自动升级为哈希密码
     if (isPlaintextPassword(dbUser.password)) {
       await supabase
         .from('users')
-        .update({ password: hashPassword(password) })
+        .update({ password: hashPassword(password), updated_at: new Date().toISOString() })
         .eq('id', dbUser.id);
     }
+
+    let tenantType: string | undefined = dbUser.tenant_type || undefined;
+    if (dbUser.tenant_id) {
+      const { data: tenantData } = await supabase
+        .from('tenants')
+        .select('tenant_type')
+        .eq('id', dbUser.tenant_id)
+        .maybeSingle();
+      tenantType = tenantData?.tenant_type || tenantType;
+    }
+    const permissions = await loadUserPermissions(dbUser.id);
+    const normalizedRole = normalizeAccountRole(dbUser.role || 'employee');
 
     return {
       id: dbUser.id,
       phone: dbUser.phone || undefined,
-      email: dbUser.email || undefined,
-      name: dbUser.nickname || dbUser.phone || dbUser.email || '用户',
+      name: dbUser.real_name || dbUser.nickname || dbUser.phone || '用户',
+      avatar: dbUser.avatar_url || undefined,
       provider: 'credentials',
+      role: normalizedRole === 'guest' ? 'employee' : normalizedRole,
+      tenant_id: dbUser.tenant_id || undefined,
+      tenant_type: tenantType,
+      department: dbUser.department || undefined,
+      nickname: dbUser.real_name || dbUser.nickname || undefined,
+      permissions,
     };
   } catch {
     return null;
   }
 }
 
-/**
- * 认证用户：先查内存 store，再查 Supabase 数据库
- */
 export async function authenticateUser(account: string, password: string): Promise<User | null> {
   // 1. 先查内存 store（演示用户等）
   const memoryUser = authenticateUserFromStore(account, password);

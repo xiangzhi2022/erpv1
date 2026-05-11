@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { getSupabaseClient } from '@/db/client';
-import { cookies } from 'next/headers';
+import { getUserFromRequest } from '@/lib/auth';
+import { isSuperAdmin } from '@/lib/role-access';
 import { format, subMonths, startOfMonth, endOfMonth } from 'date-fns';
 
 type Row = Record<string, unknown>;
@@ -9,17 +10,6 @@ type DashboardUser = {
   role?: string;
   tenant_id?: string;
 };
-
-async function getCurrentUser() {
-  const cookieStore = await cookies();
-  const userStr = cookieStore.get('erp_user')?.value;
-  if (!userStr) return null;
-  try {
-    return JSON.parse(userStr);
-  } catch {
-    return null;
-  }
-}
 
 async function safeRows<T extends Row>(
   label: string,
@@ -44,9 +34,9 @@ function calcGrowth(current: number, previous: number): number {
   return Number((((current - previous) / previous) * 100).toFixed(1));
 }
 
-export async function GET() {
+export async function GET(request: Request) {
   try {
-    const user = (await getCurrentUser()) as DashboardUser | null;
+    const user = (await getUserFromRequest(request)) as DashboardUser | null;
     if (!user) {
       return NextResponse.json({ success: false, error: '请先登录' }, { status: 401 });
     }
@@ -59,8 +49,8 @@ export async function GET() {
     const lastMonthEnd = format(endOfMonth(subMonths(now, 1)), 'yyyy-MM-dd');
 
     // 构建订单查询 - 根据角色过滤
-    const isAdmin = user.role === 'super_admin' || user.role === 'saas_admin';
-    const orderFilter = !isAdmin && user.id ? { created_by: user.id } : {};
+    const isAdmin = isSuperAdmin(user);
+    const orderFilter = !isAdmin && user.tenant_id ? { tenant_id: user.tenant_id } : {};
     const tenantFilter = !isAdmin && user.tenant_id ? { id: user.tenant_id } : {};
 
     const [

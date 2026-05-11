@@ -1,118 +1,90 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseClient } from '@/db/client';
-import { cookies } from 'next/headers';
 import { profileSchema } from '@/app/settings/schemas';
+import { authFailed, loadUserSettings, normalizeTenant, requireSettingsUser } from '../_utils';
 
-async function getAuthUser() {
-  const cookieStore = await cookies();
-  const token = cookieStore.get('erp_user');
-  if (!token) return null;
+export async function GET(request: NextRequest) {
   try {
-    return JSON.parse(token.value);
-  } catch {
-    return null;
-  }
-}
-
-// GET - 获取当前用户资料
-export async function GET() {
-  try {
-    const user = await getAuthUser();
-    if (!user) {
-      return NextResponse.json({ success: false, error: '未登录' }, { status: 401 });
-    }
+    const auth = await requireSettingsUser(request);
+    if (authFailed(auth)) return auth.response;
 
     const supabase = getSupabaseClient();
-
-    // 从 users 表获取基本信息
     const { data: userData, error: userError } = await supabase
       .from('users')
-      .select('id, phone, nickname, real_name, role, tenant_type, avatar_url, bio, created_at')
-      .eq('id', user.id)
-      .single();
+      .select('id, phone, real_name, role, tenant_id, is_active, department, created_at')
+      .eq('id', auth.user.id)
+      .maybeSingle();
 
     if (userError) {
-      console.error('获取用户资料失败:', userError);
-      return NextResponse.json({ success: false, error: '获取用户资料失败' }, { status: 500 });
+      return NextResponse.json({ success: false, error: '????????' }, { status: 500 });
     }
 
-    // 从 user_settings 获取偏好设置
-    const { data: settingsData } = await supabase
-      .from('user_settings')
-      .select('setting_key, setting_value')
-      .eq('user_id', user.id);
-
-    const preferences: Record<string, string> = {};
-    if (settingsData) {
-      settingsData.forEach((item: { setting_key: string; setting_value: string }) => {
-        preferences[item.setting_key] = item.setting_value;
-      });
+    let tenant = null;
+    if (userData?.tenant_id) {
+      const { data } = await supabase
+        .from('tenants')
+        .select('id, name, company_name, tenant_type, prefix, status, created_at, updated_at')
+        .eq('id', userData.tenant_id)
+        .maybeSingle();
+      tenant = data ? normalizeTenant(data) : null;
     }
+
+    const preferences = await loadUserSettings(auth.user.id).catch(() => ({}));
 
     return NextResponse.json({
       success: true,
       profile: {
-        id: userData.id,
-        phone: userData.phone,
-        nickname: userData.real_name || userData.nickname || '',
-        role: userData.role,
-        tenantType: userData.tenant_type || '',
-        avatarUrl: userData.avatar_url || '',
-        bio: userData.bio || '',
-        createdAt: userData.created_at,
+        id: userData?.id || auth.user.id,
+        phone: userData?.phone || auth.user.phone || '',
+        nickname: userData?.real_name || auth.user.nickname || auth.user.name || '',
+        realName: userData?.real_name || auth.user.name || '',
+        role: userData?.role || auth.user.role,
+        tenantId: userData?.tenant_id || auth.user.tenant_id || null,
+        tenantType: tenant?.tenant_type || auth.user.tenant_type || '',
+        tenantName: tenant?.company_name || '',
+        orderPrefix: tenant?.prefix || '',
+        avatarUrl: '',
+        bio: '',
+        department: userData?.department || auth.user.department || '',
+        status: userData?.is_active === false ? 'inactive' : 'active',
+        createdAt: userData?.created_at || null,
       },
+      tenant,
       preferences,
     });
   } catch (error) {
-    console.error('获取用户资料异常:', error);
-    return NextResponse.json({ success: false, error: '获取用户资料异常' }, { status: 500 });
+    console.error('get profile failed:', error);
+    return NextResponse.json({ success: false, error: '????????' }, { status: 500 });
   }
 }
 
-// PUT - 更新当前用户资料
 export async function PUT(request: NextRequest) {
   try {
-    const user = await getAuthUser();
-    if (!user) {
-      return NextResponse.json({ success: false, error: '未登录' }, { status: 401 });
-    }
+    const auth = await requireSettingsUser(request);
+    if (authFailed(auth)) return auth.response;
 
-    const body = await request.json();
-    const parsed = profileSchema.safeParse(body);
-
+    const parsed = profileSchema.safeParse(await request.json());
     if (!parsed.success) {
-      const firstIssue = parsed.error.issues[0];
       return NextResponse.json(
-        { success: false, error: firstIssue?.message || '表单验证失败' },
+        { success: false, error: parsed.error.issues[0]?.message || '??????' },
         { status: 400 }
       );
     }
 
-    const { nickname, bio, avatarUrl } = parsed.data;
     const supabase = getSupabaseClient();
-
-    // 更新 users 表（同时兼容 real_name 和 nickname）
-    const updateData: Record<string, unknown> = {
-      real_name: nickname,
-      nickname: nickname,
-      updated_at: new Date().toISOString(),
-    };
-    if (bio !== undefined) updateData.bio = bio;
-    if (avatarUrl !== undefined) updateData.avatar_url = avatarUrl;
-
-    const { error: updateError } = await supabase
+    const { nickname } = parsed.data;
+    const { error } = await supabase
       .from('users')
-      .update(updateData)
-      .eq('id', user.id);
+      .update({ real_name: nickname, updated_at: new Date().toISOString() })
+      .eq('id', auth.user.id);
 
-    if (updateError) {
-      console.error('更新用户资料失败:', updateError);
-      return NextResponse.json({ success: false, error: '更新用户资料失败' }, { status: 500 });
+    if (error) {
+      return NextResponse.json({ success: false, error: '????????' }, { status: 500 });
     }
 
-    return NextResponse.json({ success: true, message: '个人资料已更新' });
+    return NextResponse.json({ success: true, message: '???????' });
   } catch (error) {
-    console.error('更新用户资料异常:', error);
-    return NextResponse.json({ success: false, error: '更新用户资料异常' }, { status: 500 });
+    console.error('update profile failed:', error);
+    return NextResponse.json({ success: false, error: '????????' }, { status: 500 });
   }
 }

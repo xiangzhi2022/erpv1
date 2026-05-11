@@ -1,17 +1,7 @@
 import { NextResponse } from "next/server";
 import { getSupabaseClient } from "@/db/client";
-import { cookies } from "next/headers";
-
-async function getCurrentUser() {
-  const cookieStore = await cookies();
-  const userStr = cookieStore.get("erp_user")?.value;
-  if (!userStr) return null;
-  try {
-    return JSON.parse(userStr);
-  } catch {
-    return null;
-  }
-}
+import { getUserFromRequest } from "@/lib/auth";
+import { canAccessPath } from "@/lib/role-access";
 
 interface OrderItemInput {
   productName: string;
@@ -31,15 +21,14 @@ interface RequestBody {
 
 export async function POST(request: Request) {
   try {
-    const user = await getCurrentUser();
+    const user = await getUserFromRequest(request);
 
     if (!user) {
       return NextResponse.json({ success: false, error: "请先登录" }, { status: 401 });
     }
 
     // 权限检查：经销商管理员或系统管理员可创建订单
-    const allowedRoles = ["dealer_admin", "super_admin", "saas_admin"];
-    if (!allowedRoles.includes(user.role)) {
+    if (!canAccessPath(user, "/orders")) {
       return NextResponse.json({ success: false, error: "无权限创建订单" }, { status: 403 });
     }
 

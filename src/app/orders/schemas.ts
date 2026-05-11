@@ -65,6 +65,7 @@ export const orderFormSchema = z.object({
   order_no: z.string().min(1, '订单号不能为空'),
   customer_name: z.string().min(1, '客户名称不能为空'),
   customer_phone: z.string().optional(),
+  target_factory_id: z.string().min(1, '请选择工厂企业'),
   delivery_date: z.string(),
   remark: z.string(),
   items: z.array(orderItemSchema).min(1, '至少需要一个订单项'),
@@ -127,6 +128,19 @@ export interface Customer {
   tenant_id: string | null;
   created_at: string;
   updated_at: string | null;
+}
+
+export interface FactoryEnterprise {
+  id: string;
+  name: string | null;
+  company_name?: string | null;
+  contact_person: string | null;
+  contact_phone: string | null;
+  address: string | null;
+  status: string | null;
+  current_load?: number;
+  max_load?: number;
+  load_percentage?: number;
 }
 
 // Format amount from cents to yuan

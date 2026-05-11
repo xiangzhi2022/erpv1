@@ -1,23 +1,14 @@
 import { NextResponse } from 'next/server';
 import { getSupabaseClient } from '@/db/client';
-import { cookies } from 'next/headers';
+import { getUserFromRequest } from '@/lib/auth';
+import { isSuperAdmin } from '@/lib/role-access';
 
 type Row = Record<string, unknown>;
 type DashboardUser = {
   id?: string;
   role?: string;
+  tenant_id?: string;
 };
-
-async function getCurrentUser() {
-  const cookieStore = await cookies();
-  const userStr = cookieStore.get('erp_user')?.value;
-  if (!userStr) return null;
-  try {
-    return JSON.parse(userStr);
-  } catch {
-    return null;
-  }
-}
 
 async function safeRows<T extends Row>(
   label: string,
@@ -45,16 +36,16 @@ interface ActivityItem {
   operatorName?: string;
 }
 
-export async function GET() {
+export async function GET(request: Request) {
   try {
-    const user = (await getCurrentUser()) as DashboardUser | null;
+    const user = (await getUserFromRequest(request)) as DashboardUser | null;
     if (!user) {
       return NextResponse.json({ success: false, error: '请先登录' }, { status: 401 });
     }
 
     const supabase = getSupabaseClient();
-    const isAdmin = user.role === 'super_admin' || user.role === 'saas_admin';
-    const orderFilter = !isAdmin && user.id ? { created_by: user.id } : {};
+    const isAdmin = isSuperAdmin(user);
+    const orderFilter = !isAdmin && user.tenant_id ? { tenant_id: user.tenant_id } : {};
 
     // 并行获取各类最近活动
     const [recentOrders, recentTenants, recentCustomers, recentTasks, recentShippings] =
@@ -72,7 +63,7 @@ export async function GET() {
           'tenants',
           supabase
             .from('tenants')
-            .select('id, company_name, tenant_type, created_at')
+            .select('id, name, company_name, tenant_type, created_at')
             .order('created_at', { ascending: false })
             .limit(3)
         ),
@@ -138,7 +129,7 @@ export async function GET() {
         id: String(tenant.id),
         type: 'tenant',
         title: `${tenantTypeLabels[String(tenant.tenant_type)] || '租户'}注册`,
-        description: String(tenant.company_name || '未命名租户'),
+        description: String(tenant.company_name || tenant.name || '未命名租户'),
         timestamp: String(tenant.created_at || new Date().toISOString()),
       });
     }

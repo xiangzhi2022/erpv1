@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getSupabaseClient } from "@/db/client";
 import { getUserFromRequest } from "@/lib/auth";
+import { canAccessPath } from "@/lib/role-access";
 
 /** production_tasks.status 合法状态 */
 type TaskStatus = "pending" | "processing" | "completed";
@@ -24,7 +25,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ success: false, error: "请先登录" }, { status: 401 });
     }
 
-    if (user.role !== "factory_user") {
+    if (!canAccessPath(user, "/worker")) {
       return NextResponse.json({ success: false, error: "无权限访问" }, { status: 403 });
     }
 

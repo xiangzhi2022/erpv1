@@ -48,7 +48,7 @@ export async function GET(request: Request, { params }: RouteContext) {
       );
     }
 
-    if (!["factory_admin", "super_admin", "saas_admin", "dealer_admin"].includes(user.role)) {
+    if (!["factory_admin", "super_admin", "dealer_admin"].includes(user.role)) {
       return NextResponse.json(
         { success: false, error: "无权限访问" },
         { status: 403 }
@@ -115,7 +115,7 @@ export async function PUT(request: Request, { params }: RouteContext) {
       );
     }
 
-    if (!["factory_admin", "super_admin", "saas_admin"].includes(user.role)) {
+    if (!["factory_admin", "super_admin"].includes(user.role)) {
       return NextResponse.json(
         { success: false, error: "无权限操作" },
         { status: 403 }
@@ -271,8 +271,7 @@ export async function DELETE(request: Request, { params }: RouteContext) {
       );
     }
 
-    // 仅超级管理员和SaaS管理员可删除
-    if (!["super_admin", "saas_admin"].includes(user.role)) {
+    if (user.role !== "super_admin") {
       return NextResponse.json(
         { success: false, error: "仅管理员可删除车间" },
         { status: 403 }

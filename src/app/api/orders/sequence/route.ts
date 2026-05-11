@@ -1,5 +1,6 @@
 import { getSupabaseClient } from '@/db/client';
 import { getUserFromRequest } from '@/lib/auth';
+import { isSuperAdmin } from '@/lib/role-access';
 
 const getServiceClient = () => getSupabaseClient();
 
@@ -26,7 +27,7 @@ export async function GET(request: Request) {
 
     // Non-platform users are scoped by tenant_id.
     // are scoped by tenant_id instead of per-user ownership.
-    if (user.role !== 'super_admin' && user.role !== 'saas_admin') {
+    if (!isSuperAdmin(user)) {
       if (!user.tenant_id) {
         return Response.json({ success: false, error: '当前用户未关联租户' }, { status: 403 });
       }

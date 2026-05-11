@@ -1,29 +1,18 @@
 import { NextResponse } from "next/server";
 import { getSupabaseClient } from "@/db/client";
-import { cookies } from "next/headers";
-
-async function getCurrentUser() {
-  const cookieStore = await cookies();
-  const userStr = cookieStore.get("erp_user")?.value;
-  if (!userStr) return null;
-  try {
-    return JSON.parse(userStr);
-  } catch {
-    return null;
-  }
-}
+import { getUserFromRequest } from "@/lib/auth";
+import { canAccessPath, isSuperAdmin } from "@/lib/role-access";
 
 export async function GET(request: Request) {
   try {
-    const user = await getCurrentUser();
+    const user = await getUserFromRequest(request);
 
     if (!user) {
       return NextResponse.json({ success: false, error: "请先登录" }, { status: 401 });
     }
 
     // 权限检查：经销商管理员或系统管理员可访问
-    const allowedRoles = ["dealer_admin", "super_admin", "saas_admin"];
-    if (!allowedRoles.includes(user.role)) {
+    if (!canAccessPath(user, "/orders")) {
       return NextResponse.json({ success: false, error: "无权限访问" }, { status: 403 });
     }
 
@@ -36,7 +25,7 @@ export async function GET(request: Request) {
       .order("created_at", { ascending: false });
 
     // 权限过滤：经销商管理员只看自己租户的订单
-    if (user.role === "dealer_admin") {
+    if (!isSuperAdmin(user)) {
       if (!user.tenant_id) {
         return NextResponse.json(
           { success: false, error: "用户未关联经销商租户" },

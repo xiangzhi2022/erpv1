@@ -1,31 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createClient } from '@supabase/supabase-js';
-
-const supabaseUrl = process.env.COZE_SUPABASE_URL!;
-const supabaseServiceKey = process.env.COZE_SUPABASE_SERVICE_ROLE_KEY!;
-
-function getSupabaseAdmin() {
-  return createClient(supabaseUrl, supabaseServiceKey, {
-    auth: { persistSession: false },
-  });
-}
-
-async function getAuthUser() {
-  const { cookies } = await import('next/headers');
-  const cookieStore = await cookies();
-  const token = cookieStore.get('erp_user');
-  if (!token) return null;
-  try {
-    return JSON.parse(token.value);
-  } catch {
-    return null;
-  }
-}
+import { getSupabaseClient } from '@/db/client';
+import { getUserFromRequest } from '@/lib/auth';
+import { isSuperAdmin } from '@/lib/role-access';
 
 // GET - 获取供应商列表（支持搜索、分类筛选、评级筛选、分页）
 export async function GET(request: NextRequest) {
   try {
-    const user = await getAuthUser();
+    const user = await getUserFromRequest(request);
     if (!user) {
       return NextResponse.json({ success: false, error: '未登录' }, { status: 401 });
     }
@@ -38,7 +19,7 @@ export async function GET(request: NextRequest) {
     const page = Math.max(1, parseInt(searchParams.get('page') || '1', 10));
     const pageSize = Math.min(100, Math.max(1, parseInt(searchParams.get('pageSize') || '50', 10)));
 
-    const supabase = getSupabaseAdmin();
+    const supabase = getSupabaseClient();
 
     // 计算分页偏移
     const from = (page - 1) * pageSize;
@@ -72,6 +53,12 @@ export async function GET(request: NextRequest) {
     // 按状态筛选
     if (status) {
       query = query.eq('status', status);
+    }
+    if (!isSuperAdmin(user)) {
+      if (!user.tenant_id) {
+        return NextResponse.json({ success: false, error: '当前用户未关联企业' }, { status: 403 });
+      }
+      query = query.eq('tenant_id', user.tenant_id);
     }
 
     const { data: suppliers, error, count } = await query;

@@ -1,24 +1,15 @@
 import { NextResponse } from 'next/server';
 import { getSupabaseClient } from '@/db/client';
-import { cookies } from 'next/headers';
+import { getUserFromRequest } from '@/lib/auth';
+import { isSuperAdmin } from '@/lib/role-access';
 import { format, subMonths, startOfMonth, endOfMonth } from 'date-fns';
 
 type Row = Record<string, unknown>;
 type DashboardUser = {
   id?: string;
   role?: string;
+  tenant_id?: string;
 };
-
-async function getCurrentUser() {
-  const cookieStore = await cookies();
-  const userStr = cookieStore.get('erp_user')?.value;
-  if (!userStr) return null;
-  try {
-    return JSON.parse(userStr);
-  } catch {
-    return null;
-  }
-}
 
 async function safeRows<T extends Row>(
   label: string,
@@ -59,17 +50,17 @@ const statusColorMap: Record<string, string> = {
   cancelled: 'hsl(215 14% 34%)',
 };
 
-export async function GET() {
+export async function GET(request: Request) {
   try {
-    const user = (await getCurrentUser()) as DashboardUser | null;
+    const user = (await getUserFromRequest(request)) as DashboardUser | null;
     if (!user) {
       return NextResponse.json({ success: false, error: '请先登录' }, { status: 401 });
     }
 
     const supabase = getSupabaseClient();
     const now = new Date();
-    const isAdmin = user.role === 'super_admin' || user.role === 'saas_admin';
-    const orderFilter = !isAdmin && user.id ? { created_by: user.id } : {};
+    const isAdmin = isSuperAdmin(user);
+    const orderFilter = !isAdmin && user.tenant_id ? { tenant_id: user.tenant_id } : {};
 
     // 获取过去6个月的数据
     const queries = [];

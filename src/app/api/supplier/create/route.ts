@@ -1,30 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createClient } from '@supabase/supabase-js';
-
-const supabaseUrl = process.env.COZE_SUPABASE_URL!;
-const supabaseServiceKey = process.env.COZE_SUPABASE_SERVICE_ROLE_KEY!;
-
-function getSupabaseAdmin() {
-  return createClient(supabaseUrl, supabaseServiceKey, {
-    auth: { persistSession: false },
-  });
-}
-
-async function getAuthUser() {
-  const { cookies } = await import('next/headers');
-  const cookieStore = await cookies();
-  const token = cookieStore.get('erp_user');
-  if (!token) return null;
-  try {
-    return JSON.parse(token.value);
-  } catch {
-    return null;
-  }
-}
+import { getSupabaseClient } from '@/db/client';
+import { getUserFromRequest } from '@/lib/auth';
 
 // 生成供应商编号: SUP-YYYYMMDD-NNN
 async function generateSupplierCode(): Promise<string> {
-  const supabase = getSupabaseAdmin();
+  const supabase = getSupabaseClient();
   const today = new Date();
   const dateStr =
     today.getFullYear().toString() +
@@ -63,7 +43,7 @@ const VALID_CATEGORIES = ['原材料', '包装耗材', '外协加工', '办公�
 // POST - 创建供应商
 export async function POST(request: NextRequest) {
   try {
-    const user = await getAuthUser();
+    const user = await getUserFromRequest(request);
     if (!user) {
       return NextResponse.json({ success: false, error: '未登录' }, { status: 401 });
     }
@@ -87,7 +67,7 @@ export async function POST(request: NextRequest) {
     // 校验 status 值
     const safeStatus = status && VALID_STATUSES.includes(status) ? status : 'active';
 
-    const supabase = getSupabaseAdmin();
+    const supabase = getSupabaseClient();
 
     // 检查名称是否重复
     const { data: existing } = await supabase
@@ -117,6 +97,7 @@ export async function POST(request: NextRequest) {
         address: toNullIfEmpty(address),
         remark: toNullIfEmpty(remark),
         created_by: user.id || null,
+        tenant_id: user.tenant_id || null,
       })
       .select()
       .single();

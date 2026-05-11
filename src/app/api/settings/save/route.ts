@@ -1,81 +1,40 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseClient } from '@/db/client';
-import { cookies } from 'next/headers';
-
-async function getAuthUser() {
-  const cookieStore = await cookies();
-  const token = cookieStore.get('erp_user');
-  if (!token) return null;
-  try {
-    return JSON.parse(token.value);
-  } catch {
-    return null;
-  }
-}
+import { authFailed, requireSettingsUser, stringifySettingValue } from '../_utils';
 
 export async function POST(request: NextRequest) {
   try {
-    const user = await getAuthUser();
-    if (!user) {
-      return NextResponse.json(
-        { success: false, error: '请先登录' },
-        { status: 401 }
-      );
-    }
+    const auth = await requireSettingsUser(request);
+    if (authFailed(auth)) return auth.response;
 
     const { prefix, companyName, phone, address } = await request.json();
+    if (!prefix) return NextResponse.json({ success: false, error: '??????' }, { status: 400 });
 
-    if (!prefix) {
-      return NextResponse.json(
-        { success: false, error: '前缀不能为空' },
-        { status: 400 }
-      );
-    }
-
-    const supabase = getSupabaseClient();
-
-    // 保存设置到 user_settings（使用 upsert）
     const settings = [
-      { key: 'order_prefix', value: prefix || '' },
-      { key: 'company_name', value: companyName || '' },
-      { key: 'company_phone', value: phone || '' },
-      { key: 'company_address', value: address || '' },
+      ['order_prefix', prefix],
+      ['company_name', companyName || ''],
+      ['company_phone', phone || ''],
+      ['company_address', address || ''],
     ];
 
-    for (const setting of settings) {
-      // 只保存有值的设置项
-      if (!setting.value) continue;
+    const supabase = getSupabaseClient();
+    const rows = settings
+      .filter(([, value]) => value)
+      .map(([key, value]) => ({
+        user_id: auth.user.id,
+        setting_key: key,
+        setting_value: stringifySettingValue(value),
+        updated_at: new Date().toISOString(),
+      }));
 
-      const { error } = await supabase
-        .from('user_settings')
-        .upsert(
-          {
-            user_id: user.id,
-            setting_key: setting.key,
-            setting_value: setting.value,
-            updated_at: new Date().toISOString(),
-          },
-          { onConflict: 'user_id,setting_key' }
-        );
-
-      if (error) {
-        console.error('保存设置失败:', error);
-        return NextResponse.json(
-          { success: false, error: '保存设置失败' },
-          { status: 500 }
-        );
-      }
+    if (rows.length > 0) {
+      const { error } = await supabase.from('user_settings').upsert(rows, { onConflict: 'user_id,setting_key' });
+      if (error) return NextResponse.json({ success: false, error: '??????' }, { status: 500 });
     }
 
-    return NextResponse.json({
-      success: true,
-      message: '设置保存成功',
-    });
+    return NextResponse.json({ success: true, message: '??????' });
   } catch (error) {
-    console.error('保存设置失败:', error);
-    return NextResponse.json(
-      { success: false, error: '保存设置失败' },
-      { status: 500 }
-    );
+    console.error('save settings failed:', error);
+    return NextResponse.json({ success: false, error: '??????' }, { status: 500 });
   }
 }

@@ -1,25 +1,19 @@
 ﻿import { NextResponse } from 'next/server';
 import { getSupabaseClient } from '@/db/client';
 import { getUserFromRequest } from '@/lib/auth';
-
-interface FactoryConfigRow {
-  current_load: number | null;
-  max_load: number | null;
-  is_accepting: boolean | null;
-  avg_completion_days: number | null;
-}
+import { canAccessPath } from '@/lib/role-access';
 
 interface TenantRow {
   id: string;
   name: string | null;
-  type: string | null;
+  company_name: string | null;
+  tenant_type: string | null;
   contact_person: string | null;
   contact_phone: string | null;
   address: string | null;
   status: string | null;
   created_at?: string | null;
   updated_at?: string | null;
-  factory_config?: FactoryConfigRow[] | null;
 }
 
 interface FactoryLoad {
@@ -35,22 +29,26 @@ export async function GET(request: Request) {
       return NextResponse.json({ success: false, error: '请先登录' }, { status: 401 });
     }
 
-    const allowedRoles = ['dealer_admin', 'factory_admin', 'super_admin', 'saas_admin'];
-    if (!allowedRoles.includes(user.role)) {
+    if (!canAccessPath(user, '/orders') && !canAccessPath(user, '/orders/exchanges')) {
       return NextResponse.json({ success: false, error: '无权限访问' }, { status: 403 });
     }
 
     const supabase = getSupabaseClient();
+    const { searchParams } = new URL(request.url);
+    const search = searchParams.get('search')?.trim();
 
-    const { data: factories, error } = await supabase
+    let query = supabase
       .from('tenants')
-      .select(`
-        id, name, type, contact_person, contact_phone, address, status, created_at, updated_at,
-        factory_config:factory_config(current_load, max_load, is_accepting, avg_completion_days)
-      `)
-      .eq('type', 'factory')
+      .select('id, name, company_name, tenant_type, contact_person, contact_phone, address, status, created_at, updated_at')
+      .eq('tenant_type', 'manufacturer')
       .eq('status', 'active')
       .order('created_at', { ascending: false });
+
+    if (search) {
+      query = query.or(`name.ilike.%${search}%,company_name.ilike.%${search}%,contact_phone.ilike.%${search}%`);
+    }
+
+    const { data: factories, error } = await query;
 
     if (error) {
       console.error('获取工厂列表失败:', error);
@@ -85,16 +83,16 @@ export async function GET(request: Request) {
 
     const factoryList = factoryRows
       .map((factory) => {
-        const config = factory.factory_config?.[0] ?? null;
         const orderLoad = factoryLoadMap.get(factory.id) || { total_orders: 0, producing_orders: 0 };
-        const currentLoad = config?.current_load ?? orderLoad.producing_orders;
-        const maxLoad = config?.max_load ?? 100;
+        const currentLoad = orderLoad.producing_orders;
+        const maxLoad = 100;
         const loadPercentage = maxLoad > 0 ? Math.round((currentLoad / maxLoad) * 100) : 0;
 
         return {
           id: factory.id,
           name: factory.name,
-          type: factory.type,
+          company_name: factory.company_name,
+          type: factory.tenant_type,
           code: null,
           order_prefix: null,
           contact_person: factory.contact_person,
@@ -105,8 +103,8 @@ export async function GET(request: Request) {
           updated_at: factory.updated_at || null,
           current_load: currentLoad,
           max_load: maxLoad,
-          is_accepting: config?.is_accepting ?? true,
-          avg_completion_days: config?.avg_completion_days ?? 15,
+          is_accepting: true,
+          avg_completion_days: 15,
           load_percentage: loadPercentage,
           total_orders: orderLoad.total_orders,
           producing_orders: orderLoad.producing_orders,

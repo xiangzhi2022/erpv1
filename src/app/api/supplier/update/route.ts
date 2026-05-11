@@ -1,26 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createClient } from '@supabase/supabase-js';
-
-const supabaseUrl = process.env.COZE_SUPABASE_URL!;
-const supabaseServiceKey = process.env.COZE_SUPABASE_SERVICE_ROLE_KEY!;
-
-function getSupabaseAdmin() {
-  return createClient(supabaseUrl, supabaseServiceKey, {
-    auth: { persistSession: false },
-  });
-}
-
-async function getAuthUser() {
-  const { cookies } = await import('next/headers');
-  const cookieStore = await cookies();
-  const token = cookieStore.get('erp_user');
-  if (!token) return null;
-  try {
-    return JSON.parse(token.value);
-  } catch {
-    return null;
-  }
-}
+import { getSupabaseClient } from '@/db/client';
+import { getUserFromRequest } from '@/lib/auth';
+import { isSuperAdmin } from '@/lib/role-access';
 
 const VALID_STATUSES = ['active', 'inspecting', 'blacklisted'] as const;
 const VALID_RATINGS = ['A', 'B', 'C', 'D'] as const;
@@ -35,7 +16,7 @@ function toNullIfEmpty(value: string | undefined | null): string | null {
 // PATCH - 更新供应商信息（支持全量编辑和快捷状态切换）
 export async function PATCH(request: NextRequest) {
   try {
-    const user = await getAuthUser();
+    const user = await getUserFromRequest(request);
     if (!user) {
       return NextResponse.json({ success: false, error: '未登录' }, { status: 401 });
     }
@@ -47,17 +28,20 @@ export async function PATCH(request: NextRequest) {
       return NextResponse.json({ success: false, error: '缺少供应商ID' }, { status: 400 });
     }
 
-    const supabase = getSupabaseAdmin();
+    const supabase = getSupabaseClient();
 
     // 先验证供应商存在
     const { data: existing, error: fetchError } = await supabase
       .from('suppliers')
-      .select('id, name')
+      .select('id, name, tenant_id')
       .eq('id', id)
       .single();
 
     if (fetchError || !existing) {
       return NextResponse.json({ success: false, error: '供应商不存在' }, { status: 404 });
+    }
+    if (!isSuperAdmin(user) && (!user.tenant_id || existing.tenant_id !== user.tenant_id)) {
+      return NextResponse.json({ success: false, error: '无权限更新该供应商' }, { status: 403 });
     }
 
     // 如果更新名称，检查是否重复

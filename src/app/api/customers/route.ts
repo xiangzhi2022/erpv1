@@ -2,7 +2,7 @@
 import { getSupabaseClient } from '@/db/client';
 import { getUserFromRequest } from '@/lib/auth';
 
-const PLATFORM_ROLES = new Set(['super_admin', 'saas_admin']);
+const PLATFORM_ROLES = new Set(['super_admin']);
 
 // GET /api/customers - Fetch customers for order form selection
 export async function GET(request: Request) {

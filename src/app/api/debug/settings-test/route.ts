@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseClient } from '@/db/client';
+import { getUserFromRequest } from '@/lib/auth';
 import { requireDevEnv, safeErrorMessage } from '../_lib/env-guard';
 
 /**
@@ -13,16 +14,13 @@ export async function POST(request: NextRequest) {
   try {
     const supabase = getSupabaseClient();
 
-    // Verify the user is authenticated
-    const userCookie = request.cookies.get('erp_user');
-    if (!userCookie) {
+    const user = await getUserFromRequest(request);
+    if (!user) {
       return NextResponse.json(
         { success: false, error: '请先登录' },
         { status: 401 },
       );
     }
-
-    const user = JSON.parse(userCookie.value);
 
     // 1. Check user_settings table exists (read-only connectivity check)
     const { error: tablesError } = await supabase

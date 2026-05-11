@@ -1,5 +1,6 @@
 import { getSupabaseClient } from '@/db/client';
 import { getUserFromRequest, type AuthUser } from '@/lib/auth';
+import { isSuperAdmin } from '@/lib/role-access';
 import { ORDER_STATUSES, STATUS_TRANSITIONS, type OrderStatus } from '@/app/orders/schemas';
 
 const getServiceClient = () => getSupabaseClient();
@@ -15,7 +16,7 @@ const PATCHABLE_ORDER_FIELDS = new Set([
 ]);
 
 function canAccessAllTenants(user: AuthUser): boolean {
-  return user.role === 'super_admin' || user.role === 'saas_admin';
+  return isSuperAdmin(user);
 }
 
 // GET /api/orders/[id] - Get single order with items

@@ -1,11 +1,12 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
+import { Checkbox } from '@/components/ui/checkbox';
 import {
   Dialog,
   DialogContent,
@@ -14,36 +15,104 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-import { Loader2, Plus, Pencil, Trash2 } from 'lucide-react';
+import { Loader2, Pencil, Plus, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
 
 interface UserItem {
   id: string;
   phone: string;
-  real_name: string;
+  real_name: string | null;
   role: string;
-  department: string;
+  department: string | null;
   status: string;
-  tenant_type?: string;
+  tenant_id?: string | null;
+  tenant_name?: string;
   is_active?: boolean;
+  permissions?: string[];
+  permission_labels?: string[];
 }
 
-interface RoleOption {
+interface AccountRoleOption {
   value: string;
   label: string;
-  dept: string;
+  department: string;
+  description: string;
 }
 
-const TENANT_TYPES = [
-  { value: 'official', label: '官方管理' },
-  { value: 'manufacturer', label: '生产商' },
-  { value: 'dealer', label: '经销商' },
-  { value: 'material_supplier', label: '材料商' },
+interface PermissionOption {
+  value: string;
+  label: string;
+  businessType: string;
+  department: string;
+  description: string;
+}
+
+interface TenantOption {
+  id: string;
+  company_name?: string;
+  name?: string;
+  tenant_type?: string;
+}
+
+const STATUS_OPTIONS = [
+  { value: 'active', label: '启用' },
+  { value: 'inactive', label: '禁用' },
 ];
+
+function PermissionChecklist({
+  options,
+  value,
+  onChange,
+}: {
+  options: PermissionOption[];
+  value: string[];
+  onChange: (next: string[]) => void;
+}) {
+  const grouped = useMemo(() => {
+    return options.reduce<Record<string, PermissionOption[]>>((groups, option) => {
+      const key = option.businessType;
+      groups[key] = groups[key] || [];
+      groups[key].push(option);
+      return groups;
+    }, {});
+  }, [options]);
+
+  const toggle = (permission: string, checked: boolean) => {
+    if (checked) onChange(Array.from(new Set([...value, permission])));
+    else onChange(value.filter((item) => item !== permission));
+  };
+
+  if (options.length === 0) {
+    return <div className="rounded-lg border bg-muted/40 p-3 text-sm text-muted-foreground">当前账号没有可分配的员工权限。</div>;
+  }
+
+  return (
+    <div className="space-y-3 rounded-lg border p-3">
+      {Object.entries(grouped).map(([group, items]) => (
+        <div key={group} className="space-y-2">
+          <div className="text-xs font-medium text-muted-foreground">{group}</div>
+          <div className="grid gap-2 sm:grid-cols-2">
+            {items.map((option) => (
+              <label key={option.value} className="flex cursor-pointer items-start gap-2 rounded-md border p-2 text-sm hover:bg-muted/50">
+                <Checkbox checked={value.includes(option.value)} onCheckedChange={(checked) => toggle(option.value, checked === true)} />
+                <span className="min-w-0">
+                  <span className="block font-medium">{option.label}</span>
+                  <span className="block truncate text-xs text-muted-foreground">{option.department}</span>
+                </span>
+              </label>
+            ))}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
 
 export function UsersForm() {
   const [users, setUsers] = useState<UserItem[]>([]);
-  const [roles, setRoles] = useState<RoleOption[]>([]);
+  const [accountRoles, setAccountRoles] = useState<AccountRoleOption[]>([]);
+  const [permissions, setPermissions] = useState<PermissionOption[]>([]);
+  const [tenants, setTenants] = useState<TenantOption[]>([]);
   const [isLoadingUsers, setIsLoadingUsers] = useState(false);
   const [addUserOpen, setAddUserOpen] = useState(false);
   const [editUserOpen, setEditUserOpen] = useState(false);
@@ -51,57 +120,38 @@ export function UsersForm() {
   const [isUpdating, setIsUpdating] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
 
-  // 当前用户
-  const [currentUser, setCurrentUser] = useState<{ phone: string; nickname: string; role: string; tenant_type?: string } | null>(null);
-
-  // 添加用户表单
   const [newUserPhone, setNewUserPhone] = useState('');
   const [newUserName, setNewUserName] = useState('');
   const [newUserPassword, setNewUserPassword] = useState('');
-  const [newUserRole, setNewUserRole] = useState('订单管理');
-  const [newUserDept, setNewUserDept] = useState('技术/计划');
-  const [newUserTenantType, setNewUserTenantType] = useState('');
+  const [newUserRole, setNewUserRole] = useState('employee');
+  const [newUserTenantId, setNewUserTenantId] = useState('');
+  const [newUserPermissions, setNewUserPermissions] = useState<string[]>([]);
 
-  // 编辑用户
   const [editingUser, setEditingUser] = useState<UserItem | null>(null);
-  const [editForm, setEditForm] = useState({ name: '', role: '', status: '', department: '' });
+  const [editForm, setEditForm] = useState({ name: '', role: 'employee', status: 'active', department: '', tenant_id: '', permissions: [] as string[] });
 
-  // 加载当前用户
-  useEffect(() => {
-    const cookies = document.cookie.split(';').reduce((acc, cookie) => {
-      const [key, value] = cookie.trim().split('=');
-      acc[key] = decodeURIComponent(value || '');
-      return acc;
-    }, {} as Record<string, string>);
-
-    if (cookies['erp_user']) {
-      try {
-        setCurrentUser(JSON.parse(cookies['erp_user']));
-      } catch {
-        // ignore
+  const loadRoles = useCallback(async () => {
+    try {
+      const response = await fetch('/api/settings/roles');
+      const data = await response.json();
+      if (data.success) {
+        setAccountRoles(data.accountRoles || []);
+        setPermissions(data.permissions || []);
       }
+    } catch {
+      toast.error('加载角色权限失败');
     }
   }, []);
 
-  // 加载角色列表
-  useEffect(() => {
-    const loadRoles = async () => {
-      try {
-        const response = await fetch('/api/settings/roles');
-        const data = await response.json();
-        if (data.success && data.roles) {
-          const options = data.roles.map((r: { id: number; role_name: string; dept: string }) => ({
-            value: r.role_name,
-            label: r.role_name,
-            dept: r.dept || '',
-          }));
-          setRoles(options);
-        }
-      } catch (error) {
-        console.error('加载角色列表失败:', error);
-      }
-    };
-    loadRoles();
+  const loadTenants = useCallback(async () => {
+    try {
+      const response = await fetch('/api/settings/tenants');
+      if (!response.ok) return;
+      const data = await response.json();
+      if (data.success) setTenants(data.tenants || []);
+    } catch {
+      // Non-super admins cannot load tenant list. That is expected.
+    }
   }, []);
 
   const fetchUsers = useCallback(async () => {
@@ -109,11 +159,9 @@ export function UsersForm() {
     try {
       const response = await fetch('/api/settings/users');
       const data = await response.json();
-      if (data.success) {
-        setUsers(data.users);
-      }
-    } catch (error) {
-      console.error('获取用户列表失败:', error);
+      if (data.success) setUsers(data.users || []);
+      else toast.error(data.error || '获取用户列表失败');
+    } catch {
       toast.error('获取用户列表失败');
     } finally {
       setIsLoadingUsers(false);
@@ -121,10 +169,23 @@ export function UsersForm() {
   }, []);
 
   useEffect(() => {
+    loadRoles();
+    loadTenants();
     fetchUsers();
-  }, [fetchUsers]);
+  }, [fetchUsers, loadRoles, loadTenants]);
 
-  // 添加用户
+  const roleLabel = (role: string) => accountRoles.find((item) => item.value === role)?.label || role;
+  const canChooseTenant = tenants.length > 0;
+
+  const resetAddForm = () => {
+    setNewUserPhone('');
+    setNewUserName('');
+    setNewUserPassword('');
+    setNewUserRole('employee');
+    setNewUserTenantId('');
+    setNewUserPermissions([]);
+  };
+
   const handleAddUser = async () => {
     if (!newUserPhone || !newUserPassword) return;
     setIsAddingUser(true);
@@ -137,16 +198,14 @@ export function UsersForm() {
           password: newUserPassword,
           real_name: newUserName || newUserPhone,
           role: newUserRole,
-          department: newUserDept,
+          tenant_id: newUserTenantId || undefined,
+          permissions: newUserRole === 'employee' ? newUserPermissions : [],
         }),
       });
       const data = await response.json();
       if (data.success) {
         setAddUserOpen(false);
-        setNewUserPhone('');
-        setNewUserName('');
-        setNewUserPassword('');
-        setNewUserRole('订单管理');
+        resetAddForm();
         fetchUsers();
         toast.success('用户添加成功');
       } else {
@@ -159,14 +218,15 @@ export function UsersForm() {
     }
   };
 
-  // 编辑用户
   const handleEditUser = (user: UserItem) => {
     setEditingUser(user);
     setEditForm({
       name: user.real_name || '',
-      role: user.role,
-      status: user.is_active ? 'active' : 'inactive',
+      role: user.role || 'employee',
+      status: user.status || (user.is_active ? 'active' : 'inactive'),
       department: user.department || '',
+      tenant_id: user.tenant_id || '',
+      permissions: user.permissions || [],
     });
     setEditUserOpen(true);
   };
@@ -178,7 +238,14 @@ export function UsersForm() {
       const response = await fetch(`/api/settings/users?id=${editingUser.id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(editForm),
+        body: JSON.stringify({
+          real_name: editForm.name,
+          role: editForm.role,
+          status: editForm.status,
+          department: editForm.department,
+          tenant_id: editForm.tenant_id || undefined,
+          permissions: editForm.role === 'employee' ? editForm.permissions : [],
+        }),
       });
       const data = await response.json();
       if (data.success) {
@@ -196,9 +263,8 @@ export function UsersForm() {
     }
   };
 
-  // 切换用户状态
   const handleToggleStatus = (user: UserItem) => {
-    const newStatus = user.is_active ? 'inactive' : 'active';
+    const newStatus = user.status === 'active' || user.is_active ? 'inactive' : 'active';
     fetch(`/api/settings/users?id=${user.id}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
@@ -213,23 +279,16 @@ export function UsersForm() {
           toast.error(data.error || '状态更新失败');
         }
       })
-      .catch(() => {
-        toast.error('状态更新失败');
-      });
+      .catch(() => toast.error('状态更新失败'));
   };
 
-  // 删除用户
   const handleDeleteUser = async () => {
     if (!editingUser) return;
-    const confirmed = window.confirm(`确定要删除用户 "${editingUser.real_name || editingUser.phone}" 吗？此操作不可恢复。`);
-    if (!confirmed) return;
+    if (!window.confirm(`确定要删除用户 "${editingUser.real_name || editingUser.phone}" 吗？此操作不可恢复。`)) return;
 
     setIsDeleting(true);
     try {
-      const response = await fetch(`/api/settings/users?id=${editingUser.id}`, {
-        method: 'DELETE',
-        headers: { 'Content-Type': 'application/json' },
-      });
+      const response = await fetch(`/api/settings/users?id=${editingUser.id}`, { method: 'DELETE' });
       const data = await response.json();
       if (data.success) {
         setEditUserOpen(false);
@@ -246,16 +305,18 @@ export function UsersForm() {
     }
   };
 
+  const roleOptions = accountRoles.length > 0 ? accountRoles : [{ value: 'employee', label: '员工', department: '员工', description: '员工账号' }];
+
   return (
     <Card>
       <CardHeader>
         <div className="flex items-center justify-between">
           <div>
             <CardTitle>用户管理</CardTitle>
-            <CardDescription>管理系统用户账号</CardDescription>
+            <CardDescription>管理账号层级和员工多岗位权限</CardDescription>
           </div>
           <Button onClick={() => setAddUserOpen(true)}>
-            <Plus className="h-4 w-4 mr-1" />
+            <Plus className="mr-1 h-4 w-4" />
             添加用户
           </Button>
         </div>
@@ -270,46 +331,47 @@ export function UsersForm() {
             <table className="w-full">
               <thead>
                 <tr className="border-b">
-                  <th className="text-left py-3 px-4 font-medium">用户名</th>
-                  <th className="text-left py-3 px-4 font-medium">姓名</th>
-                  <th className="text-left py-3 px-4 font-medium">部门</th>
-                  <th className="text-left py-3 px-4 font-medium">角色</th>
-                  <th className="text-left py-3 px-4 font-medium">状态</th>
-                  <th className="text-left py-3 px-4 font-medium">操作</th>
+                  <th className="px-4 py-3 text-left font-medium">账号</th>
+                  <th className="px-4 py-3 text-left font-medium">姓名</th>
+                  <th className="px-4 py-3 text-left font-medium">角色</th>
+                  <th className="px-4 py-3 text-left font-medium">员工权限</th>
+                  <th className="px-4 py-3 text-left font-medium">企业</th>
+                  <th className="px-4 py-3 text-left font-medium">状态</th>
+                  <th className="px-4 py-3 text-left font-medium">操作</th>
                 </tr>
               </thead>
               <tbody>
                 {users.length === 0 ? (
                   <tr>
-                    <td colSpan={6} className="py-8 text-center text-muted-foreground">暂无用户数据</td>
+                    <td colSpan={7} className="py-8 text-center text-muted-foreground">暂无用户数据</td>
                   </tr>
                 ) : (
                   users.map((user) => (
-                    <tr key={user.id} className="border-b">
-                      <td className="py-3 px-4">{user.phone}</td>
-                      <td className="py-3 px-4">{user.real_name || '-'}</td>
-                      <td className="py-3 px-4">
-                        {(() => {
-                          const role = roles.find((r) => r.value === user.role);
-                          return role ? (
-                            <Badge variant="secondary" className="text-xs">{role.dept}</Badge>
+                    <tr key={user.id} className="border-b align-top">
+                      <td className="px-4 py-3">{user.phone}</td>
+                      <td className="px-4 py-3">{user.real_name || '-'}</td>
+                      <td className="px-4 py-3">{roleLabel(user.role)}</td>
+                      <td className="px-4 py-3">
+                        <div className="flex max-w-[320px] flex-wrap gap-1">
+                          {(user.permission_labels || []).length > 0 ? (
+                            user.permission_labels?.map((label) => <Badge key={label} variant="secondary">{label}</Badge>)
                           ) : (
                             <span className="text-muted-foreground">-</span>
-                          );
-                        })()}
+                          )}
+                        </div>
                       </td>
-                      <td className="py-3 px-4">{user.role}</td>
-                      <td className="py-3 px-4">
+                      <td className="px-4 py-3">{user.tenant_name || '-'}</td>
+                      <td className="px-4 py-3">
                         <button
                           onClick={() => handleToggleStatus(user)}
-                          className={`px-2 py-1 rounded-full text-xs font-medium cursor-pointer transition-colors ${user.is_active ? 'bg-green-100 text-green-700 hover:bg-green-200 dark:bg-green-900/30 dark:text-green-400' : 'bg-gray-200 text-gray-600 hover:bg-gray-300 dark:bg-gray-700 dark:text-gray-400'}`}
+                          className={`rounded-full px-2 py-1 text-xs font-medium transition-colors ${user.status === 'active' || user.is_active ? 'bg-green-100 text-green-700 hover:bg-green-200' : 'bg-gray-200 text-gray-600 hover:bg-gray-300'}`}
                         >
-                          {user.is_active ? '启用' : '禁用'}
+                          {user.status === 'active' || user.is_active ? '启用' : '禁用'}
                         </button>
                       </td>
-                      <td className="py-3 px-4">
+                      <td className="px-4 py-3">
                         <Button variant="outline" size="sm" onClick={() => handleEditUser(user)}>
-                          <Pencil className="h-3 w-3 mr-1" />
+                          <Pencil className="mr-1 h-3 w-3" />
                           编辑
                         </Button>
                       </td>
@@ -322,75 +384,46 @@ export function UsersForm() {
         )}
       </CardContent>
 
-      {/* 添加用户弹窗 */}
       <Dialog open={addUserOpen} onOpenChange={setAddUserOpen}>
-        <DialogContent>
+        <DialogContent className="max-w-2xl">
           <DialogHeader>
             <DialogTitle>添加新用户</DialogTitle>
-            <DialogDescription>填写用户信息创建新账号</DialogDescription>
+            <DialogDescription>二级管理员只能创建本企业员工，超级管理员可创建二级管理员或员工。</DialogDescription>
           </DialogHeader>
-          <div className="space-y-4">
-            {currentUser?.role === 'super_admin' && (
-              <div className="space-y-2">
-                <Label>租户类型</Label>
-                <select
-                  className="w-full h-10 px-3 rounded-md border border-input bg-background text-sm"
-                  value={newUserTenantType}
-                  onChange={(e) => setNewUserTenantType(e.target.value)}
-                >
-                  {TENANT_TYPES.map((t) => (
-                    <option key={t.value} value={t.value}>{t.label}</option>
-                  ))}
-                </select>
-              </div>
-            )}
+          <div className="grid gap-4 md:grid-cols-2">
             <div className="space-y-2">
               <Label>手机号</Label>
-              <Input
-                placeholder="请输入手机号"
-                value={newUserPhone}
-                onChange={(e) => setNewUserPhone(e.target.value)}
-              />
+              <Input placeholder="请输入手机号" value={newUserPhone} onChange={(event) => setNewUserPhone(event.target.value)} />
             </div>
             <div className="space-y-2">
               <Label>姓名</Label>
-              <Input
-                placeholder="请输入姓名（选填）"
-                value={newUserName}
-                onChange={(e) => setNewUserName(e.target.value)}
-              />
+              <Input placeholder="请输入姓名（选填）" value={newUserName} onChange={(event) => setNewUserName(event.target.value)} />
             </div>
             <div className="space-y-2">
               <Label>密码</Label>
-              <Input
-                type="password"
-                placeholder="请输入密码"
-                value={newUserPassword}
-                onChange={(e) => setNewUserPassword(e.target.value)}
-              />
+              <Input type="password" placeholder="请输入密码" value={newUserPassword} onChange={(event) => setNewUserPassword(event.target.value)} />
             </div>
             <div className="space-y-2">
-              <Label>角色</Label>
-              <select
-                className="w-full h-10 px-3 rounded-md border border-input bg-background text-sm"
-                value={newUserRole}
-                onChange={(e) => {
-                  setNewUserRole(e.target.value);
-                  const role = roles.find((r) => r.value === e.target.value);
-                  if (role) setNewUserDept(role.dept);
-                }}
-              >
-                {roles.map((role) => (
-                  <option key={role.value} value={role.value}>
-                    {role.label} [{role.dept}]
-                  </option>
-                ))}
+              <Label>账号角色</Label>
+              <select className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm" value={newUserRole} onChange={(event) => setNewUserRole(event.target.value)}>
+                {roleOptions.map((role) => <option key={role.value} value={role.value}>{role.label}</option>)}
               </select>
             </div>
-            <div className="space-y-2">
-              <Label>部门</Label>
-              <Input value={newUserDept} disabled className="bg-muted" />
-            </div>
+            {canChooseTenant ? (
+              <div className="space-y-2 md:col-span-2">
+                <Label>所属企业</Label>
+                <select className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm" value={newUserTenantId} onChange={(event) => setNewUserTenantId(event.target.value)}>
+                  <option value="">不指定</option>
+                  {tenants.map((tenant) => <option key={tenant.id} value={tenant.id}>{tenant.company_name || tenant.name || tenant.id}</option>)}
+                </select>
+              </div>
+            ) : null}
+            {newUserRole === 'employee' ? (
+              <div className="space-y-2 md:col-span-2">
+                <Label>员工权限</Label>
+                <PermissionChecklist options={permissions} value={newUserPermissions} onChange={setNewUserPermissions} />
+              </div>
+            ) : null}
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setAddUserOpen(false)}>取消</Button>
@@ -401,70 +434,56 @@ export function UsersForm() {
         </DialogContent>
       </Dialog>
 
-      {/* 编辑用户弹窗 */}
       <Dialog open={editUserOpen} onOpenChange={setEditUserOpen}>
-        <DialogContent>
+        <DialogContent className="max-w-2xl">
           <DialogHeader>
             <DialogTitle>编辑用户</DialogTitle>
-            <DialogDescription>修改用户信息</DialogDescription>
+            <DialogDescription>修改账号层级、状态和员工多岗位权限</DialogDescription>
           </DialogHeader>
-          <div className="space-y-4">
+          <div className="grid gap-4 md:grid-cols-2">
             <div className="space-y-2">
-              <Label>用户名</Label>
+              <Label>手机号</Label>
               <Input value={editingUser?.phone || ''} disabled />
             </div>
             <div className="space-y-2">
               <Label>姓名</Label>
-              <Input
-                placeholder="请输入姓名"
-                value={editForm.name}
-                onChange={(e) => setEditForm({ ...editForm, name: e.target.value })}
-              />
+              <Input value={editForm.name} onChange={(event) => setEditForm({ ...editForm, name: event.target.value })} />
             </div>
             <div className="space-y-2">
-              <Label>角色</Label>
-              <select
-                className="w-full h-10 px-3 rounded-md border border-input bg-background text-sm"
-                value={editForm.role}
-                onChange={(e) => setEditForm({ ...editForm, role: e.target.value })}
-              >
-                {roles.map((role) => (
-                  <option key={role.value} value={role.value}>
-                    {role.label} [{role.dept}]
-                  </option>
-                ))}
+              <Label>账号角色</Label>
+              <select className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm" value={editForm.role} onChange={(event) => setEditForm({ ...editForm, role: event.target.value })}>
+                {roleOptions.map((role) => <option key={role.value} value={role.value}>{role.label}</option>)}
               </select>
             </div>
             <div className="space-y-2">
               <Label>状态</Label>
-              <select
-                className="w-full h-10 px-3 rounded-md border border-input bg-background text-sm"
-                value={editForm.status}
-                onChange={(e) => setEditForm({ ...editForm, status: e.target.value })}
-              >
-                <option value="active">启用</option>
-                <option value="inactive">禁用</option>
+              <select className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm" value={editForm.status} onChange={(event) => setEditForm({ ...editForm, status: event.target.value })}>
+                {STATUS_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
               </select>
             </div>
-            <div className="space-y-2">
+            {canChooseTenant ? (
+              <div className="space-y-2 md:col-span-2">
+                <Label>所属企业</Label>
+                <select className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm" value={editForm.tenant_id} onChange={(event) => setEditForm({ ...editForm, tenant_id: event.target.value })}>
+                  <option value="">不指定</option>
+                  {tenants.map((tenant) => <option key={tenant.id} value={tenant.id}>{tenant.company_name || tenant.name || tenant.id}</option>)}
+                </select>
+              </div>
+            ) : null}
+            <div className="space-y-2 md:col-span-2">
               <Label>部门</Label>
-              <Input
-                value={(() => {
-                  const role = roles.find((r) => r.value === editForm.role);
-                  return role ? role.dept : editForm.department || '-';
-                })()}
-                disabled
-                className="bg-muted"
-              />
+              <Input value={editForm.department} onChange={(event) => setEditForm({ ...editForm, department: event.target.value })} placeholder="可留空，由权限自动推导" />
             </div>
+            {editForm.role === 'employee' ? (
+              <div className="space-y-2 md:col-span-2">
+                <Label>员工权限</Label>
+                <PermissionChecklist options={permissions} value={editForm.permissions} onChange={(next) => setEditForm({ ...editForm, permissions: next })} />
+              </div>
+            ) : null}
           </div>
           <DialogFooter className="flex justify-between sm:justify-between">
-            <Button
-              variant="destructive"
-              onClick={handleDeleteUser}
-              disabled={isDeleting}
-            >
-              <Trash2 className="h-4 w-4 mr-1" />
+            <Button variant="destructive" onClick={handleDeleteUser} disabled={isDeleting}>
+              <Trash2 className="mr-1 h-4 w-4" />
               {isDeleting ? '删除中...' : '删除'}
             </Button>
             <div className="flex gap-2">

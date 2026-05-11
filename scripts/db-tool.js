@@ -24,6 +24,16 @@ if (fs.existsSync(envLocalPath)) {
     }
   });
 }
+const envPath = path.join(__dirname, '..', '.env');
+if (fs.existsSync(envPath)) {
+  const content = fs.readFileSync(envPath, 'utf8');
+  content.split('\n').forEach(line => {
+    const [key, ...valueParts] = line.split('=');
+    if (key && valueParts.length && !key.trim().startsWith('#') && envConfig[key.trim()] === undefined) {
+      envConfig[key.trim()] = valueParts.join('=').trim();
+    }
+  });
+}
 
 const CONFIG = {
   url: envConfig.COZE_SUPABASE_URL || process.env.COZE_SUPABASE_URL || 'https://cdcnjtgabgjkouavwxsl.supabase.co',

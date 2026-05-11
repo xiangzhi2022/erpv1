@@ -1,6 +1,15 @@
 import { NextResponse } from "next/server";
 import { getSupabaseClient } from "@/db/client";
 import { getUserFromRequest } from "@/lib/auth";
+import { canAccessPath, getUserPermissionKeys, isSuperAdmin } from "@/lib/role-access";
+
+function canManageFactoryOrders(user: NonNullable<Awaited<ReturnType<typeof getUserFromRequest>>>): boolean {
+  return (
+    isSuperAdmin(user) ||
+    user.role === "factory_admin" ||
+    getUserPermissionKeys(user).some((key) => key === "factory_order_manager" || key === "factory_sales")
+  );
+}
 
 export async function GET(request: Request) {
   try {
@@ -10,7 +19,7 @@ export async function GET(request: Request) {
       return NextResponse.json({ success: false, error: "请先登录" }, { status: 401 });
     }
 
-    if (!["factory_admin", "super_admin"].includes(user.role)) {
+    if (!canAccessPath(user, "/orders") || !canManageFactoryOrders(user)) {
       return NextResponse.json({ success: false, error: "无权限访问" }, { status: 403 });
     }
 
@@ -143,7 +152,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ success: false, error: "请先登录" }, { status: 401 });
     }
 
-    if (!["factory_admin", "super_admin"].includes(user.role)) {
+    if (!canManageFactoryOrders(user)) {
       return NextResponse.json({ success: false, error: "无权限访问" }, { status: 403 });
     }
 

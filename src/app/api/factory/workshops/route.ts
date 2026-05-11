@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { getUserFromRequest } from "@/lib/auth";
+import { canAccessPath, isSuperAdmin } from "@/lib/role-access";
 
 /** 合法的车间状态值 */
 const VALID_STATUSES = ["normal", "maintenance", "stopped"] as const;
@@ -42,7 +43,7 @@ export async function GET(request: Request) {
       );
     }
 
-    if (!["factory_admin", "super_admin", "saas_admin", "dealer_admin"].includes(user.role)) {
+    if (!canAccessPath(user, "/factory") && !canAccessPath(user, "/progress")) {
       return NextResponse.json(
         { success: false, error: "无权限访问" },
         { status: 403 }
@@ -144,7 +145,7 @@ export async function POST(request: Request) {
       );
     }
 
-    if (!["factory_admin", "super_admin", "saas_admin"].includes(user.role)) {
+    if (!isSuperAdmin(user) && user.role !== "factory_admin") {
       return NextResponse.json(
         { success: false, error: "无权限操作" },
         { status: 403 }

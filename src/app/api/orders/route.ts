@@ -1,11 +1,12 @@
 import { getSupabaseClient } from '@/db/client';
 import { getUserFromRequest, type AuthUser } from '@/lib/auth';
+import { isSuperAdmin } from '@/lib/role-access';
 import { ORDER_STATUSES, STATUS_TRANSITIONS } from '@/app/orders/schemas';
 
 const getServiceClient = () => getSupabaseClient();
 
 function canAccessAllTenants(user: AuthUser): boolean {
-  return user.role === 'super_admin' || user.role === 'saas_admin';
+  return isSuperAdmin(user);
 }
 
 // Valid status values for filtering

@@ -6,6 +6,7 @@ import {
   buildSessionCookie,
   isProduction,
 } from '@/lib/auth';
+import { getLandingPath } from '@/lib/role-access';
 
 export async function POST(request: NextRequest) {
   try {
@@ -54,7 +55,12 @@ export async function POST(request: NextRequest) {
         phone: user.phone,
         avatar: user.avatar,
         provider: user.provider,
+        role: user.role,
+        tenant_id: user.tenant_id,
+        tenant_type: user.tenant_type,
+        permissions: user.permissions || [],
       },
+      redirectTo: getLandingPath(user),
     });
 
     // 设置会话 Cookie（统一使用 buildSessionCookie）
