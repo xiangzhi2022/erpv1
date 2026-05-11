@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
-import { workerFormSchema, WorkerFormValues, CRAFT_TYPES, GENDERS, WORKER_STATUSES, Worker } from '../schemas';
+import { workerFormSchema, WorkerFormValues, CRAFT_TYPES, GENDERS, WORKER_STATUSES, Worker, safeParseTags } from '../schemas';
 import {
   Dialog,
   DialogContent,
@@ -49,7 +49,7 @@ function getDefaultValues(editWorker: Worker | null): WorkerFormValues {
       status: (editWorker.status === 'active' || editWorker.status === 'on_leave' || editWorker.status === 'resigned')
         ? editWorker.status
         : 'active',
-      skill_tags: editWorker.skill_tags ? JSON.parse(editWorker.skill_tags).join(',') : '',
+      skill_tags: safeParseTags(editWorker.skill_tags).join(','),
       hire_date: editWorker.hire_date ? editWorker.hire_date.split('T')[0] : '',
       remark: editWorker.remark || '',
     };
@@ -91,6 +91,13 @@ export function WorkerFormModal({ open, onOpenChange, editWorker, onSuccess }: W
         skill_tags: values.skill_tags
           ? JSON.stringify(values.skill_tags.split(',').map(t => t.trim()).filter(Boolean))
           : null,
+        // 将空字符串转为 null，与数据库 nullable 字段一致
+        phone: values.phone || null,
+        gender: values.gender || null,
+        craft_type: values.craft_type || null,
+        workshop_id: values.workshop_id || null,
+        hire_date: values.hire_date || null,
+        remark: values.remark || null,
       };
 
       const url = editWorker ? `/api/workers/${editWorker.id}` : '/api/workers';

@@ -1,18 +1,14 @@
 "use client";
 
 import { useState, useEffect, useCallback, useRef } from "react";
-import { useRouter } from "next/navigation";
-import { Sidebar } from "@/components/sidebar";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   Dialog,
   DialogContent,
-  DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle,
@@ -61,12 +57,9 @@ import {
   Flag,
   Bell,
   BellRing,
-  X,
   Trash2,
   Pencil,
   Eye,
-  ChevronRight,
-  Filter,
 } from "lucide-react";
 import type { Task, Category } from "@/db/schema";
 
@@ -102,13 +95,13 @@ const priorityConfig: Record<number, { label: string; color: string; icon: React
 };
 
 export default function TasksPage() {
-  const router = useRouter();
   const [tasks, setTasks] = useState<Task[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
   const [stats, setStats] = useState<TaskStats | null>(null);
   const [notifications, setNotifications] = useState<NotificationItem[]>([]);
   const [unreadCount, setUnreadCount] = useState(0);
   const [loading, setLoading] = useState(true);
+  const [mounted, setMounted] = useState(false);
   const [viewMode, setViewMode] = useState<"kanban" | "list">("kanban");
   const [searchQuery, setSearchQuery] = useState("");
   const [filterStatus, setFilterStatus] = useState("all");
@@ -175,6 +168,10 @@ export default function TasksPage() {
     fetchData();
   }, [fetchData]);
 
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
   // Filtered tasks
   const filteredTasks = tasks.filter((t) => {
     if (filterStatus !== "all" && t.status !== filterStatus) return false;
@@ -224,8 +221,10 @@ export default function TasksPage() {
       const data = await res.json();
       if (data.success) {
         setTasks((prev) =>
-          prev.map((t) => (t.id === task.id ? { ...t, status: targetStatus, completed: targetStatus === "completed" } : t))
+          prev.map((t) => (t.id === task.id ? data.data : t))
         );
+        // Refresh stats after status change
+        fetchData();
       }
     } catch {
       // Silent fail
@@ -323,6 +322,8 @@ export default function TasksPage() {
       const data = await res.json();
       if (data.success) {
         setTasks((prev) => prev.map((t) => (t.id === task.id ? data.data : t)));
+        // Refresh stats after toggle
+        fetchData();
       }
     } catch {
       // Silent fail
@@ -344,13 +345,16 @@ export default function TasksPage() {
 
   const handleMarkAllRead = async () => {
     try {
-      await fetch("/api/notifications", {
+      const res = await fetch("/api/notifications", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action: "markAllRead" }),
       });
-      setNotifications((prev) => prev.map((n) => ({ ...n, read: true })));
-      setUnreadCount(0);
+      const data = await res.json();
+      if (data.success) {
+        setNotifications((prev) => prev.map((n) => ({ ...n, read: true })));
+        setUnreadCount(0);
+      }
     } catch {
       // Silent fail
     }
@@ -380,12 +384,12 @@ export default function TasksPage() {
   };
 
   const isOverdue = (task: Task): boolean => {
-    if (!task.due_date || task.status === "completed") return false;
+    if (!mounted || !task.due_date || task.status === "completed") return false;
     return new Date(task.due_date) < new Date();
   };
 
   const isDueSoon = (task: Task): boolean => {
-    if (!task.due_date || task.status === "completed") return false;
+    if (!mounted || !task.due_date || task.status === "completed") return false;
     const threeDaysLater = new Date();
     threeDaysLater.setDate(threeDaysLater.getDate() + 3);
     const dueDate = new Date(task.due_date);
@@ -542,10 +546,7 @@ export default function TasksPage() {
   };
 
   return (
-    <div className="flex min-h-screen bg-background">
-      <Sidebar />
-
-      <main className="flex-1 overflow-hidden">
+    <>
         <div className="h-full flex flex-col">
           {/* Header */}
           <div className="border-b px-6 py-4 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
@@ -610,17 +611,20 @@ export default function TasksPage() {
                             onClick={async () => {
                               if (!n.read) {
                                 try {
-                                  await fetch(`/api/notifications/${n.id}`, {
+                                  const res = await fetch(`/api/notifications/${n.id}`, {
                                     method: "PATCH",
                                   });
-                                  setNotifications((prev) =>
-                                    prev.map((item) =>
-                                      item.id === n.id
-                                        ? { ...item, read: true }
-                                        : item
-                                    )
-                                  );
-                                  setUnreadCount((c) => Math.max(0, c - 1));
+                                  const data = await res.json();
+                                  if (data.success) {
+                                    setNotifications((prev) =>
+                                      prev.map((item) =>
+                                        item.id === n.id
+                                          ? { ...item, read: true }
+                                          : item
+                                      )
+                                    );
+                                    setUnreadCount((c) => Math.max(0, c - 1));
+                                  }
                                 } catch {
                                   // Silent fail
                                 }
@@ -641,7 +645,7 @@ export default function TasksPage() {
                                   </p>
                                 )}
                                 <p className="text-[10px] text-muted-foreground mt-1">
-                                  {new Date(n.created_at).toLocaleString("zh-CN")}
+                                  {mounted ? new Date(n.created_at).toLocaleString("zh-CN") : ""}
                                 </p>
                               </div>
                             </div>
@@ -817,7 +821,7 @@ export default function TasksPage() {
               <div className="flex flex-col items-center justify-center py-20 text-muted-foreground">
                 <Circle className="h-12 w-12 mb-4 opacity-30" />
                 <p className="text-lg font-medium">暂无任务</p>
-                <p className="text-sm mt-1">点击"新建任务"开始创建</p>
+                <p className="text-sm mt-1">点击&quot;新建任务&quot;开始创建</p>
               </div>
             ) : viewMode === "kanban" ? (
               /* Kanban View */
@@ -1017,7 +1021,6 @@ export default function TasksPage() {
             )}
           </div>
         </div>
-      </main>
 
       {/* Task Create/Edit Sheet */}
       <Sheet open={sheetOpen} onOpenChange={setSheetOpen}>
@@ -1228,7 +1231,7 @@ export default function TasksPage() {
                     {detailTask.due_date ? (
                       <>
                         <CalendarDays className="h-3.5 w-3.5" />
-                        {new Date(detailTask.due_date).toLocaleDateString("zh-CN")}
+                        {mounted ? new Date(detailTask.due_date).toLocaleDateString("zh-CN") : ""}
                         {isOverdue(detailTask) && (
                           <Badge variant="destructive" className="text-[10px] h-4 px-1 ml-1">
                             已过期
@@ -1282,6 +1285,6 @@ export default function TasksPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-    </div>
+    </>
   );
 }

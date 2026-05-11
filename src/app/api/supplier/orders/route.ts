@@ -1,104 +1,64 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { cookies } from 'next/headers';
-import { createClient } from '@supabase/supabase-js';
+import { getSupabaseClient } from '@/db/client';
+import { getUserFromRequest } from '@/lib/auth';
+import { isSuperAdmin } from '@/lib/role-access';
 
-const supabaseUrl = process.env.COZE_SUPABASE_URL || 'https://cdcnjtgabgjkouavwxsl.supabase.co';
-const supabaseServiceKey = process.env.COZE_SUPABASE_SERVICE_ROLE_KEY || '';
-
-function getSupabaseAdmin() {
-  return createClient(supabaseUrl, supabaseServiceKey, {
-    auth: { persistSession: false }
-  });
-}
-
-async function getAuthUser() {
-  const cookieStore = await cookies();
-  const token = cookieStore.get('erp_user');
-  if (!token) return null;
-  try {
-    return JSON.parse(token.value);
-  } catch {
-    return null;
-  }
-}
-
-// GET - 获取材料商订单列表
+// GET - 获取供应商的关联订单列表
+// 通过 supplier_id 查询 orders 表获取相关订单
 export async function GET(request: NextRequest) {
   try {
-    const user = await getAuthUser();
+    const user = await getUserFromRequest(request);
     if (!user) {
       return NextResponse.json({ success: false, error: '未登录' }, { status: 401 });
     }
 
-    // 检查是否是材料商管理员
-    if (user.role !== 'supplier_admin' && user.role !== 'super_admin') {
-      return NextResponse.json({ success: false, error: '无权限' }, { status: 403 });
+    const { searchParams } = new URL(request.url);
+    const supplierId = searchParams.get('supplierId') || searchParams.get('supplier_id');
+
+    if (!supplierId) {
+      return NextResponse.json({ success: false, error: '缺少供应商ID (supplierId)' }, { status: 400 });
     }
 
-    const supabase = getSupabaseAdmin();
-    
-    // 获取当前租户的材料订单
-    const { data: orders, error } = await supabase
-      .from('material_orders')
-      .select('*')
-      .eq('supplier_id', user.tenant_id)
-      .order('created_at', { ascending: false });
+    const supabase = getSupabaseClient();
 
-    if (error) {
-      return NextResponse.json({ success: false, error: error.message }, { status: 500 });
-    }
-
-    return NextResponse.json({ success: true, orders: orders || [] });
-  } catch (error) {
-    console.error('获取材料订单失败:', error);
-    return NextResponse.json({ success: false, error: '获取材料订单失败' }, { status: 500 });
-  }
-}
-
-// POST - 创建材料订单
-export async function POST(request: NextRequest) {
-  try {
-    const user = await getAuthUser();
-    if (!user) {
-      return NextResponse.json({ success: false, error: '未登录' }, { status: 401 });
-    }
-
-    if (user.role !== 'supplier_admin' && user.role !== 'super_admin') {
-      return NextResponse.json({ success: false, error: '无权限' }, { status: 403 });
-    }
-
-    const body = await request.json();
-    const { customer_name, items, total_amount } = body;
-
-    if (!customer_name || !items || !total_amount) {
-      return NextResponse.json({ success: false, error: '缺少必填字段' }, { status: 400 });
-    }
-
-    const supabase = getSupabaseAdmin();
-
-    // 生成订单号
-    const orderNo = `SC${Date.now()}`;
-
-    const { data, error } = await supabase
-      .from('material_orders')
-      .insert({
-        order_no: orderNo,
-        supplier_id: user.tenant_id,
-        customer_name,
-        items,
-        total_amount,
-        status: 'pending',
-      })
-      .select()
+    // 先验证供应商存在
+    const { data: supplier, error: supplierError } = await supabase
+      .from('suppliers')
+      .select('id, name, supplier_code')
+      .eq('id', supplierId)
       .single();
 
+    if (supplierError || !supplier) {
+      return NextResponse.json({ success: false, error: '供应商不存在' }, { status: 404 });
+    }
+
+    // 查询该供应商关联的订单
+    // 使用 orders 表的 target_factory_id 作为供应商关联字段
+    const { data: orders, error } = await supabase
+      .from('orders')
+      .select('id, order_no, customer_name, customer_phone, status, total_amount, delivery_date, remark, created_at')
+      .eq('target_factory_id', supplierId)
+      .order('created_at', { ascending: false });
+    if (!isSuperAdmin(user) && user.tenant_id !== supplierId) {
+      return NextResponse.json({ success: false, error: '无权限查看该供应商订单' }, { status: 403 });
+    }
+
     if (error) {
+      console.error('获取供应商订单数据库错误:', error);
       return NextResponse.json({ success: false, error: error.message }, { status: 500 });
     }
 
-    return NextResponse.json({ success: true, order: data });
+    return NextResponse.json({
+      success: true,
+      supplier: {
+        id: supplier.id,
+        name: supplier.name,
+        supplier_code: supplier.supplier_code,
+      },
+      orders: orders || [],
+    });
   } catch (error) {
-    console.error('创建材料订单失败:', error);
-    return NextResponse.json({ success: false, error: '创建材料订单失败' }, { status: 500 });
+    console.error('获取供应商订单失败:', error);
+    return NextResponse.json({ success: false, error: '获取供应商订单失败' }, { status: 500 });
   }
 }

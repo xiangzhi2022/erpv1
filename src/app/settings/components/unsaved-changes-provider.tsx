@@ -25,7 +25,7 @@ export function useUnsavedChanges() {
 }
 
 export function UnsavedChangesProvider({ children }: { children: React.ReactNode }) {
-  const [isDirty, setIsDirty] = useState(false);
+  const [, setIsDirty] = useState(false);
   const [pendingNavigation, setPendingNavigation] = useState<(() => void) | null>(null);
   const [showDialog, setShowDialog] = useState(false);
 

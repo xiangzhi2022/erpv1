@@ -31,7 +31,7 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { Separator } from '@/components/ui/separator';
 import { Plus, Trash2, Loader2, ChevronsUpDown, Check } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { orderFormSchema, OrderFormValues, Customer } from '../schemas';
+import { orderFormSchema, OrderFormValues, FactoryEnterprise } from '../schemas';
 
 interface CreateOrderDialogProps {
   open: boolean;
@@ -40,9 +40,9 @@ interface CreateOrderDialogProps {
 }
 
 export function CreateOrderDialog({ open, onOpenChange, onSuccess }: CreateOrderDialogProps) {
-  const [customers, setCustomers] = useState<Customer[]>([]);
-  const [customerSearchOpen, setCustomerSearchOpen] = useState(false);
-  const [customerSearch, setCustomerSearch] = useState('');
+  const [factories, setFactories] = useState<FactoryEnterprise[]>([]);
+  const [factorySearchOpen, setFactorySearchOpen] = useState(false);
+  const [factorySearch, setFactorySearch] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [generatingOrderNo, setGeneratingOrderNo] = useState(false);
 
@@ -54,6 +54,7 @@ export function CreateOrderDialog({ open, onOpenChange, onSuccess }: CreateOrder
     defaultValues: {
       order_no: '',
       customer_name: '',
+      target_factory_id: '',
       delivery_date: '',
       remark: '',
       items: [{ product_name: '', specification: '', quantity: 1, unit: '件', unit_price: 0 }],
@@ -74,41 +75,41 @@ export function CreateOrderDialog({ open, onOpenChange, onSuccess }: CreateOrder
     return sum + qty * price;
   }, 0);
 
-  // Fetch customers
-  const fetchCustomers = useCallback(async (search?: string) => {
+  // Fetch registered factory enterprises for dealer order routing.
+  const fetchFactories = useCallback(async (search?: string) => {
     try {
       const params = new URLSearchParams();
       if (search) params.set('search', search);
-      const res = await fetch(`/api/customers?${params}`);
+      const res = await fetch(`/api/factories?${params}`);
       if (res.ok) {
         const data = await res.json();
-        setCustomers(data.data || []);
+        setFactories(data.data || data.factories || []);
       }
     } catch (err) {
-      console.error('Fetch customers failed:', err);
+      console.error('Fetch factories failed:', err);
     }
   }, []);
 
   useEffect(() => {
     if (open) {
-      fetchCustomers();
+      fetchFactories();
     }
-  }, [open, fetchCustomers]);
+  }, [open, fetchFactories]);
 
   // Generate order number
-  const generateOrderNo = async () => {
+  const generateOrderNo = useCallback(async () => {
     setGeneratingOrderNo(true);
     try {
       const res = await fetch('/api/orders/generate', { method: 'POST' });
       const data = await res.json();
       if (data.success) {
-        form.setValue('order_no', data.orderNo);
+        form.setValue('order_no', data.data?.order_no || data.orderNo || '');
       } else {
         // Fallback: use sequence API
         const seqRes = await fetch('/api/orders/sequence');
         const seqData = await seqRes.json();
         if (seqData.success) {
-          form.setValue('order_no', seqData.orderNo);
+          form.setValue('order_no', seqData.data?.order_no || seqData.orderNo || '');
         }
       }
     } catch {
@@ -120,20 +121,23 @@ export function CreateOrderDialog({ open, onOpenChange, onSuccess }: CreateOrder
     } finally {
       setGeneratingOrderNo(false);
     }
-  };
+  }, [form]);
 
   // Auto-generate order number on open
   useEffect(() => {
     if (open && !form.getValues('order_no')) {
       generateOrderNo();
     }
-  }, [open]);
+  }, [open, form, generateOrderNo]);
 
-  // Select customer
-  const selectCustomer = (customer: Customer) => {
-    form.setValue('customer_name', customer.name);
-    setCustomerSearchOpen(false);
-    setCustomerSearch('');
+  // Select factory enterprise
+  const selectFactory = (factory: FactoryEnterprise) => {
+    const factoryName = factory.company_name || factory.name || '';
+    form.setValue('customer_name', factoryName);
+    form.setValue('target_factory_id', factory.id);
+    form.setValue('customer_phone', factory.contact_phone || '');
+    setFactorySearchOpen(false);
+    setFactorySearch('');
   };
 
   // Submit
@@ -208,54 +212,57 @@ export function CreateOrderDialog({ open, onOpenChange, onSuccess }: CreateOrder
                   )}
                 </div>
 
-                {/* Customer Select */}
+                {/* Factory Select */}
                 <div className="space-y-2">
-                  <Label>客户名称 *</Label>
-                  <Popover open={customerSearchOpen} onOpenChange={setCustomerSearchOpen}>
+                  <Label>工厂企业 *</Label>
+                  <Popover open={factorySearchOpen} onOpenChange={setFactorySearchOpen}>
                     <PopoverTrigger asChild>
                       <Button
                         variant="outline"
                         role="combobox"
-                        aria-expanded={customerSearchOpen}
+                        aria-expanded={factorySearchOpen}
                         className="w-full justify-between font-normal"
                       >
-                        {form.watch('customer_name') || '选择客户...'}
+                        {form.watch('customer_name') || '选择工厂企业...'}
                         <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
                       </Button>
                     </PopoverTrigger>
                     <PopoverContent className="w-[300px] p-0" align="start">
                       <Command shouldFilter={false}>
                         <CommandInput
-                          placeholder="搜索客户..."
-                          value={customerSearch}
+                          placeholder="搜索工厂企业..."
+                          value={factorySearch}
                           onValueChange={(v) => {
-                            setCustomerSearch(v);
-                            fetchCustomers(v);
+                            setFactorySearch(v);
+                            fetchFactories(v);
                           }}
                         />
                         <CommandList>
-                          <CommandEmpty>未找到客户</CommandEmpty>
+                          <CommandEmpty>未找到工厂企业</CommandEmpty>
                           <CommandGroup>
-                            {customers.map((customer) => (
+                            {factories.map((factory) => {
+                              const factoryName = factory.company_name || factory.name || '';
+                              return (
                               <CommandItem
-                                key={customer.id}
-                                value={customer.id}
-                                onSelect={() => selectCustomer(customer)}
+                                key={factory.id}
+                                value={factory.id}
+                                onSelect={() => selectFactory(factory)}
                               >
                                 <Check
                                   className={cn(
                                     'mr-2 h-4 w-4',
-                                    form.watch('customer_name') === customer.name ? 'opacity-100' : 'opacity-0'
+                                    form.watch('target_factory_id') === factory.id ? 'opacity-100' : 'opacity-0'
                                   )}
                                 />
                                 <div>
-                                  <p className="font-medium">{customer.name}</p>
-                                  {customer.phone && (
-                                    <p className="text-xs text-muted-foreground">{customer.phone}</p>
+                                  <p className="font-medium">{factoryName}</p>
+                                  {factory.contact_phone && (
+                                    <p className="text-xs text-muted-foreground">{factory.contact_phone}</p>
                                   )}
                                 </div>
                               </CommandItem>
-                            ))}
+                              );
+                            })}
                           </CommandGroup>
                         </CommandList>
                       </Command>
@@ -263,6 +270,9 @@ export function CreateOrderDialog({ open, onOpenChange, onSuccess }: CreateOrder
                   </Popover>
                   {form.formState.errors.customer_name && (
                     <p className="text-xs text-destructive">{form.formState.errors.customer_name.message}</p>
+                  )}
+                  {form.formState.errors.target_factory_id && (
+                    <p className="text-xs text-destructive">{form.formState.errors.target_factory_id.message}</p>
                   )}
                 </div>
 

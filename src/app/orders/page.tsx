@@ -2,7 +2,6 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
-import { Sidebar } from '@/components/sidebar';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -126,8 +125,8 @@ export default function OrdersPage() {
 
     setStatusLoading(true);
     try {
-      const res = await fetch('/api/orders', {
-        method: 'PUT',
+      const res = await fetch(`/api/orders/${orderId}`, {
+        method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ id: orderId, status, notes }),
       });
@@ -159,8 +158,8 @@ export default function OrdersPage() {
     if (!selectedOrder) return;
     setStatusLoading(true);
     try {
-      const res = await fetch('/api/orders', {
-        method: 'PUT',
+      const res = await fetch(`/api/orders/${selectedOrder.id}`, {
+        method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ id: selectedOrder.id, status: 'returned', notes: reason }),
       });
@@ -213,11 +212,8 @@ export default function OrdersPage() {
   }
 
   return (
-    <div className="flex min-h-screen bg-background">
-      <Sidebar />
-
-      <main className="flex-1 overflow-auto">
-        <div className="p-6 lg:p-8 max-w-[1400px] mx-auto space-y-6">
+    <>
+        <div className="space-y-6">
           {/* Header */}
           <div className="flex items-center justify-between">
             <div>
@@ -263,7 +259,6 @@ export default function OrdersPage() {
             onStatusChange={handleStatusChange}
           />
         </div>
-      </main>
 
       {/* Create Order Dialog */}
       <CreateOrderDialog
@@ -291,6 +286,6 @@ export default function OrdersPage() {
         onSubmit={handleReturnSubmit}
         loading={statusLoading}
       />
-    </div>
+    </>
   );
 }

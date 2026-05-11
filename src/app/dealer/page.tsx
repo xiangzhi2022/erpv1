@@ -1,7 +1,6 @@
 'use client';
 
 import { useState } from 'react';
-import { Sidebar } from '@/components/sidebar';
 import { Button } from '@/components/ui/button';
 import { Plus } from 'lucide-react';
 import { DealerTable } from './components/dealer-table';
@@ -29,9 +28,8 @@ export default function DealerPage() {
   };
 
   return (
-    <div className="flex min-h-screen bg-background">
-      <Sidebar />
-      <main className="flex-1 p-6 space-y-6 overflow-auto">
+    <>
+      <div className="space-y-6">
         {/* 页面标题 */}
         <div className="flex items-center justify-between">
           <div>
@@ -57,7 +55,7 @@ export default function DealerPage() {
           editingDealer={editingDealer}
           onSuccess={handleSuccess}
         />
-      </main>
-    </div>
+      </div>
+    </>
   );
 }

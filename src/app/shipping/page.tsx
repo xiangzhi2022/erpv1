@@ -1,8 +1,7 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
-import { Sidebar } from '@/components/sidebar';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -12,6 +11,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Skeleton } from '@/components/ui/skeleton';
 import { Truck, Package, Plus, RotateCcw } from 'lucide-react';
 
+// Status labels aligned with ORDER_STATUS_CONFIG in orders/schemas.ts
 interface Order {
   id: string;
   order_no: string;
@@ -23,24 +23,37 @@ interface Order {
   notes?: string;
 }
 
+// Shipping-facing status display, aligned with orders module status values
+const shippingStatusMap: Record<string, string> = {
+  pending: '待发货',
+  returned: '已退回',
+  confirmed: '待发货',
+  pool: '待发货',
+  producing: '待发货',
+  in_production: '待发货',
+  shipped: '已发货',
+  completed: '已签收',
+  cancelled: '已取消',
+};
+
 const statusColors: Record<string, string> = {
   '待发货': 'bg-orange-100 text-orange-700',
   '已发货': 'bg-blue-100 text-blue-700',
-  '运输中': 'bg-purple-100 text-purple-700',
   '已签收': 'bg-green-100 text-green-700',
+  '已退回': 'bg-red-100 text-red-700',
+  '已取消': 'bg-gray-100 text-gray-700',
 };
 
-const shippingStatusMap: Record<string, string> = {
-  confirmed: '待发货',
-  producing: '待发货',
-  shipped: '已发货',
-  completed: '已签收',
-};
+// Orders that are relevant for shipping view
+const SHIPPING_VISIBLE_STATUSES = ['confirmed', 'producing', 'in_production', 'shipped', 'completed'];
+// Orders that can be shipped (not yet shipped or completed)
+const SHIPPABLE_STATUSES = ['confirmed', 'producing', 'in_production'];
 
 export default function ShippingPage() {
   const router = useRouter();
   const [orders, setOrders] = useState<Order[]>([]);
   const [loading, setLoading] = useState(true);
+  const [mounted, setMounted] = useState(false);
   const [searchDealer, setSearchDealer] = useState('');
   const [searchOrder, setSearchOrder] = useState('');
   const [shipDialogOpen, setShipDialogOpen] = useState(false);
@@ -51,36 +64,49 @@ export default function ShippingPage() {
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
 
   useEffect(() => {
-    fetchOrders();
+    setMounted(true);
   }, []);
 
-  const fetchOrders = async () => {
+  const fetchOrders = useCallback(async () => {
     try {
       const res = await fetch('/api/orders');
       if (res.ok) {
         const data = await res.json();
-        setOrders(data.data || []);
+        if (data.success) {
+          setOrders(data.data || []);
+        }
       }
     } catch (error) {
       console.error('获取订单失败:', error);
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
 
-  // 可发货的订单：已确认或生产中
+  useEffect(() => {
+    fetchOrders();
+  }, [fetchOrders]);
+
+  // Filter orders relevant to shipping
   const shippableOrders = orders.filter(o =>
-    ['confirmed', 'producing', 'shipped', 'completed'].includes(o.status)
+    SHIPPING_VISIBLE_STATUSES.includes(o.status)
   ).filter(o => {
     if (searchDealer.trim() && !o.customer_name?.includes(searchDealer.trim())) return false;
     if (searchOrder.trim() && !o.order_no?.includes(searchOrder.trim())) return false;
     return true;
   });
 
+  // Format date safely (client-only to avoid hydration mismatch)
+  const formatDateSafe = (dateStr: string | null): string => {
+    if (!dateStr || !mounted) return '-';
+    return new Date(dateStr).toLocaleDateString('zh-CN');
+  };
+
   const handleShip = async () => {
     if (!shipOrder || !trackingNo.trim()) return;
     setActionLoading(true);
     try {
+      // Use PUT /api/orders - same convention as orders module
       const res = await fetch('/api/orders', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
@@ -113,10 +139,7 @@ export default function ShippingPage() {
   };
 
   return (
-    <div className="flex min-h-screen bg-background">
-      <Sidebar />
-      
-      <main className="flex-1 p-8">
+    <>
         <div className="max-w-7xl mx-auto space-y-6">
           <div className="flex items-center justify-between">
             <div>
@@ -201,7 +224,7 @@ export default function ShippingPage() {
                             <td className="py-3 px-4">{order.customer_name || '-'}</td>
                             <td className="py-3 px-4">¥{(order.total_amount / 100).toFixed(2)}</td>
                             <td className="py-3 px-4 text-muted-foreground">
-                              {order.created_at ? new Date(order.created_at).toLocaleDateString('zh-CN') : '-'}
+                              {formatDateSafe(order.created_at)}
                             </td>
                             <td className="py-3 px-4">
                               <span className={`px-2 py-1 rounded-full text-xs font-medium ${statusColors[shipStatus] || 'bg-gray-100 text-gray-700'}`}>
@@ -213,7 +236,7 @@ export default function ShippingPage() {
                                 <Button variant="outline" size="sm" onClick={() => router.push(`/orders`)}>
                                   查看
                                 </Button>
-                                {order.status !== 'shipped' && order.status !== 'completed' && (
+                                {SHIPPABLE_STATUSES.includes(order.status) && (
                                   <Button
                                     size="sm"
                                     onClick={() => { setShipOrder(order); setShipDialogOpen(true); }}
@@ -233,7 +256,6 @@ export default function ShippingPage() {
             </CardContent>
           </Card>
         </div>
-      </main>
 
       {/* Ship Dialog */}
       <Dialog open={shipDialogOpen} onOpenChange={setShipDialogOpen}>
@@ -287,14 +309,14 @@ export default function ShippingPage() {
             <DialogDescription>选择待发货的订单创建发货单</DialogDescription>
           </DialogHeader>
           <div className="space-y-4">
-            {orders.filter(o => ['confirmed', 'producing'].includes(o.status)).length === 0 ? (
+            {orders.filter(o => SHIPPABLE_STATUSES.includes(o.status)).length === 0 ? (
               <div className="text-center py-8 text-muted-foreground">
                 <Package className="h-10 w-10 mx-auto mb-2 opacity-50" />
                 <p>暂无可发货订单</p>
               </div>
             ) : (
               <div className="space-y-2 max-h-60 overflow-y-auto">
-                {orders.filter(o => ['confirmed', 'producing'].includes(o.status)).map(order => (
+                {orders.filter(o => SHIPPABLE_STATUSES.includes(o.status)).map(order => (
                   <div
                     key={order.id}
                     className="flex items-center justify-between p-3 border rounded-lg hover:bg-muted/50 cursor-pointer"
@@ -319,6 +341,6 @@ export default function ShippingPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-    </div>
+    </>
   );
 }

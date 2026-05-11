@@ -1,23 +1,13 @@
 import { getSupabaseClient } from '@/db/client';
-import { cookies } from 'next/headers';
+import { getUserFromRequest } from '@/lib/auth';
+import { isSuperAdmin } from '@/lib/role-access';
 
 const getClient = () => getSupabaseClient();
-
-async function getCurrentUser() {
-  const cookieStore = await cookies();
-  const userStr = cookieStore.get('erp_user')?.value;
-  if (!userStr) return null;
-  try {
-    return JSON.parse(userStr);
-  } catch {
-    return null;
-  }
-}
 
 // 获取经销商列表（支持分页和过滤）
 export async function GET(request: Request) {
   try {
-    const user = await getCurrentUser();
+    const user = await getUserFromRequest(request);
     if (!user) {
       return Response.json({ success: false, error: '请先登录' }, { status: 401 });
     }
@@ -35,9 +25,10 @@ export async function GET(request: Request) {
       .select('*', { count: 'exact' })
       .order('created_at', { ascending: false });
 
-    // 关键字搜索（名称或联系人）
+    // 关键字搜索（名称、联系人或电话）— 转义特殊字符防注入
     if (keyword) {
-      query = query.or(`name.ilike.%${keyword}%,contact_name.ilike.%${keyword}%,phone.ilike.%${keyword}%`);
+      const safe = keyword.replace(/[%_\\]/g, '\\$&');
+      query = query.or(`name.ilike.%${safe}%,contact_name.ilike.%${safe}%,phone.ilike.%${safe}%`);
     }
 
     // 地区过滤
@@ -51,8 +42,9 @@ export async function GET(request: Request) {
     }
 
     // 权限过滤：非管理员只能看自己创建的
-    if (user.role !== 'super_admin' && user.role !== 'saas_admin') {
-      query = query.eq('created_by', user.id);
+    if (!isSuperAdmin(user)) {
+      if (!user.tenant_id) return Response.json({ success: false, error: '当前用户未关联企业' }, { status: 403 });
+      query = query.eq('tenant_id', user.tenant_id);
     }
 
     // 分页
@@ -85,7 +77,7 @@ export async function GET(request: Request) {
 // 新增经销商
 export async function POST(request: Request) {
   try {
-    const user = await getCurrentUser();
+    const user = await getUserFromRequest(request);
     if (!user) {
       return Response.json({ success: false, error: '请先登录' }, { status: 401 });
     }
@@ -97,6 +89,11 @@ export async function POST(request: Request) {
       return Response.json({ success: false, error: '经销商名称至少2个字符' }, { status: 400 });
     }
 
+    const validStatuses = ['active', 'inactive'] as const;
+    if (status && !validStatuses.includes(status)) {
+      return Response.json({ success: false, error: '状态值无效，仅支持 active/inactive' }, { status: 400 });
+    }
+
     const supabase = getClient();
     const { data, error } = await supabase
       .from('dealers')
@@ -105,9 +102,10 @@ export async function POST(request: Request) {
         contact_name: contactName?.trim() || null,
         phone: phone?.trim() || null,
         region: region?.trim() || null,
-        status: status || 'active',
+        status: validStatuses.includes(status) ? status : 'active',
         remark: remark?.trim() || null,
         created_by: user.id,
+        tenant_id: user.tenant_id || null,
       })
       .select()
       .single();

@@ -1,70 +1,54 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseClient } from '@/db/client';
-import { cookies } from 'next/headers';
+import { hashPassword, isPlaintextPassword, verifyPassword } from '@/lib/auth';
 import { passwordSchema } from '@/app/settings/schemas';
+import { authFailed, requireSettingsUser } from '../_utils';
 
-async function getAuthUser() {
-  const cookieStore = await cookies();
-  const token = cookieStore.get('erp_user');
-  if (!token) return null;
-  try {
-    return JSON.parse(token.value);
-  } catch {
-    return null;
-  }
-}
-
-// PUT - 修改密码
 export async function PUT(request: NextRequest) {
   try {
-    const user = await getAuthUser();
-    if (!user) {
-      return NextResponse.json({ success: false, error: '未登录' }, { status: 401 });
-    }
+    const auth = await requireSettingsUser(request);
+    if (authFailed(auth)) return auth.response;
 
-    const body = await request.json();
-    const parsed = passwordSchema.safeParse(body);
-
+    const parsed = passwordSchema.safeParse(await request.json());
     if (!parsed.success) {
-      const firstIssue = parsed.error.issues[0];
       return NextResponse.json(
-        { success: false, error: firstIssue?.message || '表单验证失败' },
+        { success: false, error: parsed.error.issues[0]?.message || '??????' },
         { status: 400 }
       );
     }
 
-    const { currentPassword, newPassword } = parsed.data;
     const supabase = getSupabaseClient();
-
-    // 验证当前密码
     const { data: userData, error: fetchError } = await supabase
       .from('users')
       .select('password')
-      .eq('id', user.id)
-      .single();
+      .eq('id', auth.user.id)
+      .maybeSingle();
 
-    if (fetchError || !userData) {
-      return NextResponse.json({ success: false, error: '用户不存在' }, { status: 404 });
+    if (fetchError || !userData?.password) {
+      return NextResponse.json({ success: false, error: '?????' }, { status: 404 });
     }
 
-    if (userData.password !== currentPassword) {
-      return NextResponse.json({ success: false, error: '当前密码不正确' }, { status: 400 });
+    const { currentPassword, newPassword } = parsed.data;
+    const passwordMatches = isPlaintextPassword(userData.password)
+      ? userData.password === currentPassword
+      : verifyPassword(currentPassword, userData.password);
+
+    if (!passwordMatches) {
+      return NextResponse.json({ success: false, error: '???????' }, { status: 400 });
     }
 
-    // 更新密码
-    const { error: updateError } = await supabase
+    const { error } = await supabase
       .from('users')
-      .update({ password: newPassword, updated_at: new Date().toISOString() })
-      .eq('id', user.id);
+      .update({ password: hashPassword(newPassword), updated_at: new Date().toISOString() })
+      .eq('id', auth.user.id);
 
-    if (updateError) {
-      console.error('修改密码失败:', updateError);
-      return NextResponse.json({ success: false, error: '修改密码失败' }, { status: 500 });
+    if (error) {
+      return NextResponse.json({ success: false, error: '??????' }, { status: 500 });
     }
 
-    return NextResponse.json({ success: true, message: '密码修改成功' });
+    return NextResponse.json({ success: true, message: '??????' });
   } catch (error) {
-    console.error('修改密码异常:', error);
-    return NextResponse.json({ success: false, error: '修改密码异常' }, { status: 500 });
+    console.error('update password failed:', error);
+    return NextResponse.json({ success: false, error: '??????' }, { status: 500 });
   }
 }

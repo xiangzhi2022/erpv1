@@ -81,3 +81,4 @@ bin/
 scripts/seed-*.js
 scripts/migrate-*.js
 scripts/migrate-*.ts
+node_modules

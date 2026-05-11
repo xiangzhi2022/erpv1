@@ -1,5 +1,10 @@
 import { NextResponse } from "next/server";
 import { getUserFromRequest } from "@/lib/auth";
+import { canAccessPath, isSuperAdmin } from "@/lib/role-access";
+
+/** 合法的车间状态值 */
+const VALID_STATUSES = ["normal", "maintenance", "stopped"] as const;
+type ValidStatus = (typeof VALID_STATUSES)[number];
 
 function getSupabaseHeaders(): Record<string, string> {
   const serviceKey = process.env.COZE_SUPABASE_SERVICE_ROLE_KEY;
@@ -13,6 +18,14 @@ function getSupabaseHeaders(): Record<string, string> {
 
 function getSupabaseUrl(): string {
   return `${process.env.COZE_SUPABASE_URL}/rest/v1`;
+}
+
+/**
+ * 计算负荷百分比，上限 100
+ */
+function calcLoadPercentage(currentLoad: number, capacity: number): number {
+  if (!capacity || capacity <= 0) return 0;
+  return Math.min(Math.round((currentLoad / capacity) * 100), 100);
 }
 
 /**
@@ -30,7 +43,7 @@ export async function GET(request: Request) {
       );
     }
 
-    if (!["factory_admin", "super_admin", "saas_admin", "dealer_admin"].includes(user.role)) {
+    if (!canAccessPath(user, "/factory") && !canAccessPath(user, "/progress")) {
       return NextResponse.json(
         { success: false, error: "无权限访问" },
         { status: 403 }
@@ -40,6 +53,14 @@ export async function GET(request: Request) {
     const { searchParams } = new URL(request.url);
     const status = searchParams.get("status");
     const keyword = searchParams.get("keyword");
+
+    // 校验 status 参数合法性
+    if (status && status !== "all" && !VALID_STATUSES.includes(status as ValidStatus)) {
+      return NextResponse.json(
+        { success: false, error: `无效的状态筛选值: ${status}` },
+        { status: 400 }
+      );
+    }
 
     // 构建查询参数
     const queryParams = new URLSearchParams({
@@ -70,13 +91,13 @@ export async function GET(request: Request) {
 
     const workshops = (await response.json()) as Record<string, unknown>[];
 
-    // 计算负荷率
+    // 计算负荷率（上限 100）
     const enriched: Record<string, unknown>[] = (workshops || []).map((w) => ({
       ...w,
-      load_percentage:
-        w.capacity && Number(w.capacity) > 0
-          ? Math.round((Number(w.current_load) / Number(w.capacity)) * 100)
-          : 0,
+      load_percentage: calcLoadPercentage(
+        Number(w.current_load || 0),
+        Number(w.capacity || 0)
+      ),
     }));
 
     // 统计数据
@@ -124,7 +145,7 @@ export async function POST(request: Request) {
       );
     }
 
-    if (!["factory_admin", "super_admin", "saas_admin"].includes(user.role)) {
+    if (!isSuperAdmin(user) && user.role !== "factory_admin") {
       return NextResponse.json(
         { success: false, error: "无权限操作" },
         { status: 403 }
@@ -132,7 +153,7 @@ export async function POST(request: Request) {
     }
 
     const body = await request.json();
-    const { factory_code, name, location, manager, capacity, description } =
+    const { factory_code, name, location, manager, capacity, current_load, status, description } =
       body;
 
     if (!factory_code || !name) {
@@ -153,6 +174,33 @@ export async function POST(request: Request) {
         { status: 400 }
       );
     }
+
+    // 产能与负荷校验
+    const cap = Number(capacity) || 0;
+    const load = Number(current_load) || 0;
+    if (cap < 0) {
+      return NextResponse.json(
+        { success: false, error: "产能不能为负数" },
+        { status: 400 }
+      );
+    }
+    if (load < 0) {
+      return NextResponse.json(
+        { success: false, error: "负荷不能为负数" },
+        { status: 400 }
+      );
+    }
+    if (load > cap) {
+      return NextResponse.json(
+        { success: false, error: "当前负荷不能超过产能" },
+        { status: 400 }
+      );
+    }
+
+    // 状态校验
+    const initialStatus = status && VALID_STATUSES.includes(status as ValidStatus)
+      ? status
+      : "normal";
 
     // 检查编号是否重复
     const checkParams = new URLSearchParams({
@@ -178,9 +226,9 @@ export async function POST(request: Request) {
       name,
       location: location || null,
       manager: manager || null,
-      capacity: Number(capacity) || 0,
-      current_load: 0,
-      status: "normal",
+      capacity: cap,
+      current_load: load,
+      status: initialStatus,
       description: description || null,
     };
 
@@ -200,7 +248,16 @@ export async function POST(request: Request) {
     // POST with return=representation returns array or single object
     const result = Array.isArray(workshop) ? workshop[0] : workshop;
 
-    return NextResponse.json({ success: true, workshop: result }, { status: 201 });
+    // 补充负荷率字段
+    const enrichedResult = {
+      ...result,
+      load_percentage: calcLoadPercentage(
+        Number(result.current_load || 0),
+        Number(result.capacity || 0)
+      ),
+    };
+
+    return NextResponse.json({ success: true, workshop: enrichedResult }, { status: 201 });
   } catch (error) {
     console.error("创建车间失败:", error);
     return NextResponse.json(

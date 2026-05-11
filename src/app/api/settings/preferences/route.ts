@@ -1,90 +1,48 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseClient } from '@/db/client';
-import { cookies } from 'next/headers';
+import { authFailed, loadUserSettings, requireSettingsUser, stringifySettingValue } from '../_utils';
 
-async function getAuthUser() {
-  const cookieStore = await cookies();
-  const token = cookieStore.get('erp_user');
-  if (!token) return null;
+export async function GET(request: NextRequest) {
   try {
-    return JSON.parse(token.value);
-  } catch {
-    return null;
-  }
-}
+    const auth = await requireSettingsUser(request);
+    if (authFailed(auth)) return auth.response;
 
-// GET - 获取用户偏好设置
-export async function GET() {
-  try {
-    const user = await getAuthUser();
-    if (!user) {
-      return NextResponse.json({ success: false, error: '未登录' }, { status: 401 });
-    }
-
-    const supabase = getSupabaseClient();
-
-    const { data, error } = await supabase
-      .from('user_settings')
-      .select('setting_key, setting_value')
-      .eq('user_id', user.id);
-
-    if (error) {
-      console.error('获取偏好设置失败:', error);
-      return NextResponse.json({ success: false, error: '获取偏好设置失败' }, { status: 500 });
-    }
-
-    const preferences: Record<string, string> = {};
-    if (data) {
-      data.forEach((item: { setting_key: string; setting_value: string }) => {
-        preferences[item.setting_key] = item.setting_value;
-      });
-    }
-
+    const preferences = await loadUserSettings(auth.user.id).catch(() => ({}));
     return NextResponse.json({ success: true, preferences });
   } catch (error) {
-    console.error('获取偏好设置异常:', error);
-    return NextResponse.json({ success: false, error: '获取偏好设置异常' }, { status: 500 });
+    console.error('get preferences failed:', error);
+    return NextResponse.json({ success: false, error: '????????' }, { status: 500 });
   }
 }
 
-// PUT - 更新用户偏好设置
 export async function PUT(request: NextRequest) {
   try {
-    const user = await getAuthUser();
-    if (!user) {
-      return NextResponse.json({ success: false, error: '未登录' }, { status: 401 });
-    }
+    const auth = await requireSettingsUser(request);
+    if (authFailed(auth)) return auth.response;
 
-    const body = await request.json();
-    const { key, value } = body;
-
+    const { key, value } = await request.json();
     if (!key || value === undefined) {
-      return NextResponse.json({ success: false, error: '参数不完整' }, { status: 400 });
+      return NextResponse.json({ success: false, error: '?????' }, { status: 400 });
     }
 
     const supabase = getSupabaseClient();
-
-    // 使用 upsert 更新或插入偏好设置
-    const { error } = await supabase
-      .from('user_settings')
-      .upsert(
-        {
-          user_id: user.id,
-          setting_key: key,
-          setting_value: value,
-          updated_at: new Date().toISOString(),
-        },
-        { onConflict: 'user_id,setting_key' }
-      );
+    const { error } = await supabase.from('user_settings').upsert(
+      {
+        user_id: auth.user.id,
+        setting_key: key,
+        setting_value: stringifySettingValue(value),
+        updated_at: new Date().toISOString(),
+      },
+      { onConflict: 'user_id,setting_key' }
+    );
 
     if (error) {
-      console.error('更新偏好设置失败:', error);
-      return NextResponse.json({ success: false, error: '更新偏好设置失败' }, { status: 500 });
+      return NextResponse.json({ success: false, error: '????????' }, { status: 500 });
     }
 
-    return NextResponse.json({ success: true, message: '偏好设置已更新' });
+    return NextResponse.json({ success: true, message: '???????' });
   } catch (error) {
-    console.error('更新偏好设置异常:', error);
-    return NextResponse.json({ success: false, error: '更新偏好设置异常' }, { status: 500 });
+    console.error('update preferences failed:', error);
+    return NextResponse.json({ success: false, error: '????????' }, { status: 500 });
   }
 }

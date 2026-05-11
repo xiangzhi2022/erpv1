@@ -1,15 +1,29 @@
 import { NextResponse } from 'next/server';
 import { getSupabaseClient } from '@/db/client';
-import { cookies } from 'next/headers';
+import { getUserFromRequest } from '@/lib/auth';
+import { isSuperAdmin } from '@/lib/role-access';
 
-async function getCurrentUser() {
-  const cookieStore = await cookies();
-  const userStr = cookieStore.get('erp_user')?.value;
-  if (!userStr) return null;
+type Row = Record<string, unknown>;
+type DashboardUser = {
+  id?: string;
+  role?: string;
+  tenant_id?: string;
+};
+
+async function safeRows<T extends Row>(
+  label: string,
+  query: PromiseLike<{ data: T[] | null; error: unknown }>
+): Promise<T[]> {
   try {
-    return JSON.parse(userStr);
-  } catch {
-    return null;
+    const { data, error } = await query;
+    if (error) {
+      console.warn(`Dashboard activity fallback for ${label}:`, error);
+      return [];
+    }
+    return Array.isArray(data) ? data : [];
+  } catch (error) {
+    console.warn(`Dashboard activity fallback for ${label}:`, error);
+    return [];
   }
 }
 
@@ -22,43 +36,61 @@ interface ActivityItem {
   operatorName?: string;
 }
 
-export async function GET() {
+export async function GET(request: Request) {
   try {
-    const user = await getCurrentUser();
+    const user = (await getUserFromRequest(request)) as DashboardUser | null;
     if (!user) {
       return NextResponse.json({ success: false, error: '请先登录' }, { status: 401 });
     }
 
     const supabase = getSupabaseClient();
+    const isAdmin = isSuperAdmin(user);
+    const orderFilter = !isAdmin && user.tenant_id ? { tenant_id: user.tenant_id } : {};
 
     // 并行获取各类最近活动
     const [recentOrders, recentTenants, recentCustomers, recentTasks, recentShippings] =
       await Promise.all([
-        supabase
-          .from('orders')
-          .select('id, order_no, customer_name, status, created_at')
-          .order('created_at', { ascending: false })
-          .limit(5),
-        supabase
-          .from('tenants')
-          .select('id, company_name, tenant_type, created_at')
-          .order('created_at', { ascending: false })
-          .limit(3),
-        supabase
-          .from('customers')
-          .select('id, name, created_at')
-          .order('created_at', { ascending: false })
-          .limit(3),
-        supabase
-          .from('tasks')
-          .select('id, title, status, created_at')
-          .order('created_at', { ascending: false })
-          .limit(3),
-        supabase
-          .from('shipping')
-          .select('id, shipping_no, status, created_at')
-          .order('created_at', { ascending: false })
-          .limit(3),
+        safeRows(
+          'orders',
+          supabase
+            .from('orders')
+            .select('id, order_no, customer_name, status, created_at')
+            .match(orderFilter)
+            .order('created_at', { ascending: false })
+            .limit(5)
+        ),
+        safeRows(
+          'tenants',
+          supabase
+            .from('tenants')
+            .select('id, name, company_name, tenant_type, created_at')
+            .order('created_at', { ascending: false })
+            .limit(3)
+        ),
+        safeRows(
+          'customers',
+          supabase
+            .from('customers')
+            .select('id, name, created_at')
+            .order('created_at', { ascending: false })
+            .limit(3)
+        ),
+        safeRows(
+          'tasks',
+          supabase
+            .from('tasks')
+            .select('id, title, status, created_at')
+            .order('created_at', { ascending: false })
+            .limit(3)
+        ),
+        safeRows(
+          'shipping',
+          supabase
+            .from('shipping')
+            .select('id, shipping_no, status, created_at')
+            .order('created_at', { ascending: false })
+            .limit(3)
+        ),
       ]);
 
     const activities: ActivityItem[] = [];
@@ -75,13 +107,13 @@ export async function GET() {
       cancelled: '已取消',
     };
 
-    for (const order of recentOrders.data || []) {
+    for (const order of recentOrders) {
       activities.push({
-        id: order.id,
+        id: String(order.id),
         type: 'order',
         title: `订单 ${order.order_no}`,
         description: `${order.customer_name || '未知客户'} · ${statusLabels[order.status] || order.status}`,
-        timestamp: order.created_at,
+        timestamp: String(order.created_at || new Date().toISOString()),
       });
     }
 
@@ -92,46 +124,46 @@ export async function GET() {
       material_supplier: '材料商',
     };
 
-    for (const tenant of recentTenants.data || []) {
+    for (const tenant of recentTenants) {
       activities.push({
-        id: tenant.id,
+        id: String(tenant.id),
         type: 'tenant',
-        title: `${tenantTypeLabels[tenant.tenant_type] || '租户'}注册`,
-        description: tenant.company_name,
-        timestamp: tenant.created_at,
+        title: `${tenantTypeLabels[String(tenant.tenant_type)] || '租户'}注册`,
+        description: String(tenant.company_name || tenant.name || '未命名租户'),
+        timestamp: String(tenant.created_at || new Date().toISOString()),
       });
     }
 
     // 客户活动
-    for (const customer of recentCustomers.data || []) {
+    for (const customer of recentCustomers) {
       activities.push({
-        id: customer.id,
+        id: String(customer.id),
         type: 'customer',
         title: '新客户',
-        description: customer.name,
-        timestamp: customer.created_at,
+        description: String(customer.name || '未命名客户'),
+        timestamp: String(customer.created_at || new Date().toISOString()),
       });
     }
 
     // 任务活动
-    for (const task of recentTasks.data || []) {
+    for (const task of recentTasks) {
       activities.push({
-        id: task.id,
+        id: String(task.id),
         type: 'task',
         title: `任务: ${task.title}`,
-        description: `状态: ${statusLabels[task.status] || task.status}`,
-        timestamp: task.created_at,
+        description: `状态: ${statusLabels[String(task.status)] || task.status || '未知'}`,
+        timestamp: String(task.created_at || new Date().toISOString()),
       });
     }
 
     // 发货活动
-    for (const shipping of recentShippings.data || []) {
+    for (const shipping of recentShippings) {
       activities.push({
-        id: shipping.id,
+        id: String(shipping.id),
         type: 'shipping',
         title: `发货 ${shipping.shipping_no}`,
-        description: `${statusLabels[shipping.status] || shipping.status}`,
-        timestamp: shipping.created_at,
+        description: `${statusLabels[String(shipping.status)] || shipping.status || '未知'}`,
+        timestamp: String(shipping.created_at || new Date().toISOString()),
       });
     }
 

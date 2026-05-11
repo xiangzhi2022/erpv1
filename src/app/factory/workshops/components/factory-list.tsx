@@ -1,7 +1,8 @@
 'use client';
 
 import { useState } from 'react';
-import { WorkshopData, getWorkshopStatusConfig } from '../page';
+import { WorkshopData } from '../schemas';
+import { getWorkshopStatusConfig } from '../page';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
@@ -266,7 +267,6 @@ function WorkshopTable({
   onStatusToggle,
   onDelete,
   isPending,
-  onEditSuccess,
 }: FactoryListProps) {
   const [detailWorkshop, setDetailWorkshop] = useState<WorkshopData | null>(null);
 

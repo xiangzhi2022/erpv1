@@ -49,7 +49,7 @@ export function SupplierTable({ data, onEdit, onView, onStatusChange, onDelete }
       <div className="flex flex-col items-center justify-center py-16 text-muted-foreground">
         <ShieldBan className="h-12 w-12 mb-4 opacity-40" />
         <p className="text-lg font-medium">暂无供应商数据</p>
-        <p className="text-sm mt-1">点击右上角"新增供应商"添加</p>
+        <p className="text-sm mt-1">点击右上角&quot;新增供应商&quot;添加</p>
       </div>
     );
   }

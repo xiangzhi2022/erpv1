@@ -23,9 +23,17 @@ export async function POST(request: Request) {
         { status: 400 }
       );
     }
+    // Validate color format (hex color)
+    const finalColor = color ?? "#6366f1";
+    if (typeof finalColor !== "string" || !/^#[0-9a-fA-F]{6}$/.test(finalColor)) {
+      return NextResponse.json(
+        { success: false, error: "颜色格式无效，请使用 #RRGGBB 格式" },
+        { status: 400 }
+      );
+    }
     const category = await createCategory({
       name: name.trim(),
-      color: color ?? "#6366f1",
+      color: finalColor,
       description: description ?? null,
     });
     return NextResponse.json({ success: true, data: category }, { status: 201 });

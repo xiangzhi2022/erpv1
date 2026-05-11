@@ -1,30 +1,44 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getSupabaseClient } from '@/db/client';
+import {
+  ACCOUNT_ROLE_TEMPLATES,
+  PERMISSION_TEMPLATES,
+  getAssignableAccountRoles,
+  getAssignablePermissions,
+} from '@/lib/role-access';
+import { authFailed, requireSettingsUser } from '../_utils';
 
 export async function GET(request: NextRequest) {
   try {
-    const supabase = getSupabaseClient();
-    
-    // 测试连接
-    const { data: testData, error: testError } = await supabase.from('sys_roles').select('id').limit(1);
-    
-    if (testError) {
-      console.error('Supabase connection test error:', testError);
-      return NextResponse.json({ success: false, error: testError.message }, { status: 500 });
-    }
-    
-    const { data: roles, error } = await supabase
-      .from('sys_roles')
-      .select('id, role_name, dept')
-      .order('sort_order');
+    const auth = await requireSettingsUser(request);
+    if (authFailed(auth)) return auth.response;
 
-    if (error) {
-      return NextResponse.json({ success: false, error: error.message }, { status: 500 });
-    }
+    const accountRoles = getAssignableAccountRoles(auth.user).map((role) => ({
+      value: role.role,
+      label: role.label,
+      level: role.level,
+      businessType: role.businessType,
+      department: role.department,
+      description: role.description,
+    }));
 
-    return NextResponse.json({ success: true, roles });
+    const permissions = getAssignablePermissions(auth.user).map((permission) => ({
+      value: permission.key,
+      label: permission.label,
+      level: permission.level,
+      businessType: permission.businessType,
+      department: permission.department,
+      description: permission.description,
+    }));
+
+    return NextResponse.json({
+      success: true,
+      accountRoles,
+      permissions,
+      allAccountRoles: ACCOUNT_ROLE_TEMPLATES,
+      allPermissions: PERMISSION_TEMPLATES,
+    });
   } catch (error) {
-    console.error('获取角色列表失败:', error);
-    return NextResponse.json({ success: false, error: '获取角色列表失败' }, { status: 500 });
+    console.error('get roles failed:', error);
+    return NextResponse.json({ success: false, error: '获取角色权限失败' }, { status: 500 });
   }
 }

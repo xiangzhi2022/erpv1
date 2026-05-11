@@ -1,216 +1,139 @@
-import { createClient } from '@supabase/supabase-js';
 import { NextRequest, NextResponse } from 'next/server';
-import { cookies } from 'next/headers';
+import { getSupabaseClient } from '@/db/client';
+import { authFailed, normalizeTenant, requireSettingsUser } from '../_utils';
 
-const supabaseUrl = process.env.COZE_SUPABASE_URL || '';
-const supabaseServiceKey = process.env.COZE_SUPABASE_SERVICE_ROLE_KEY || '';
-
-function getSupabaseAdmin() {
-  return createClient(supabaseUrl, supabaseServiceKey, {
-    auth: { persistSession: false }
-  });
+function requireSuperAdmin(role: string) {
+  return role === 'super_admin';
 }
 
-async function getAuthUser() {
-  const cookieStore = await cookies();
-  const token = cookieStore.get('erp_user');
-  if (!token) return null;
+export async function GET(request: NextRequest) {
   try {
-    return JSON.parse(token.value);
-  } catch {
-    return null;
-  }
-}
-
-export async function GET() {
-  try {
-    const user = await getAuthUser();
-    if (!user) {
-      return NextResponse.json({ success: false, error: '未登录' }, { status: 401 });
+    const auth = await requireSettingsUser(request);
+    if (authFailed(auth)) return auth.response;
+    if (!requireSuperAdmin(auth.user.role)) {
+      return NextResponse.json({ success: false, error: '?????????' }, { status: 403 });
     }
 
-    const supabase = getSupabaseAdmin();
-    const { data, error } = await supabase
+    const { data, error } = await getSupabaseClient()
       .from('tenants')
-      .select('*')
+      .select('id, name, company_name, tenant_type, prefix, status, created_at, updated_at')
       .order('created_at', { ascending: false });
 
-    if (error) {
-      return NextResponse.json({ success: false, error: error.message }, { status: 500 });
-    }
-
-    return NextResponse.json({ success: true, tenants: data || [] });
+    if (error) return NextResponse.json({ success: false, error: '????????' }, { status: 500 });
+    return NextResponse.json({ success: true, tenants: (data || []).map(normalizeTenant) });
   } catch (error) {
-    console.error('获取租户列表失败:', error);
-    return NextResponse.json({ success: false, error: '获取租户列表失败' }, { status: 500 });
+    console.error('get tenants failed:', error);
+    return NextResponse.json({ success: false, error: '????????' }, { status: 500 });
   }
 }
 
 export async function POST(request: NextRequest) {
   try {
-    const user = await getAuthUser();
-    if (!user) {
-      return NextResponse.json({ success: false, error: '未登录' }, { status: 401 });
-    }
-
-    // 只有官方管理员可以创建租户
-    if (user.role !== 'super_admin') {
-      return NextResponse.json({ success: false, error: '只有管理员可以创建租户' }, { status: 403 });
+    const auth = await requireSettingsUser(request);
+    if (authFailed(auth)) return auth.response;
+    if (!requireSuperAdmin(auth.user.role)) {
+      return NextResponse.json({ success: false, error: '???????????' }, { status: 403 });
     }
 
     const body = await request.json();
-    const { tenant_type, company_name, contact_phone, address, prefix } = body;
-
-    if (!tenant_type || !company_name) {
-      return NextResponse.json({ success: false, error: '租户类型和公司名称必填' }, { status: 400 });
+    const tenantType = body.tenant_type;
+    const companyName = body.company_name || body.name;
+    if (!tenantType || !companyName) {
+      return NextResponse.json({ success: false, error: '???????????' }, { status: 400 });
     }
 
-    if (!['manufacturer', 'dealer', 'material_supplier'].includes(tenant_type)) {
-      return NextResponse.json({ success: false, error: '无效的租户类型' }, { status: 400 });
-    }
-
-    const supabase = getSupabaseAdmin();
-
-    // 如果提供了前缀，检查是否已存在
-    if (prefix) {
+    const supabase = getSupabaseClient();
+    if (body.prefix) {
       const { data: existing } = await supabase
         .from('tenants')
         .select('id')
-        .eq('prefix', prefix)
-        .single();
-      
-      if (existing) {
-        return NextResponse.json({ success: false, error: '该前缀已被使用' }, { status: 400 });
-      }
+        .eq('prefix', body.prefix)
+        .maybeSingle();
+      if (existing) return NextResponse.json({ success: false, error: '???????' }, { status: 400 });
     }
 
-    // 创建租户
     const { data, error } = await supabase
       .from('tenants')
-      .insert({
-        tenant_type,
-        company_name,
-        contact_phone: contact_phone || null,
-        address: address || null,
-        prefix: prefix || null,
-      })
-      .select()
+      .insert({ name: companyName, company_name: companyName, tenant_type: tenantType, prefix: body.prefix || null, status: body.status || 'active' })
+      .select('id, name, company_name, tenant_type, prefix, status, created_at, updated_at')
       .single();
 
-    if (error) {
-      return NextResponse.json({ success: false, error: error.message }, { status: 500 });
-    }
-
-    return NextResponse.json({ success: true, tenant: data });
+    if (error) return NextResponse.json({ success: false, error: '??????' }, { status: 500 });
+    return NextResponse.json({ success: true, tenant: normalizeTenant(data) });
   } catch (error) {
-    console.error('创建租户失败:', error);
-    return NextResponse.json({ success: false, error: '创建租户失败' }, { status: 500 });
+    console.error('create tenant failed:', error);
+    return NextResponse.json({ success: false, error: '??????' }, { status: 500 });
   }
 }
 
 export async function PUT(request: NextRequest) {
   try {
-    const user = await getAuthUser();
-    if (!user) {
-      return NextResponse.json({ success: false, error: '未登录' }, { status: 401 });
-    }
-
-    if (user.role !== 'super_admin') {
-      return NextResponse.json({ success: false, error: '只有管理员可以修改租户' }, { status: 403 });
+    const auth = await requireSettingsUser(request);
+    if (authFailed(auth)) return auth.response;
+    if (!requireSuperAdmin(auth.user.role)) {
+      return NextResponse.json({ success: false, error: '???????????' }, { status: 403 });
     }
 
     const body = await request.json();
-    const { id, company_name, contact_phone, address, prefix, status } = body;
+    if (!body.id) return NextResponse.json({ success: false, error: '??ID??' }, { status: 400 });
 
-    if (!id) {
-      return NextResponse.json({ success: false, error: '租户ID必填' }, { status: 400 });
-    }
-
-    const supabase = getSupabaseAdmin();
-
-    // 如果更新前缀，检查是否与其他租户冲突
-    if (prefix) {
+    const supabase = getSupabaseClient();
+    if (body.prefix) {
       const { data: existing } = await supabase
         .from('tenants')
         .select('id')
-        .eq('prefix', prefix)
-        .neq('id', id)
-        .single();
-      
-      if (existing) {
-        return NextResponse.json({ success: false, error: '该前缀已被其他租户使用' }, { status: 400 });
-      }
+        .eq('prefix', body.prefix)
+        .neq('id', body.id)
+        .maybeSingle();
+      if (existing) return NextResponse.json({ success: false, error: '???????????' }, { status: 400 });
     }
 
-    const updateData: Record<string, string> = {};
-    if (company_name) updateData.company_name = company_name;
-    if (contact_phone !== undefined) updateData.contact_phone = contact_phone;
-    if (address !== undefined) updateData.address = address;
-    if (prefix !== undefined) updateData.prefix = prefix;
-    if (status) updateData.status = status;
-    updateData.updated_at = new Date().toISOString();
+    const updateData: Record<string, unknown> = { updated_at: new Date().toISOString() };
+    if (body.company_name !== undefined || body.name !== undefined) {
+      updateData.name = body.company_name || body.name;
+      updateData.company_name = body.company_name || body.name;
+    }
+    if (body.tenant_type !== undefined) updateData.tenant_type = body.tenant_type;
+    if (body.prefix !== undefined) updateData.prefix = body.prefix || null;
+    if (body.status !== undefined) updateData.status = body.status;
 
     const { data, error } = await supabase
       .from('tenants')
       .update(updateData)
-      .eq('id', id)
-      .select()
+      .eq('id', body.id)
+      .select('id, name, company_name, tenant_type, prefix, status, created_at, updated_at')
       .single();
 
-    if (error) {
-      return NextResponse.json({ success: false, error: error.message }, { status: 500 });
-    }
-
-    return NextResponse.json({ success: true, tenant: data });
+    if (error) return NextResponse.json({ success: false, error: '??????' }, { status: 500 });
+    return NextResponse.json({ success: true, tenant: normalizeTenant(data) });
   } catch (error) {
-    console.error('更新租户失败:', error);
-    return NextResponse.json({ success: false, error: '更新租户失败' }, { status: 500 });
+    console.error('update tenant failed:', error);
+    return NextResponse.json({ success: false, error: '??????' }, { status: 500 });
   }
 }
 
 export async function DELETE(request: NextRequest) {
   try {
-    const user = await getAuthUser();
-    if (!user) {
-      return NextResponse.json({ success: false, error: '未登录' }, { status: 401 });
+    const auth = await requireSettingsUser(request);
+    if (authFailed(auth)) return auth.response;
+    if (!requireSuperAdmin(auth.user.role)) {
+      return NextResponse.json({ success: false, error: '???????????' }, { status: 403 });
     }
 
-    if (user.role !== 'super_admin') {
-      return NextResponse.json({ success: false, error: '只有管理员可以删除租户' }, { status: 403 });
-    }
+    const id = new URL(request.url).searchParams.get('id');
+    if (!id) return NextResponse.json({ success: false, error: '??ID??' }, { status: 400 });
 
-    const { searchParams } = new URL(request.url);
-    const id = searchParams.get('id');
-
-    if (!id) {
-      return NextResponse.json({ success: false, error: '租户ID必填' }, { status: 400 });
-    }
-
-    const supabase = getSupabaseAdmin();
-
-    // 不允许删除官方管理员
-    const { data: tenant } = await supabase
-      .from('tenants')
-      .select('tenant_type')
-      .eq('id', id)
-      .single();
-
+    const supabase = getSupabaseClient();
+    const { data: tenant } = await supabase.from('tenants').select('tenant_type').eq('id', id).maybeSingle();
     if (tenant?.tenant_type === 'official') {
-      return NextResponse.json({ success: false, error: '不能删除官方租户' }, { status: 400 });
+      return NextResponse.json({ success: false, error: '????????' }, { status: 400 });
     }
 
-    const { error } = await supabase
-      .from('tenants')
-      .delete()
-      .eq('id', id);
-
-    if (error) {
-      return NextResponse.json({ success: false, error: error.message }, { status: 500 });
-    }
-
+    const { error } = await supabase.from('tenants').delete().eq('id', id);
+    if (error) return NextResponse.json({ success: false, error: '??????' }, { status: 500 });
     return NextResponse.json({ success: true });
   } catch (error) {
-    console.error('删除租户失败:', error);
-    return NextResponse.json({ success: false, error: '删除租户失败' }, { status: 500 });
+    console.error('delete tenant failed:', error);
+    return NextResponse.json({ success: false, error: '??????' }, { status: 500 });
   }
 }

@@ -1,54 +1,71 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseClient } from '@/db/client';
+import { getUserFromRequest } from '@/lib/auth';
+import { requireDevEnv, safeErrorMessage } from '../_lib/env-guard';
 
+/**
+ * Debug endpoint: tests user_settings table connectivity and write operations.
+ * Only available in development. Never exposes stack traces or internal details.
+ */
 export async function POST(request: NextRequest) {
+  const guard = requireDevEnv();
+  if (guard) return guard;
+
   try {
     const supabase = getSupabaseClient();
-    
-    // 获取当前用户
-    const userCookie = request.cookies.get('erp_user');
-    if (!userCookie) {
+
+    const user = await getUserFromRequest(request);
+    if (!user) {
       return NextResponse.json(
         { success: false, error: '请先登录' },
-        { status: 401 }
+        { status: 401 },
       );
     }
-    
-    const user = JSON.parse(userCookie.value);
-    
-    // 1. 检查 user_settings 表是否存在
-    const { data: tables, error: tablesError } = await supabase
+
+    // 1. Check user_settings table exists (read-only connectivity check)
+    const { error: tablesError } = await supabase
       .from('user_settings')
-      .select('*')
+      .select('id')
       .limit(1);
-    
-    // 2. 尝试插入数据
+
+    if (tablesError) {
+      return NextResponse.json({
+        success: false,
+        error: 'Table check failed',
+        tableExists: false,
+      });
+    }
+
+    // 2. Attempt insert (only in dev)
     const { data, error: insertError } = await supabase
       .from('user_settings')
       .insert({
         user_id: user.id,
         setting_key: 'order_prefix',
         setting_value: 'TEST',
-        updated_at: new Date().toISOString()
+        updated_at: new Date().toISOString(),
       })
-      .select()
+      .select('id, user_id, setting_key, setting_value, updated_at')
       .single();
-    
+
+    if (insertError) {
+      return NextResponse.json({
+        success: false,
+        error: 'Insert failed',
+        tableExists: true,
+      });
+    }
+
     return NextResponse.json({
       success: true,
-      debug: {
-        userId: user.id,
-        tablesError: tablesError,
-        insertError: insertError,
-        insertedData: data
-      }
+      tableExists: true,
+      insertOk: true,
+      insertedId: data.id,
     });
-    
-  } catch (error: any) {
-    return NextResponse.json({
-      success: false,
-      error: error.message,
-      stack: error.stack
-    }, { status: 500 });
+  } catch (err: unknown) {
+    return NextResponse.json(
+      { success: false, error: safeErrorMessage(err) },
+      { status: 500 },
+    );
   }
 }

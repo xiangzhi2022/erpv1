@@ -1,7 +1,17 @@
 import { NextResponse } from 'next/server';
 import { getSupabaseClient } from '@/db/client';
 import { getUserFromRequest } from '@/lib/auth';
-import { workOrderQuerySchema, type ProgressStats, type WorkOrder } from '@/app/progress/schemas';
+import { workOrderQuerySchema, WorkOrderStatus, type ProgressStats, type WorkOrder } from '@/app/progress/schemas';
+
+/** Check if a string is a valid UUID v4 format */
+function isValidUUID(value: string): boolean {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value);
+}
+
+/** Safely resolve operator name from user, with fallback chain */
+function resolveOperatorName(user: { nickname?: string; phone?: string; email?: string; name?: string }): string {
+  return user.nickname || user.phone || user.email || user.name || '未知操作人';
+}
 
 export async function GET(request: Request) {
   try {
@@ -69,7 +79,7 @@ export async function GET(request: Request) {
       throw new Error(`统计失败: ${countError.message}`);
     }
 
-    // Get status distribution for stats
+    // Get status distribution for stats - aligned with canonical status names
     const { data: allOrders, error: statsError } = await supabase
       .from('work_orders')
       .select('status, expected_end_date, completed_quantity, target_quantity');
@@ -81,14 +91,14 @@ export async function GET(request: Request) {
     const now = new Date();
     const stats: ProgressStats = {
       total: allOrders?.length || 0,
-      pending: allOrders?.filter((o: Record<string, unknown>) => o.status === 'pending').length || 0,
-      producing: allOrders?.filter((o: Record<string, unknown>) => o.status === 'producing').length || 0,
-      inspecting: allOrders?.filter((o: Record<string, unknown>) => o.status === 'inspecting').length || 0,
-      stored: allOrders?.filter((o: Record<string, unknown>) => o.status === 'stored').length || 0,
-      aborted: allOrders?.filter((o: Record<string, unknown>) => o.status === 'aborted').length || 0,
+      pending: allOrders?.filter((o: Record<string, unknown>) => o.status === WorkOrderStatus.PENDING).length || 0,
+      producing: allOrders?.filter((o: Record<string, unknown>) => o.status === WorkOrderStatus.PRODUCING).length || 0,
+      inspecting: allOrders?.filter((o: Record<string, unknown>) => o.status === WorkOrderStatus.INSPECTING).length || 0,
+      stored: allOrders?.filter((o: Record<string, unknown>) => o.status === WorkOrderStatus.STORED).length || 0,
+      aborted: allOrders?.filter((o: Record<string, unknown>) => o.status === WorkOrderStatus.ABORTED).length || 0,
       overdue:
         allOrders?.filter((o: Record<string, unknown>) => {
-          if (!o.expected_end_date || o.status === 'stored' || o.status === 'aborted')
+          if (!o.expected_end_date || o.status === WorkOrderStatus.STORED || o.status === WorkOrderStatus.ABORTED)
             return false;
           return new Date(String(o.expected_end_date)) < now;
         }).length || 0,
@@ -120,51 +130,74 @@ export async function POST(request: Request) {
     }
 
     const body = await request.json();
-    const { order_id, order_item_id, workshop_id, product_name, target_quantity, priority, expected_end_date, remark } = body;
+    const { order_id, workshop_id, product_name, target_quantity, priority, expected_end_date, remark } = body;
 
-    if (!order_id || !product_name || target_quantity === undefined) {
+    if (!product_name || target_quantity === undefined) {
       return NextResponse.json(
-        { success: false, error: '缺少必填字段: order_id, product_name, target_quantity' },
+        { success: false, error: '缺少必填字段: product_name, target_quantity' },
+        { status: 400 }
+      );
+    }
+
+    if (target_quantity <= 0) {
+      return NextResponse.json(
+        { success: false, error: '目标数量必须大于0' },
         { status: 400 }
       );
     }
 
     const supabase = getSupabaseClient();
 
+    // Build insert data — only include columns that exist in the DB schema
+    const insertData: Record<string, unknown> = {
+      workshop_id: workshop_id || null,
+      product_name,
+      target_quantity,
+      completed_quantity: 0,
+      status: WorkOrderStatus.PENDING,
+      priority: priority || 'normal',
+      expected_end_date: expected_end_date || null,
+      remark: remark || null,
+    };
+
+    // Only set order_id if it is a valid UUID (the column is UUID type and nullable)
+    if (order_id && isValidUUID(String(order_id))) {
+      insertData.order_id = order_id;
+    }
+
+    // Create work order with initial status 'pending'
     const { data, error } = await supabase
       .from('work_orders')
-      .insert({
-        order_id,
-        order_item_id,
-        workshop_id,
-        product_name,
-        target_quantity,
-        completed_quantity: 0,
-        status: 'pending',
-        priority: priority || 'normal',
-        expected_end_date: expected_end_date || null,
-        remark: remark || null,
-        created_by: user.id,
-      })
+      .insert(insertData)
       .select()
-      .single();
+      .maybeSingle();
 
     if (error) {
       throw new Error(`创建工单失败: ${error.message}`);
     }
 
-    // Auto-create a progress log
-    const { error: logError } = await supabase.from('progress_logs').insert({
+    if (!data) {
+      throw new Error('创建工单失败: 未返回数据');
+    }
+
+    // Write initial progress log on work order creation
+    // operator_id is UUID type — only set if user.id is a valid UUID
+    const logInsertData: Record<string, unknown> = {
       work_order_id: data.id,
-      operator_id: user.id,
-      operator_name: user.nickname || user.phone,
+      operator_name: resolveOperatorName(user),
       action: 'start',
       completed_delta: 0,
       remark: '工单创建',
-    });
+    };
+    if (isValidUUID(user.id)) {
+      logInsertData.operator_id = user.id;
+    }
+
+    const { error: logError } = await supabase.from('progress_logs').insert(logInsertData);
 
     if (logError) {
       console.error('创建进度日志失败:', logError.message);
+      // Non-fatal: work order is created, log failure should not block
     }
 
     return NextResponse.json({ success: true, data });

@@ -38,7 +38,7 @@ export function CraftDistribution({ distribution }: CraftDistributionProps) {
           .sort(([, a], [, b]) => b - a)
           .map(([craft, count]) => {
             const percentage = Math.round((count / total) * 100);
-            const label = CRAFT_TYPES.find(c => c.value === craft)?.label || (craft === '未分配' ? '未分配' : craft);
+            const label = CRAFT_TYPES.find(c => c.value === craft)?.label || (craft === 'unassigned' ? '未分配' : craft);
             const colorClass = CRAFT_COLORS[craft] || 'bg-gray-400';
             return (
               <div key={craft}>

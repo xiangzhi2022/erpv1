@@ -1,23 +1,21 @@
 import { getSupabaseClient } from '@/db/client';
-import { cookies } from 'next/headers';
+import { getUserFromRequest, type AuthUser } from '@/lib/auth';
+import { isSuperAdmin } from '@/lib/role-access';
+import { ORDER_STATUSES, STATUS_TRANSITIONS } from '@/app/orders/schemas';
 
 const getServiceClient = () => getSupabaseClient();
 
-async function getCurrentUser() {
-  const cookieStore = await cookies();
-  const userStr = cookieStore.get('erp_user')?.value;
-  if (!userStr) return null;
-  try {
-    return JSON.parse(userStr);
-  } catch {
-    return null;
-  }
+function canAccessAllTenants(user: AuthUser): boolean {
+  return isSuperAdmin(user);
 }
+
+// Valid status values for filtering
+const VALID_STATUSES = new Set<string>(ORDER_STATUSES);
 
 // GET /api/orders - Fetch orders with pagination, search, filtering, and items
 export async function GET(request: Request) {
   try {
-    const user = await getCurrentUser();
+    const user = await getUserFromRequest(request);
     if (!user) {
       return Response.json({ success: false, error: '请先登录' }, { status: 401 });
     }
@@ -26,8 +24,8 @@ export async function GET(request: Request) {
     const { searchParams } = new URL(request.url);
     const status = searchParams.get('status');
     const search = searchParams.get('search');
-    const page = parseInt(searchParams.get('page') || '1', 10);
-    const pageSize = parseInt(searchParams.get('pageSize') || '20', 10);
+    const page = Math.max(1, parseInt(searchParams.get('page') || '1', 10));
+    const pageSize = Math.min(100, Math.max(1, parseInt(searchParams.get('pageSize') || '20', 10)));
     const dateFrom = searchParams.get('dateFrom');
     const dateTo = searchParams.get('dateTo');
 
@@ -41,17 +39,24 @@ export async function GET(request: Request) {
       .order('created_at', { ascending: false })
       .range(from, to);
 
-    // Permission filter: super_admin/saas_admin sees all, others see own
-    if (user.role !== 'super_admin' && user.role !== 'saas_admin') {
-      query = query.eq('created_by', user.id);
+    // Non-platform users are scoped by tenant_id instead of per-user ownership.
+    if (!canAccessAllTenants(user)) {
+      if (!user.tenant_id) {
+        return Response.json({ success: false, error: '当前用户未关联租户' }, { status: 403 });
+      }
+      query = query.eq('tenant_id', user.tenant_id);
     }
 
-    // Status filter
+    // Status filter - validate before applying
     if (status && status !== 'all') {
-      const statuses = status.split(',');
+      const requestedStatuses = status.split(',').map((s) => s.trim()).filter(Boolean);
+      const statuses = requestedStatuses.filter((s) => VALID_STATUSES.has(s));
+      if (statuses.length !== requestedStatuses.length) {
+        return Response.json({ success: false, error: '订单状态筛选值无效' }, { status: 400 });
+      }
       if (statuses.length === 1) {
         query = query.eq('status', statuses[0]);
-      } else {
+      } else if (statuses.length > 1) {
         query = query.in('status', statuses);
       }
     }
@@ -76,12 +81,17 @@ export async function GET(request: Request) {
       return Response.json({ success: false, error: error.message }, { status: 500 });
     }
 
-    // Get status statistics
+    // Get status statistics (using same permission scope)
     let statsQuery = supabase.from('orders').select('status');
-    if (user.role !== 'super_admin' && user.role !== 'saas_admin') {
-      statsQuery = statsQuery.eq('created_by', user.id);
+    if (!canAccessAllTenants(user)) {
+      statsQuery = statsQuery.eq('tenant_id', user.tenant_id);
     }
-    const { data: allOrders } = await statsQuery;
+    const { data: allOrders, error: statsError } = await statsQuery;
+
+    if (statsError) {
+      console.error('Get order stats error:', statsError);
+      return Response.json({ success: false, error: statsError.message }, { status: 500 });
+    }
 
     const stats = {
       total: allOrders?.length || 0,
@@ -89,7 +99,7 @@ export async function GET(request: Request) {
       returned: allOrders?.filter((o: { status: string }) => o.status === 'returned').length || 0,
       confirmed: allOrders?.filter((o: { status: string }) => o.status === 'confirmed').length || 0,
       pool: allOrders?.filter((o: { status: string }) => o.status === 'pool').length || 0,
-      producing: allOrders?.filter((o: { status: string }) => o.status === 'producing' || o.status === 'in_production').length || 0,
+      producing: allOrders?.filter((o: { status: string }) => o.status === 'producing').length || 0,
       shipped: allOrders?.filter((o: { status: string }) => o.status === 'shipped').length || 0,
       completed: allOrders?.filter((o: { status: string }) => o.status === 'completed').length || 0,
       cancelled: allOrders?.filter((o: { status: string }) => o.status === 'cancelled').length || 0,
@@ -115,29 +125,52 @@ export async function GET(request: Request) {
 // POST /api/orders - Create order with items
 export async function POST(request: Request) {
   try {
-    const user = await getCurrentUser();
+    const user = await getUserFromRequest(request);
     if (!user) {
       return Response.json({ success: false, error: '请先登录' }, { status: 401 });
     }
 
     const body = await request.json();
-    const { order_no, customer_name, delivery_date, remark, items } = body;
+    const { order_no, customer_name, customer_phone, delivery_date, remark, items, target_factory_id } = body;
 
-    if (!order_no) {
+    // Validate required fields
+    if (!order_no || !order_no.trim()) {
       return Response.json({ success: false, error: '订单号不能为空' }, { status: 400 });
     }
-    if (!customer_name) {
+    if (!customer_name || !customer_name.trim()) {
       return Response.json({ success: false, error: '客户名称不能为空' }, { status: 400 });
     }
-    if (!items || items.length === 0) {
+    if (!items || !Array.isArray(items) || items.length === 0) {
       return Response.json({ success: false, error: '订单项不能为空' }, { status: 400 });
+    }
+
+    // Validate each order item
+    for (let i = 0; i < items.length; i++) {
+      const item = items[i];
+      if (!item.product_name || !item.product_name.trim()) {
+        return Response.json({ success: false, error: `第${i + 1}项: 产品名称不能为空` }, { status: 400 });
+      }
+      if (!item.quantity || item.quantity < 1) {
+        return Response.json({ success: false, error: `第${i + 1}项: 数量必须大于0` }, { status: 400 });
+      }
     }
 
     const supabase = getServiceClient();
 
-    // Calculate total amount from items
+    // Check for duplicate order_no
+    const { data: existing } = await supabase
+      .from('orders')
+      .select('id')
+      .eq('order_no', order_no.trim())
+      .maybeSingle();
+
+    if (existing) {
+      return Response.json({ success: false, error: '订单号已存在，请重新生成' }, { status: 409 });
+    }
+
+    // Calculate total amount from items (all amounts in cents)
     let totalAmount = 0;
-    const orderItems = items.map((item: { product_name: string; specification?: string; quantity: number; unit: string; unit_price: number }) => {
+    const orderItems = items.map((item: { product_name: string; specification?: string; quantity: number; unit: string; unit_price: number; remark?: string }) => {
       const subtotal = (item.quantity || 1) * (item.unit_price || 0);
       totalAmount += subtotal;
       return {
@@ -147,20 +180,23 @@ export async function POST(request: Request) {
         unit: item.unit || '件',
         unit_price: item.unit_price || 0,
         subtotal,
+        remark: item.remark || null,
       };
     });
 
-    // Create order (using actual DB schema columns)
+    // Create order - only use columns that exist in DB schema
     const { data: order, error: orderError } = await supabase
       .from('orders')
       .insert({
-        order_no,
-        customer_name,
+        order_no: order_no.trim(),
+        customer_name: customer_name.trim(),
+        customer_phone: customer_phone?.trim() || null,
         status: 'pending',
         total_amount: totalAmount,
         delivery_date: delivery_date || null,
         remark: remark || null,
-        created_by: user.id,
+        tenant_id: user.tenant_id || null,
+        target_factory_id: target_factory_id || null,
       })
       .select()
       .single();
@@ -182,6 +218,7 @@ export async function POST(request: Request) {
 
     if (itemsError) {
       console.error('Create order items error:', itemsError);
+      // Rollback: delete the created order
       await supabase.from('orders').delete().eq('id', order.id);
       return Response.json({ success: false, error: '创建订单明细失败' }, { status: 500 });
     }
@@ -200,47 +237,79 @@ export async function POST(request: Request) {
   }
 }
 
-// PUT /api/orders - Update order status
+// PUT /api/orders - Backward-compatible status update endpoint.
 export async function PUT(request: Request) {
   try {
-    const user = await getCurrentUser();
+    const user = await getUserFromRequest(request);
     if (!user) {
       return Response.json({ success: false, error: '请先登录' }, { status: 401 });
     }
+    if (!canAccessAllTenants(user) && !user.tenant_id) {
+      return Response.json({ success: false, error: '当前用户未关联租户' }, { status: 403 });
+    }
 
     const body = await request.json();
-    const { id, status, notes } = body;
+    const { id, status, notes } = body as { id?: string; status?: string; notes?: string };
 
-    if (!id || !status) {
-      return Response.json({ success: false, error: '缺少订单ID或状态' }, { status: 400 });
+    if (!id) {
+      return Response.json({ success: false, error: '订单 ID 不能为空' }, { status: 400 });
+    }
+    if (!status || !VALID_STATUSES.has(status)) {
+      return Response.json({ success: false, error: '无效的状态值' }, { status: 400 });
     }
 
     const supabase = getServiceClient();
+    let fetchQuery = supabase
+      .from('orders')
+      .select('id, status, tenant_id')
+      .eq('id', id);
+
+    if (!canAccessAllTenants(user)) {
+      if (!user.tenant_id) {
+        return Response.json({ success: false, error: '当前用户未关联租户' }, { status: 403 });
+      }
+      fetchQuery = fetchQuery.eq('tenant_id', user.tenant_id);
+    }
+
+    const { data: existingOrder, error: fetchError } = await fetchQuery.single();
+
+    if (fetchError || !existingOrder) {
+      return Response.json({ success: false, error: '订单不存在或无权操作' }, { status: 404 });
+    }
+
+    const currentStatus = existingOrder.status as string;
+    const allowedTransitions = STATUS_TRANSITIONS[currentStatus];
+    if (status !== currentStatus && (!allowedTransitions || !allowedTransitions.has(status))) {
+      return Response.json(
+        { success: false, error: `不允许从「${currentStatus}」变更为「${status}」` },
+        { status: 400 }
+      );
+    }
 
     const updateData: Record<string, unknown> = {
       status,
       updated_at: new Date().toISOString(),
     };
 
-    if (notes !== undefined) {
-      updateData.remark = notes;
+    if (typeof notes === 'string' && notes.trim()) {
+      updateData.remark = notes.trim();
     }
 
     const { data, error } = await supabase
       .from('orders')
       .update(updateData)
       .eq('id', id)
-      .select()
+      .select('*, items:order_items(*)')
       .single();
 
     if (error) {
-      console.error('Update order error:', error);
+      console.error('Update order status error:', error);
       return Response.json({ success: false, error: error.message }, { status: 500 });
     }
 
     return Response.json({ success: true, data });
   } catch (err) {
-    console.error('Update order error:', err);
+    console.error('Update order status error:', err);
     return Response.json({ success: false, error: '服务器错误' }, { status: 500 });
   }
 }
