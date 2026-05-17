@@ -35,8 +35,7 @@ export async function GET(request: Request) {
       .from("orders")
       .select(`
         id, order_no, customer_name, customer_phone, status, total_amount,
-        delivery_date, remark, tenant_id, target_factory_id, created_at, updated_at,
-        dealer:tenants!orders_dealer_id_fkey(id, name),
+        delivery_date, remark, tenant_id, dealer_id, from_tenant_id, target_factory_id, created_at, updated_at,
         items:order_items(id, product_name, quantity, unit_price, subtotal)
       `)
       .eq("target_factory_id", user.tenant_id || "")
@@ -58,6 +57,15 @@ export async function GET(request: Request) {
     }
 
     const orderList = orders || [];
+    const tenantIds = Array.from(new Set(
+      orderList
+        .flatMap((order: Record<string, unknown>) => [order.dealer_id, order.from_tenant_id, order.tenant_id])
+        .filter((value): value is string => typeof value === "string" && value.length > 0)
+    ));
+    const { data: tenantRows } = tenantIds.length > 0
+      ? await supabase.from("tenants").select("id, name, company_name").in("id", tenantIds)
+      : { data: [] };
+    const tenantMap = new Map((tenantRows || []).map((tenant: Record<string, unknown>) => [tenant.id as string, tenant]));
 
     // 获取订单对应的生产任务 - 使用 status 字段（与 production_tasks 表一致）
     const orderIds = orderList.map((o: Record<string, unknown>) => o.id as string);
@@ -87,8 +95,10 @@ export async function GET(request: Request) {
     // 合并数据
     const ordersWithProgress = orderList.map((o: Record<string, unknown>) => {
       const stats = taskStats.find(s => s.order_id === o.id) || { total: 0, completed: 0 };
+      const dealerId = (o.dealer_id || o.from_tenant_id || o.tenant_id) as string | undefined;
       return {
         ...o,
+        dealer: dealerId ? tenantMap.get(dealerId) || null : null,
         total_tasks: stats.total,
         completed_tasks: stats.completed,
         progress: stats.total > 0 ? Math.round((stats.completed / stats.total) * 100) : 0,
@@ -98,7 +108,7 @@ export async function GET(request: Request) {
     // 统计（基于全量订单，不受筛选参数影响）
     const { data: allOrders, error: statsError } = await supabase
       .from("orders")
-      .select("status")
+      .select("id, status")
       .eq("target_factory_id", user.tenant_id || "");
 
     if (statsError) {

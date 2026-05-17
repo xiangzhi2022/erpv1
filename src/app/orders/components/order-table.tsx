@@ -1,16 +1,10 @@
 'use client';
 
+import Link from 'next/link';
 import { useState } from 'react';
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table';
-import { Button } from '@/components/ui/button';
+import { ArrowRight, CheckCircle, Eye, FileText, MoreHorizontal, RotateCcw, XCircle } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import {
   DropdownMenu,
@@ -35,11 +29,20 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { Skeleton } from '@/components/ui/skeleton';
-import { MoreHorizontal, Eye, RotateCcw, CheckCircle, XCircle, ArrowRight, FileText } from 'lucide-react';
-import { Order, ORDER_STATUS_CONFIG, formatAmount, formatDate } from '../schemas';
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table';
+import type { OrderMode } from '@/lib/order-flow';
+import { ORDER_STATUS_CONFIG, type Order, formatAmount, formatDate } from '../schemas';
 
 interface OrderTableProps {
   orders: Order[];
+  mode: OrderMode;
   loading: boolean;
   pagination: {
     page: number;
@@ -53,8 +56,30 @@ interface OrderTableProps {
   onStatusChange: (orderId: string, status: string, notes?: string) => void;
 }
 
+function counterparty(order: Order, mode: OrderMode): string {
+  if (mode === 'dealer' || mode === 'factory_material') {
+    return order.to_tenant?.company_name || order.to_tenant?.name || order.customer_name || '-';
+  }
+  return order.from_tenant?.company_name || order.from_tenant?.name || order.customer_name || '-';
+}
+
+function flowLabel(order: Order): string {
+  if (order.order_flow === 'dealer_to_factory') return '经销商 -> 工厂';
+  if (order.order_flow === 'factory_to_supplier') return '工厂 -> 材料商';
+  return '历史订单';
+}
+
+function itemSummary(order: Order): string {
+  if (order.modules.length > 0) {
+    return `${order.modules.length} 个模块 / ${order.items.length} 个明细`;
+  }
+  if (order.items.length > 0) return `${order.items.length} 个明细`;
+  return '-';
+}
+
 export function OrderTable({
   orders,
+  mode,
   loading,
   pagination,
   onPageChange,
@@ -63,34 +88,32 @@ export function OrderTable({
   onStatusChange,
 }: OrderTableProps) {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const canReceive = mode === 'factory_received' || mode === 'supplier_received';
+  const canAdvanceProduction = mode === 'factory_received';
+  const canCancelOutgoing = mode === 'dealer' || mode === 'factory_material';
 
   const toggleSelect = (id: string) => {
     setSelectedIds((prev) => {
       const next = new Set(prev);
-      if (next.has(id)) {
-        next.delete(id);
-      } else {
-        next.add(id);
-      }
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
       return next;
     });
   };
 
   const toggleAll = () => {
-    if (selectedIds.size === orders.length) {
-      setSelectedIds(new Set());
-    } else {
-      setSelectedIds(new Set(orders.map((o) => o.id)));
-    }
+    setSelectedIds((prev) => (
+      prev.size === orders.length ? new Set() : new Set(orders.map((order) => order.id))
+    ));
   };
 
-  const getStatusBadge = (status: string) => {
-    const cfg = ORDER_STATUS_CONFIG[status as keyof typeof ORDER_STATUS_CONFIG];
-    if (!cfg) return <Badge variant="secondary">{status}</Badge>;
+  const statusBadge = (status: string) => {
+    const config = ORDER_STATUS_CONFIG[status as keyof typeof ORDER_STATUS_CONFIG];
+    if (!config) return <Badge variant="secondary">{status}</Badge>;
     return (
-      <Badge variant="outline" className={`${cfg.color} border font-medium`}>
-        <span className={`w-1.5 h-1.5 rounded-full ${cfg.dotColor} mr-1.5`} />
-        {cfg.label}
+      <Badge variant="outline" className={`${config.color} border font-medium`}>
+        <span className={`mr-1.5 h-1.5 w-1.5 rounded-full ${config.dotColor}`} />
+        {config.label}
       </Badge>
     );
   };
@@ -98,14 +121,13 @@ export function OrderTable({
   if (loading) {
     return (
       <div className="space-y-3">
-        {Array.from({ length: 5 }).map((_, i) => (
-          <div key={i} className="flex items-center gap-4">
+        {Array.from({ length: 5 }).map((_, index) => (
+          <div key={index} className="flex items-center gap-4">
             <Skeleton className="h-4 w-4" />
+            <Skeleton className="h-8 w-36" />
             <Skeleton className="h-8 w-32" />
-            <Skeleton className="h-8 w-24" />
-            <Skeleton className="h-8 w-20" />
-            <Skeleton className="h-8 w-16" />
             <Skeleton className="h-8 w-28" />
+            <Skeleton className="h-8 w-24" />
             <Skeleton className="h-8 w-20" />
           </div>
         ))}
@@ -116,9 +138,9 @@ export function OrderTable({
   if (orders.length === 0) {
     return (
       <div className="flex flex-col items-center justify-center py-16 text-muted-foreground">
-        <FileText className="h-16 w-16 mb-4 opacity-30" />
+        <FileText className="mb-4 h-16 w-16 opacity-30" />
         <p className="text-lg font-medium">暂无订单数据</p>
-        <p className="text-sm mt-1">点击右上角「创建订单」添加新订单</p>
+        <p className="mt-1 text-sm">当前订单模块还没有可显示的订单</p>
       </div>
     );
   }
@@ -130,14 +152,12 @@ export function OrderTable({
           <TableHeader>
             <TableRow className="bg-muted/50">
               <TableHead className="w-10">
-                <Checkbox
-                  checked={selectedIds.size === orders.length && orders.length > 0}
-                  onCheckedChange={toggleAll}
-                />
+                <Checkbox checked={selectedIds.size === orders.length && orders.length > 0} onCheckedChange={toggleAll} />
               </TableHead>
               <TableHead className="font-semibold">订单编号</TableHead>
-              <TableHead className="font-semibold">客户名称</TableHead>
-              <TableHead className="font-semibold">产品明细</TableHead>
+              <TableHead className="font-semibold">流向</TableHead>
+              <TableHead className="font-semibold">对方企业</TableHead>
+              <TableHead className="font-semibold">模块/明细</TableHead>
               <TableHead className="font-semibold">总金额</TableHead>
               <TableHead className="font-semibold">状态</TableHead>
               <TableHead className="font-semibold">创建时间</TableHead>
@@ -147,50 +167,27 @@ export function OrderTable({
           </TableHeader>
           <TableBody>
             {orders.map((order) => (
-              <TableRow
-                key={order.id}
-                className="cursor-pointer hover:bg-muted/30"
-                data-state={selectedIds.has(order.id) ? 'selected' : undefined}
-              >
+              <TableRow key={order.id} className="cursor-pointer hover:bg-muted/30" data-state={selectedIds.has(order.id) ? 'selected' : undefined}>
                 <TableCell>
-                  <Checkbox
-                    checked={selectedIds.has(order.id)}
-                    onCheckedChange={() => toggleSelect(order.id)}
-                  />
+                  <Checkbox checked={selectedIds.has(order.id)} onCheckedChange={() => toggleSelect(order.id)} />
                 </TableCell>
                 <TableCell>
-                  <button
-                    onClick={() => onViewDetail(order)}
-                    className="font-mono text-sm text-primary hover:underline"
-                  >
+                  <Link href={`/orders/${order.id}`} className="font-mono text-sm text-primary hover:underline">
                     {order.order_no}
-                  </button>
+                  </Link>
+                  {order.parent_order ? (
+                    <div className="mt-1 text-xs text-muted-foreground">关联 {order.parent_order.order_no}</div>
+                  ) : null}
                 </TableCell>
-                <TableCell className="font-medium">{order.customer_name || '-'}</TableCell>
                 <TableCell>
-                  {order.items && order.items.length > 0 ? (
-                    <div className="max-w-[200px]">
-                      <p className="truncate text-sm">
-                        {order.items.map((item) => item.product_name).join('、')}
-                      </p>
-                      <p className="text-xs text-muted-foreground">
-                        共 {order.items.length} 项
-                      </p>
-                    </div>
-                  ) : (
-                    <span className="text-muted-foreground">-</span>
-                  )}
+                  <Badge variant="secondary">{flowLabel(order)}</Badge>
                 </TableCell>
-                <TableCell className="font-mono text-sm">
-                  ¥{formatAmount(order.total_amount)}
-                </TableCell>
-                <TableCell>{getStatusBadge(order.status)}</TableCell>
-                <TableCell className="text-sm text-muted-foreground">
-                  {formatDate(order.created_at)}
-                </TableCell>
-                <TableCell className="text-sm text-muted-foreground">
-                  {order.delivery_date ? order.delivery_date.split('T')[0] : '-'}
-                </TableCell>
+                <TableCell className="font-medium">{counterparty(order, mode)}</TableCell>
+                <TableCell className="text-sm text-muted-foreground">{itemSummary(order)}</TableCell>
+                <TableCell className="font-mono text-sm">¥{formatAmount(order.total_amount)}</TableCell>
+                <TableCell>{statusBadge(order.status)}</TableCell>
+                <TableCell className="text-sm text-muted-foreground">{formatDate(order.created_at)}</TableCell>
+                <TableCell className="text-sm text-muted-foreground">{order.delivery_date ? order.delivery_date.split('T')[0] : '-'}</TableCell>
                 <TableCell className="text-right">
                   <DropdownMenu>
                     <DropdownMenuTrigger asChild>
@@ -199,30 +196,35 @@ export function OrderTable({
                       </Button>
                     </DropdownMenuTrigger>
                     <DropdownMenuContent align="end">
-                      <DropdownMenuItem onClick={() => onViewDetail(order)}>
-                        <Eye className="h-4 w-4 mr-2" /> 查看详情
+                      <DropdownMenuItem asChild>
+                        <Link href={`/orders/${order.id}`}>
+                          <Eye className="mr-2 h-4 w-4" /> 查看订单树
+                        </Link>
                       </DropdownMenuItem>
-                      {order.status === 'pending' && (
+                      <DropdownMenuItem onClick={() => onViewDetail(order)}>
+                        <FileText className="mr-2 h-4 w-4" /> 快速预览
+                      </DropdownMenuItem>
+                      {order.status === 'pending' && canReceive ? (
                         <>
                           <DropdownMenuSeparator />
                           <DropdownMenuItem onClick={() => onStatusChange(order.id, 'confirmed')}>
-                            <CheckCircle className="h-4 w-4 mr-2" /> 接收订单
+                            <CheckCircle className="mr-2 h-4 w-4" /> 接收订单
                           </DropdownMenuItem>
                           <DropdownMenuItem onClick={() => onStatusChange(order.id, 'returned')} className="text-destructive">
-                            <RotateCcw className="h-4 w-4 mr-2" /> 退回订单
+                            <RotateCcw className="mr-2 h-4 w-4" /> 退回订单
                           </DropdownMenuItem>
                         </>
-                      )}
-                      {order.status === 'confirmed' && (
+                      ) : null}
+                      {order.status === 'confirmed' && canAdvanceProduction ? (
                         <DropdownMenuItem onClick={() => onStatusChange(order.id, 'pool')}>
-                          <ArrowRight className="h-4 w-4 mr-2" /> 入订单池
+                          <ArrowRight className="mr-2 h-4 w-4" /> 入订单池
                         </DropdownMenuItem>
-                      )}
-                      {(order.status === 'pending' || order.status === 'confirmed') && (
+                      ) : null}
+                      {canCancelOutgoing && (order.status === 'pending' || order.status === 'confirmed') ? (
                         <DropdownMenuItem onClick={() => onStatusChange(order.id, 'cancelled')} className="text-destructive">
-                          <XCircle className="h-4 w-4 mr-2" /> 取消订单
+                          <XCircle className="mr-2 h-4 w-4" /> 取消订单
                         </DropdownMenuItem>
-                      )}
+                      ) : null}
                     </DropdownMenuContent>
                   </DropdownMenu>
                 </TableCell>
@@ -232,15 +234,11 @@ export function OrderTable({
         </Table>
       </div>
 
-      {/* Pagination */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2 text-sm text-muted-foreground">
           <span>共 {pagination.total} 条</span>
-          <Select
-            value={String(pagination.pageSize)}
-            onValueChange={(v) => onPageSizeChange(Number(v))}
-          >
-            <SelectTrigger className="w-[70px] h-8">
+          <Select value={String(pagination.pageSize)} onValueChange={(value) => onPageSizeChange(Number(value))}>
+            <SelectTrigger className="h-8 w-[76px]">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -251,7 +249,7 @@ export function OrderTable({
           </Select>
           <span>条/页</span>
         </div>
-        {pagination.totalPages > 1 && (
+        {pagination.totalPages > 1 ? (
           <Pagination>
             <PaginationContent>
               <PaginationItem>
@@ -260,14 +258,10 @@ export function OrderTable({
                   className={pagination.page <= 1 ? 'pointer-events-none opacity-50' : 'cursor-pointer'}
                 />
               </PaginationItem>
-              {generatePageNumbers(pagination.page, pagination.totalPages).map((p) => (
-                <PaginationItem key={p}>
-                  <PaginationLink
-                    onClick={() => onPageChange(p)}
-                    isActive={p === pagination.page}
-                    className="cursor-pointer"
-                  >
-                    {p}
+              {generatePageNumbers(pagination.page, pagination.totalPages).map((page) => (
+                <PaginationItem key={page}>
+                  <PaginationLink onClick={() => onPageChange(page)} isActive={page === pagination.page} className="cursor-pointer">
+                    {page}
                   </PaginationLink>
                 </PaginationItem>
               ))}
@@ -279,7 +273,7 @@ export function OrderTable({
               </PaginationItem>
             </PaginationContent>
           </Pagination>
-        )}
+        ) : null}
       </div>
     </div>
   );
@@ -287,11 +281,8 @@ export function OrderTable({
 
 function generatePageNumbers(current: number, total: number): number[] {
   const pages: number[] = [];
-  const delta = 2;
-  const start = Math.max(1, current - delta);
-  const end = Math.min(total, current + delta);
-  for (let i = start; i <= end; i++) {
-    pages.push(i);
-  }
+  const start = Math.max(1, current - 2);
+  const end = Math.min(total, current + 2);
+  for (let page = start; page <= end; page += 1) pages.push(page);
   return pages;
 }

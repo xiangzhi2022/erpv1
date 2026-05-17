@@ -23,6 +23,11 @@ export type BusinessType = 'platform' | 'factory' | 'supplier' | 'dealer';
 
 export type PermissionKey =
   | 'factory_order_manager'
+  | 'factory_boss'
+  | 'factory_production_manager'
+  | 'factory_worker'
+  | 'factory_data_entry'
+  | 'factory_profit_view'
   | 'factory_carpenter'
   | 'factory_polisher'
   | 'factory_veneer'
@@ -68,6 +73,7 @@ export interface PermissionTemplate {
   description: string;
   landingPath: string;
   allowedPrefixes: string[];
+  assignable?: boolean;
 }
 
 export interface NavigationItem {
@@ -82,6 +88,11 @@ const S = {
   dashboard: '仪表盘',
   orders: '订单管理',
   orderExchanges: '订单流转',
+  productionTasks: '生产任务',
+  workerTasks: '我的任务',
+  workerWages: '我的工资',
+  wageRules: '工资规则',
+  workerPerformance: '工人绩效',
   progress: '生产进度',
   tasks: '任务管理',
   dealer: '经销商',
@@ -104,6 +115,10 @@ const SUPER_PREFIXES = [
   '/board',
   '/dashboard',
   '/orders',
+  '/production/tasks',
+  '/performance/workers',
+  '/worker/tasks',
+  '/worker/wages',
   '/orders/exchanges',
   '/progress',
   '/factory',
@@ -118,7 +133,7 @@ const SUPER_PREFIXES = [
   '/shipping',
   '/sync',
 ];
-const FACTORY_ADMIN_PREFIXES = ['/factory', '/orders', '/orders/exchanges', '/progress', '/worker', '/workers', '/tasks', '/settings', '/shipping', '/finance'];
+const FACTORY_ADMIN_PREFIXES = ['/factory', '/orders', '/orders/exchanges', '/production/tasks', '/performance/workers', '/progress', '/worker', '/worker/tasks', '/worker/wages', '/workers', '/tasks', '/settings', '/shipping', '/finance', '/dealer'];
 const SUPPLIER_ADMIN_PREFIXES = ['/supplier', '/orders', '/orders/exchanges', '/tasks', '/settings'];
 const DEALER_ADMIN_PREFIXES = ['/dealer', '/orders', '/orders/exchanges', '/settings'];
 
@@ -176,27 +191,34 @@ export const ACCOUNT_ROLE_TEMPLATES: AccountRoleTemplate[] = [
 ];
 
 export const PERMISSION_TEMPLATES: PermissionTemplate[] = [
+  { key: 'factory_boss', label: '老板', level: 3, businessType: 'factory', department: '管理', description: '查看全厂订单、生产、工资、成本、利润和绩效。', landingPath: '/board', allowedPrefixes: ['/board', '/orders', '/production/tasks', '/performance/workers', '/workers', '/settings', '/finance', '/shipping', '/factory'] },
+  { key: 'factory_production_manager', label: '生产主管', level: 3, businessType: 'factory', department: '生产管理', description: '拆单、分配生产任务、审核任务和确认计件工资。', landingPath: '/production/tasks', allowedPrefixes: ['/orders', '/production/tasks', '/performance/workers', '/workers', '/worker', '/worker/tasks', '/progress'] },
+  { key: 'factory_worker', label: '工人', level: 3, businessType: 'factory', department: '生产', description: '查看本人生产任务、提交完成并查看本人计件工资。', landingPath: '/worker/tasks', allowedPrefixes: ['/worker', '/worker/tasks', '/worker/wages'] },
+  { key: 'factory_data_entry', label: '录入员', level: 3, businessType: 'factory', department: '录入', description: '维护订单、空间、产品和生产基础数据，不查看价格、成本、利润和工资。', landingPath: '/orders', allowedPrefixes: ['/orders'] },
+  { key: 'factory_profit_view', label: '利润查看', level: 3, businessType: 'factory', department: '财务', description: '允许查看成本和利润字段。', landingPath: '/finance', allowedPrefixes: ['/finance', '/orders', '/performance/workers'] },
   { key: 'factory_order_manager', label: '订单管理', level: 3, businessType: 'factory', department: '管理', description: '处理工厂订单接收、状态跟踪和订单流转。', landingPath: '/orders', allowedPrefixes: ['/orders', '/orders/exchanges', '/factory'] },
-  { key: 'factory_carpenter', label: '木工', level: 3, businessType: 'factory', department: '生产', description: '查看木工工序任务并上报进度。', landingPath: '/worker/portal', allowedPrefixes: ['/worker', '/worker/portal', '/progress'] },
-  { key: 'factory_polisher', label: '打磨', level: 3, businessType: 'factory', department: '生产', description: '查看打磨工序任务并上报进度。', landingPath: '/worker/portal', allowedPrefixes: ['/worker', '/worker/portal', '/progress'] },
-  { key: 'factory_veneer', label: '贴皮', level: 3, businessType: 'factory', department: '生产', description: '查看贴皮工序任务并上报进度。', landingPath: '/worker/portal', allowedPrefixes: ['/worker', '/worker/portal', '/progress'] },
-  { key: 'factory_painter', label: '喷漆', level: 3, businessType: 'factory', department: '生产', description: '查看喷漆工序任务并上报进度。', landingPath: '/worker/portal', allowedPrefixes: ['/worker', '/worker/portal', '/progress'] },
-  { key: 'factory_quality', label: '质检', level: 3, businessType: 'factory', department: '生产', description: '处理质检工序、检查结果和进度上报。', landingPath: '/worker/portal', allowedPrefixes: ['/worker', '/worker/portal', '/progress'] },
-  { key: 'factory_packer', label: '打包', level: 3, businessType: 'factory', department: '生产', description: '处理打包工序、包装进度和交付信息。', landingPath: '/worker/portal', allowedPrefixes: ['/worker', '/worker/portal', '/progress'] },
+  { key: 'factory_carpenter', label: '木工', level: 3, businessType: 'factory', department: '生产', description: '查看木工工序任务并上报进度。', landingPath: '/worker/tasks', allowedPrefixes: ['/worker', '/worker/portal', '/worker/tasks', '/worker/wages', '/progress'] },
+  { key: 'factory_polisher', label: '打磨', level: 3, businessType: 'factory', department: '生产', description: '查看打磨工序任务并上报进度。', landingPath: '/worker/tasks', allowedPrefixes: ['/worker', '/worker/portal', '/worker/tasks', '/worker/wages', '/progress'] },
+  { key: 'factory_veneer', label: '贴皮', level: 3, businessType: 'factory', department: '生产', description: '查看贴皮工序任务并上报进度。', landingPath: '/worker/tasks', allowedPrefixes: ['/worker', '/worker/portal', '/worker/tasks', '/worker/wages', '/progress'] },
+  { key: 'factory_painter', label: '喷漆', level: 3, businessType: 'factory', department: '生产', description: '查看喷漆工序任务并上报进度。', landingPath: '/worker/tasks', allowedPrefixes: ['/worker', '/worker/portal', '/worker/tasks', '/worker/wages', '/progress'] },
+  { key: 'factory_quality', label: '质检', level: 3, businessType: 'factory', department: '生产', description: '处理质检工序、检查结果和进度上报。', landingPath: '/worker/tasks', allowedPrefixes: ['/worker', '/worker/portal', '/worker/tasks', '/worker/wages', '/progress'] },
+  { key: 'factory_packer', label: '打包', level: 3, businessType: 'factory', department: '生产', description: '处理打包工序、包装进度和交付信息。', landingPath: '/worker/tasks', allowedPrefixes: ['/worker', '/worker/portal', '/worker/tasks', '/worker/wages', '/progress'] },
   { key: 'factory_admin_staff', label: '行政', level: 3, businessType: 'factory', department: '行政', description: '查看工厂后台和基础任务。', landingPath: '/factory', allowedPrefixes: ['/factory', '/tasks'] },
-  { key: 'factory_finance', label: '财务', level: 3, businessType: 'factory', department: '财务', description: '查看财务、订单金额和必要订单信息。', landingPath: '/finance', allowedPrefixes: ['/finance', '/orders'] },
+  { key: 'factory_finance', label: '财务', level: 3, businessType: 'factory', department: '财务', description: '查看财务、订单金额和必要订单信息。', landingPath: '/finance', allowedPrefixes: ['/finance', '/orders', '/performance/workers'] },
   { key: 'factory_sales', label: '销售', level: 3, businessType: 'factory', department: '销售', description: '处理销售订单、经销商协作和订单流转。', landingPath: '/orders', allowedPrefixes: ['/orders', '/orders/exchanges', '/dealer'] },
   { key: 'factory_shipping', label: '仓库发货', level: 3, businessType: 'factory', department: '仓储', description: '处理仓库发货、发货状态和必要订单信息。', landingPath: '/shipping', allowedPrefixes: ['/shipping', '/orders'] },
-  { key: 'factory_general_worker', label: '普工', level: 3, businessType: 'factory', department: '生产', description: '查看普通生产任务并上报进度。', landingPath: '/worker/portal', allowedPrefixes: ['/worker', '/worker/portal', '/progress'] },
+  { key: 'factory_general_worker', label: '普工', level: 3, businessType: 'factory', department: '生产', description: '查看普通生产任务并上报进度。', landingPath: '/worker/tasks', allowedPrefixes: ['/worker', '/worker/portal', '/worker/tasks', '/worker/wages', '/progress'] },
   { key: 'dealer_order_entry', label: '订单录入', level: 3, businessType: 'dealer', department: '订单', description: '录入客户和订单信息。', landingPath: '/orders', allowedPrefixes: ['/orders', '/orders/exchanges', '/dealer'] },
   { key: 'dealer_accounting', label: '订单核算', level: 3, businessType: 'dealer', department: '核算', description: '处理订单金额、结算和对账。', landingPath: '/orders', allowedPrefixes: ['/orders', '/dealer'] },
   { key: 'dealer_order_submitter', label: '下单', level: 3, businessType: 'dealer', department: '订单', description: '向工厂或供应商发起订单流转。', landingPath: '/orders/exchanges', allowedPrefixes: ['/orders', '/orders/exchanges', '/dealer'] },
   { key: 'dealer_order_tracker', label: '订单跟踪', level: 3, businessType: 'dealer', department: '跟踪', description: '查看订单状态、生产进度、发货状态和流转记录。', landingPath: '/orders/exchanges', allowedPrefixes: ['/orders', '/orders/exchanges', '/progress', '/shipping', '/dealer'] },
   { key: 'supplier_order_receive', label: '订单接收', level: 3, businessType: 'supplier', department: '订单', description: '接收、处理或拒绝来自协作方的订单。', landingPath: '/orders/exchanges', allowedPrefixes: ['/supplier', '/orders', '/orders/exchanges'] },
-  { key: 'supplier_order_send', label: '订单发送', level: 3, businessType: 'supplier', department: '订单', description: '向协作方发起供应商侧订单流转。', landingPath: '/orders/exchanges', allowedPrefixes: ['/supplier', '/orders', '/orders/exchanges'] },
+  { key: 'supplier_order_send', label: '订单发送', level: 3, businessType: 'supplier', department: '订单', description: '向协作方发起供应商侧订单流转。', landingPath: '/orders/exchanges', allowedPrefixes: ['/supplier', '/orders', '/orders/exchanges'], assignable: false },
 ];
 
 const PERMISSION_PRIORITY: PermissionKey[] = [
+  'factory_boss',
+  'factory_production_manager',
   'dealer_order_submitter',
   'supplier_order_receive',
   'supplier_order_send',
@@ -204,6 +226,7 @@ const PERMISSION_PRIORITY: PermissionKey[] = [
   'dealer_order_entry',
   'dealer_order_tracker',
   'factory_finance',
+  'factory_data_entry',
   'factory_shipping',
   'factory_admin_staff',
   'factory_carpenter',
@@ -213,6 +236,7 @@ const PERMISSION_PRIORITY: PermissionKey[] = [
   'factory_quality',
   'factory_packer',
   'factory_general_worker',
+  'factory_worker',
 ];
 
 const LEGACY_ROLE_ALIASES: Record<string, AccountRole> = {
@@ -231,6 +255,9 @@ const LEGACY_ROLE_PERMISSIONS: Record<string, PermissionKey[]> = {
   factory_user: ['factory_general_worker'],
   order_manager: ['factory_order_manager'],
   finance: ['factory_finance'],
+  boss: ['factory_boss'],
+  production_manager: ['factory_production_manager'],
+  data_entry: ['factory_data_entry'],
   sales: ['factory_sales'],
   warehouse_shipping: ['factory_shipping'],
   user: [],
@@ -252,6 +279,7 @@ const NAV_ITEMS: NavigationItem[] = [
   { title: S.dashboard, href: '/dashboard', icon: LayoutDashboard, group: 'main' },
   { title: S.orders, href: '/orders', icon: Package, group: 'main' },
   { title: S.orderExchanges, href: '/orders/exchanges', icon: ListChecks, group: 'workflow' },
+  { title: S.productionTasks, href: '/production/tasks', icon: ListChecks, group: 'workflow' },
   { title: S.progress, href: '/progress', icon: RefreshCw, group: 'main' },
   { title: S.tasks, href: '/tasks', icon: ListTodo, group: 'main' },
   { title: S.dealer, href: '/dealer', icon: Building2, group: 'main' },
@@ -259,14 +287,44 @@ const NAV_ITEMS: NavigationItem[] = [
   { title: S.factory, href: '/factory', icon: Factory, group: 'main' },
   { title: S.workers, href: '/workers', icon: Users, group: 'main' },
   { title: S.workerDesk, href: '/worker', icon: HardHat, group: 'portal' },
+  { title: S.workerTasks, href: '/worker/tasks', icon: HardHat, group: 'portal' },
+  { title: S.workerWages, href: '/worker/wages', icon: Wallet, group: 'portal' },
   { title: S.factoryPortal, href: '/factory/portal', icon: Factory, group: 'portal' },
   { title: S.workerPortal, href: '/worker/portal', icon: HardHat, group: 'portal' },
   { title: S.finance, href: '/finance', icon: Wallet, group: 'main' },
   { title: S.shipping, href: '/shipping', icon: Truck, group: 'main' },
+  { title: S.workerPerformance, href: '/performance/workers', icon: Users, group: 'main' },
   { title: S.categories, href: '/categories', icon: FolderTree, group: 'admin' },
+  { title: S.wageRules, href: '/settings/wage-rules', icon: Wallet, group: 'admin' },
   { title: S.settings, href: '/settings', icon: Settings, group: 'admin' },
   { title: S.sync, href: '/sync', icon: ShieldCheck, group: 'admin' },
 ];
+
+function enterpriseDirectoryTitleForUser(user: AccessUser): string {
+  if (isSuperAdmin(user)) return '经销商管理';
+
+  const role = normalizeAccountRole(rawRoleOf(user));
+  const tenantBusinessType = tenantTypeToBusinessType(user.tenant_type);
+  const permissions = getUserPermissionKeys(user);
+
+  if (
+    role === 'dealer_admin'
+    || tenantBusinessType === 'dealer'
+    || permissions.some((key) => getPermissionTemplate(key)?.businessType === 'dealer')
+  ) {
+    return '工厂企业';
+  }
+
+  if (
+    role === 'factory_admin'
+    || tenantBusinessType === 'factory'
+    || permissions.some((key) => getPermissionTemplate(key)?.businessType === 'factory')
+  ) {
+    return '材料供应商';
+  }
+
+  return '企业库';
+}
 
 function rawRoleOf(user: AccessUser | null | undefined): string {
   return user?.role || 'guest';
@@ -364,6 +422,11 @@ function allowedPrefixes(user: AccessUser): string[] {
 export function canAccessPath(user: AccessUser | null | undefined, pathname: string): boolean {
   if (!user) return false;
   const path = normalizePath(pathname);
+  if (pathStarts(path, '/settings/wage-rules') && !isAdminRole(user)) {
+    return getUserPermissionKeys(user).some((key) =>
+      key === 'factory_boss' || key === 'factory_production_manager'
+    );
+  }
   if ((path === '/settings' || pathStarts(path, '/settings')) && !isAdminRole(user)) return false;
   if (pathStarts(path, '/orders/exchanges') && !isAdminRole(user)) {
     return getUserPermissionKeys(user).some((key) =>
@@ -377,7 +440,12 @@ export function canAccessPath(user: AccessUser | null | undefined, pathname: str
 
 export function getNavigationForUser(user: AccessUser | null | undefined): NavigationItem[] {
   if (!user) return [];
-  return NAV_ITEMS.filter((item) => canAccessPath(user, item.href));
+  return NAV_ITEMS
+    .filter((item) => canAccessPath(user, item.href))
+    .map((item) => {
+      if (item.href !== '/dealer') return item;
+      return { ...item, title: enterpriseDirectoryTitleForUser(user) };
+    });
 }
 
 export function getAssignableAccountRoles(user: AccessUser | null | undefined): AccountRoleTemplate[] {
@@ -389,10 +457,11 @@ export function getAssignableAccountRoles(user: AccessUser | null | undefined): 
 
 export function getAssignablePermissions(user: AccessUser | null | undefined): PermissionTemplate[] {
   if (!user) return [];
-  if (isSuperAdmin(user)) return PERMISSION_TEMPLATES;
+  const assignablePermissions = PERMISSION_TEMPLATES.filter((template) => template.assignable !== false);
+  if (isSuperAdmin(user)) return assignablePermissions;
   const roleTemplate = getAccountRoleTemplate(rawRoleOf(user));
   if (!roleTemplate || roleTemplate.level !== 2 || roleTemplate.businessType === 'platform') return [];
-  return PERMISSION_TEMPLATES.filter((template) => template.businessType === roleTemplate.businessType);
+  return assignablePermissions.filter((template) => template.businessType === roleTemplate.businessType);
 }
 
 export function canAssignPermissionKeys(user: AccessUser | null | undefined, permissionKeys: string[]): boolean {

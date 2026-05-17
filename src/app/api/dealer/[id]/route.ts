@@ -15,6 +15,10 @@ export async function PUT(
       return Response.json({ success: false, error: '请先登录' }, { status: 401 });
     }
 
+    if (!isSuperAdmin(user)) {
+      return Response.json({ success: false, error: '无权限编辑经销商' }, { status: 403 });
+    }
+
     const { id } = await params;
     const body = await request.json();
     const { name, contactName, phone, region, status, remark } = body;
@@ -84,6 +88,10 @@ export async function DELETE(
     const user = await getUserFromRequest(request);
     if (!user) {
       return Response.json({ success: false, error: '请先登录' }, { status: 401 });
+    }
+
+    if (!isSuperAdmin(user)) {
+      return Response.json({ success: false, error: '无权限删除经销商' }, { status: 403 });
     }
 
     const { id } = await params;

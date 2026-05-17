@@ -12,6 +12,10 @@ export async function GET(request: Request) {
       return Response.json({ success: false, error: '请先登录' }, { status: 401 });
     }
 
+    if (!isSuperAdmin(user)) {
+      return Response.json({ success: false, error: '无权限访问经销商管理' }, { status: 403 });
+    }
+
     const supabase = getClient();
     const { searchParams } = new URL(request.url);
     const keyword = searchParams.get('keyword') || '';
@@ -80,6 +84,10 @@ export async function POST(request: Request) {
     const user = await getUserFromRequest(request);
     if (!user) {
       return Response.json({ success: false, error: '请先登录' }, { status: 401 });
+    }
+
+    if (!isSuperAdmin(user)) {
+      return Response.json({ success: false, error: '无权限新增经销商' }, { status: 403 });
     }
 
     const body = await request.json();

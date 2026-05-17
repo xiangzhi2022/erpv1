@@ -16,7 +16,8 @@ describe('role access rules', () => {
     expect(hrefs).toContain('/settings');
     expect(hrefs).toContain('/orders/exchanges');
     expect(hrefs).toContain('/factory');
-    expect(getAssignablePermissions(user).length).toBeGreaterThanOrEqual(18);
+    expect(getAssignablePermissions(user).map((item) => item.key)).not.toContain('supplier_order_send');
+    expect(getAssignablePermissions(user).length).toBeGreaterThanOrEqual(17);
   });
 
   it('limits level-two admins to their own business permission template', () => {
@@ -32,8 +33,9 @@ describe('role access rules', () => {
       expect.arrayContaining(['dealer_order_entry', 'dealer_order_tracker'])
     );
     expect(getAssignablePermissions(supplierAdmin).map((item) => item.key)).toEqual(
-      expect.arrayContaining(['supplier_order_receive', 'supplier_order_send'])
+      expect.arrayContaining(['supplier_order_receive'])
     );
+    expect(getAssignablePermissions(supplierAdmin).map((item) => item.key)).not.toContain('supplier_order_send');
   });
 
   it('builds employee navigation from multiple permissions and fixed landing priority', () => {
@@ -63,5 +65,16 @@ describe('role access rules', () => {
     expect(canAccessPath(accounting, '/profile')).toBe(true);
     expect(canAccessPath(accounting, '/orders')).toBe(true);
     expect(canAccessPath(accounting, '/orders/exchanges')).toBe(false);
+  });
+
+  it('shows the enterprise directory with partner-specific labels', () => {
+    const dealerAdmin: AccessUser = { role: 'dealer_admin', tenant_id: 'dealer-1', tenant_type: 'dealer', permissions: [] };
+    const factoryAdmin: AccessUser = { role: 'factory_admin', tenant_id: 'factory-1', tenant_type: 'manufacturer', permissions: [] };
+    const supplierAdmin: AccessUser = { role: 'supplier_admin', tenant_id: 'supplier-1', tenant_type: 'material_supplier', permissions: [] };
+
+    expect(getNavigationForUser(dealerAdmin).find((item) => item.href === '/dealer')?.title).toBe('工厂企业');
+    expect(canAccessPath(factoryAdmin, '/dealer')).toBe(true);
+    expect(getNavigationForUser(factoryAdmin).find((item) => item.href === '/dealer')?.title).toBe('材料供应商');
+    expect(getNavigationForUser(supplierAdmin).some((item) => item.href === '/dealer')).toBe(false);
   });
 });

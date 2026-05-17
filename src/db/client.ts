@@ -109,6 +109,21 @@ interface SupabaseCredentials {
   serviceRoleKey?: string;
 }
 
+function isReportClientConfigured(): boolean {
+  return Boolean(process.env.COZE_INTEGRATION_BASE_URL && process.env.COZE_WORKLOAD_IDENTITY_API_KEY);
+}
+
+function getSupabaseReportFetch(label: string): typeof fetch | undefined {
+  if (!isReportClientConfigured()) return undefined;
+
+  try {
+    const buffer = getReportBuffer();
+    return buffer ? createWrappedFetch(buffer, label) : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 /**
  * 获取 Supabase 凭证。
  * COZE_SUPABASE_* 优先，兼容 legacy SUPABASE_*。
@@ -165,14 +180,8 @@ function getSupabaseServiceClient(): SupabaseClient {
   }
 
   const globalOptions: Record<string, unknown> = {};
-  try {
-    const buffer = getReportBuffer();
-    if (buffer) {
-      globalOptions.fetch = createWrappedFetch(buffer, 'supabase-service');
-    }
-  } catch {
-    // reporting setup failure should not block client creation
-  }
+  const reportFetch = getSupabaseReportFetch('supabase-service');
+  if (reportFetch) globalOptions.fetch = reportFetch;
 
   return createClient(url, serviceRoleKey, {
     global: globalOptions,
@@ -201,14 +210,8 @@ function getSupabaseClient(token?: string): SupabaseClient {
   if (token) {
     globalOptions.headers = { Authorization: `Bearer ${token}` };
   }
-  try {
-    const buffer = getReportBuffer();
-    if (buffer) {
-      globalOptions.fetch = createWrappedFetch(buffer, 'supabase');
-    }
-  } catch {
-    // reporting setup failure should not block client creation
-  }
+  const reportFetch = getSupabaseReportFetch('supabase');
+  if (reportFetch) globalOptions.fetch = reportFetch;
 
   return createClient(url, key, {
     global: globalOptions,
