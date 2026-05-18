@@ -8,7 +8,10 @@ import {
   Check,
   ChevronRight,
   ChevronsUpDown,
+  CircleAlert,
+  CircleCheck,
   ClipboardList,
+  Copy,
   Layers3,
   Loader2,
   Package,
@@ -75,6 +78,17 @@ interface CreateOrderDialogProps {
 }
 
 type StepId = 'basic' | 'spaces' | 'products' | 'tasks' | 'attachments' | 'confirm';
+type CompactStepId = 'basic' | 'structure' | 'attachments' | 'confirm';
+type SelectedNode =
+  | { type: 'order' }
+  | { type: 'space'; moduleIndex: number }
+  | { type: 'product'; moduleIndex: number; itemIndex: number }
+  | { type: 'task'; moduleIndex: number; itemIndex: number; taskIndex: number };
+
+interface IncompleteNode {
+  node: SelectedNode;
+  missing: string[];
+}
 
 const STEPS: Array<{ id: StepId; label: string; description: string }> = [
   { id: 'basic', label: '基础信息', description: '订单编号、工厂企业和交付要求' },
@@ -83,6 +97,13 @@ const STEPS: Array<{ id: StepId; label: string; description: string }> = [
   { id: 'tasks', label: '四级任务', description: '板件、五金、工序、安装、包装' },
   { id: 'attachments', label: '附件备注', description: '产品图片、图纸和补充文件' },
   { id: 'confirm', label: '确认提交', description: '核对结构和金额后提交' },
+];
+
+const COMPACT_STEPS: Array<{ id: CompactStepId; label: string; description: string }> = [
+  { id: 'basic', label: '基础信息', description: '订单和客户' },
+  { id: 'structure', label: '结构录入', description: '空间/产品/任务' },
+  { id: 'attachments', label: '附件备注', description: '图纸和说明' },
+  { id: 'confirm', label: '确认提交', description: '核对结构' },
 ];
 
 const PRODUCT_TYPES = [
@@ -398,6 +419,107 @@ function countAttachments(modules: OrderModuleFormValues[]): number {
   ), 0);
 }
 
+function selectedNodeKey(node: SelectedNode): string {
+  if (node.type === 'order') return 'order';
+  if (node.type === 'space') return `space:${node.moduleIndex}`;
+  if (node.type === 'product') return `product:${node.moduleIndex}:${node.itemIndex}`;
+  return `task:${node.moduleIndex}:${node.itemIndex}:${node.taskIndex}`;
+}
+
+function compactStepForStep(step: StepId): CompactStepId {
+  if (step === 'attachments' || step === 'confirm') return step;
+  if (step === 'basic') return 'basic';
+  return 'structure';
+}
+
+function missingForOrder(values: OrderFormValues): string[] {
+  const missing: string[] = [];
+  if (isBlank(values.order_no)) missing.push('订单编号');
+  if (isBlank(values.to_tenant_id)) missing.push('工厂企业');
+  if (isBlank(values.customer_name)) missing.push('客户名称');
+  return missing;
+}
+
+function missingForSpace(module: OrderModuleFormValues | undefined): string[] {
+  const missing: string[] = [];
+  if (!module || isBlank(module.module_name)) missing.push('空间名称');
+  return missing;
+}
+
+function missingForProduct(item: OrderItemFormValues | undefined): string[] {
+  const missing: string[] = [];
+  if (!item || isBlank(item.product_name)) missing.push('产品名称');
+  if (!item || isBlank(item.product_type)) missing.push('产品类型');
+  if (!item || isBlank(item.material)) missing.push('材质');
+  if (!item || isBlank(item.specification)) missing.push('规格/型号');
+  if (!item || !hasPositiveNumber(item.length_mm) || !hasPositiveNumber(item.width_mm) || !hasPositiveNumber(item.thickness_mm)) missing.push('长宽厚');
+  if (!item || !hasPositiveNumber(item.quantity)) missing.push('数量');
+  if (!item || isBlank(item.unit)) missing.push('单位');
+  if (!item || isBlank(item.color)) missing.push('颜色');
+  return missing;
+}
+
+function missingForTask(task: ProductionTaskDraftFormValues | undefined): string[] {
+  const missing: string[] = [];
+  if (!task || isBlank(task.task_name)) missing.push('任务名称');
+  if (!task || !hasPositiveNumber(task.quantity)) missing.push('数量');
+  if (!task || isBlank(task.unit)) missing.push('单位');
+  if (!task || isBlank(task.process_name)) missing.push('工序');
+  return missing;
+}
+
+function collectIncompleteNodes(values: OrderFormValues): IncompleteNode[] {
+  const nodes: IncompleteNode[] = [];
+  const orderMissing = missingForOrder(values);
+  if (orderMissing.length > 0) nodes.push({ node: { type: 'order' }, missing: orderMissing });
+  values.modules.forEach((module, moduleIndex) => {
+    const spaceMissing = missingForSpace(module);
+    if (spaceMissing.length > 0) nodes.push({ node: { type: 'space', moduleIndex }, missing: spaceMissing });
+    module.items.forEach((item, itemIndex) => {
+      const productMissing = missingForProduct(item);
+      if (productMissing.length > 0) nodes.push({ node: { type: 'product', moduleIndex, itemIndex }, missing: productMissing });
+      if (item.tasks.length === 0) {
+        nodes.push({ node: { type: 'product', moduleIndex, itemIndex }, missing: ['四级任务'] });
+      }
+      item.tasks.forEach((task, taskIndex) => {
+        const taskMissing = missingForTask(task);
+        if (taskMissing.length > 0) nodes.push({ node: { type: 'task', moduleIndex, itemIndex, taskIndex }, missing: taskMissing });
+      });
+    });
+  });
+  return nodes;
+}
+
+function flattenStructureNodes(modules: OrderModuleFormValues[]): SelectedNode[] {
+  const nodes: SelectedNode[] = [{ type: 'order' }];
+  modules.forEach((module, moduleIndex) => {
+    nodes.push({ type: 'space', moduleIndex });
+    module.items.forEach((item, itemIndex) => {
+      nodes.push({ type: 'product', moduleIndex, itemIndex });
+      item.tasks.forEach((_, taskIndex) => {
+        nodes.push({ type: 'task', moduleIndex, itemIndex, taskIndex });
+      });
+    });
+  });
+  return nodes;
+}
+
+function normalizeSelectedNode(node: SelectedNode, modules: OrderModuleFormValues[]): SelectedNode {
+  if (node.type === 'order') return node;
+  const orderModule = modules[node.moduleIndex];
+  if (!orderModule) return { type: 'order' };
+  if (node.type === 'space') return node;
+  const item = orderModule.items[node.itemIndex];
+  if (!item) return { type: 'space', moduleIndex: node.moduleIndex };
+  if (node.type === 'product') return node;
+  if (!item.tasks[node.taskIndex]) return { type: 'product', moduleIndex: node.moduleIndex, itemIndex: node.itemIndex };
+  return node;
+}
+
+function cloneModules(modules: OrderModuleFormValues[]): OrderModuleFormValues[] {
+  return JSON.parse(JSON.stringify(modules)) as OrderModuleFormValues[];
+}
+
 export function CreateOrderDialog({
   open,
   mode,
@@ -413,6 +535,7 @@ export function CreateOrderDialog({
   const [generatingOrderNo, setGeneratingOrderNo] = useState(false);
   const [selectedPartnerName, setSelectedPartnerName] = useState('');
   const [activeStep, setActiveStep] = useState<StepId>('basic');
+  const [selectedNode, setSelectedNode] = useState<SelectedNode>({ type: 'order' });
   const [selectedModuleIndex, setSelectedModuleIndex] = useState(0);
   const [selectedItemIndex, setSelectedItemIndex] = useState(0);
 
@@ -427,11 +550,16 @@ export function CreateOrderDialog({
   });
 
   const watchedModules = form.watch('modules') || [];
+  const watchedValues = form.watch();
   const safeModuleIndex = Math.min(selectedModuleIndex, Math.max(0, watchedModules.length - 1));
   const selectedModule = watchedModules[safeModuleIndex];
   const safeItemIndex = Math.min(selectedItemIndex, Math.max(0, (selectedModule?.items.length || 1) - 1));
   const selectedItem = selectedModule?.items[safeItemIndex];
   const activeStepIndex = STEPS.findIndex((step) => step.id === activeStep);
+  const compactStep = compactStepForStep(activeStep);
+  const normalizedSelectedNode = normalizeSelectedNode(selectedNode, watchedModules);
+  const incompleteNodes = collectIncompleteNodes(watchedValues);
+  const incompleteCount = incompleteNodes.length;
 
   const totalAmount = useMemo(() => {
     return watchedModules.reduce((sum, module) => {
@@ -442,6 +570,28 @@ export function CreateOrderDialog({
   }, [watchedModules]);
 
   const progressValue = Math.round(((activeStepIndex + 1) / STEPS.length) * 100);
+
+  const selectStructureNode = useCallback((node: SelectedNode) => {
+    setSelectedNode(node);
+    if (node.type === 'order') {
+      setActiveStep('basic');
+      return;
+    }
+    setSelectedModuleIndex(node.moduleIndex);
+    if (node.type === 'space') {
+      setSelectedItemIndex(0);
+      setActiveStep('spaces');
+      return;
+    }
+    setSelectedItemIndex(node.itemIndex);
+    setActiveStep(node.type === 'product' ? 'products' : 'tasks');
+  }, []);
+
+  const updateModules = useCallback((updater: (modules: OrderModuleFormValues[]) => OrderModuleFormValues[], nextNode?: SelectedNode) => {
+    const nextModules = updater(cloneModules(form.getValues('modules') || []));
+    form.setValue('modules', nextModules, { shouldDirty: true, shouldValidate: true });
+    if (nextNode) selectStructureNode(normalizeSelectedNode(nextNode, nextModules));
+  }, [form, selectStructureNode]);
 
   const fetchPartners = useCallback(async (search?: string) => {
     const params = new URLSearchParams({ mode });
@@ -477,11 +627,19 @@ export function CreateOrderDialog({
     form.reset(emptyForm(mode));
     setSelectedPartnerName('');
     setActiveStep('basic');
+    setSelectedNode({ type: 'order' });
     setSelectedModuleIndex(0);
     setSelectedItemIndex(0);
     fetchPartners();
     generateOrderNo();
   }, [fetchPartners, form, generateOrderNo, mode, open]);
+
+  useEffect(() => {
+    const normalized = normalizeSelectedNode(selectedNode, watchedModules);
+    if (selectedNodeKey(normalized) !== selectedNodeKey(selectedNode)) {
+      selectStructureNode(normalized);
+    }
+  }, [selectStructureNode, selectedNode, watchedModules]);
 
   const selectPartner = (partner: TenantOption) => {
     form.setValue('to_tenant_id', partner.id, { shouldValidate: true });
@@ -495,8 +653,123 @@ export function CreateOrderDialog({
     form.setValue('modules', [cabinetModule()], { shouldDirty: true, shouldValidate: true });
     setSelectedModuleIndex(0);
     setSelectedItemIndex(0);
+    setSelectedNode({ type: 'task', moduleIndex: 0, itemIndex: 0, taskIndex: 0 });
     setActiveStep('tasks');
     toast.success('已生成柜子四级订单模板，可继续编辑');
+  };
+
+  const addSpace = (name = '自定义空间') => {
+    const nextIndex = watchedModules.length;
+    modules.append(defaultModule(name));
+    selectStructureNode({ type: 'space', moduleIndex: nextIndex });
+  };
+
+  const copySpace = (moduleIndex: number) => {
+    const source = watchedModules[moduleIndex];
+    if (!source) return;
+    updateModules((current) => {
+      const copied = cloneModules([source])[0];
+      copied.module_name = `${copied.module_name || `空间 #${moduleIndex + 1}`} 副本`;
+      current.splice(moduleIndex + 1, 0, copied);
+      return current;
+    }, { type: 'space', moduleIndex: moduleIndex + 1 });
+  };
+
+  const removeSpace = (moduleIndex: number) => {
+    if (watchedModules.length <= 1) {
+      toast.error('至少保留一个空间');
+      return;
+    }
+    modules.remove(moduleIndex);
+    selectStructureNode({ type: 'space', moduleIndex: Math.max(0, moduleIndex - 1) });
+  };
+
+  const addProduct = (moduleIndex: number) => {
+    const itemIndex = watchedModules[moduleIndex]?.items.length || 0;
+    updateModules((current) => {
+      current[moduleIndex]?.items.push(defaultItem());
+      return current;
+    }, { type: 'product', moduleIndex, itemIndex });
+  };
+
+  const copyProduct = (moduleIndex: number, itemIndex: number) => {
+    const source = watchedModules[moduleIndex]?.items[itemIndex];
+    if (!source) return;
+    updateModules((current) => {
+      const copied = cloneModules([{ module_name: '', remark: '', items: [source] }])[0].items[0];
+      copied.product_name = `${copied.product_name || `产品 #${itemIndex + 1}`} 副本`;
+      current[moduleIndex]?.items.splice(itemIndex + 1, 0, copied);
+      return current;
+    }, { type: 'product', moduleIndex, itemIndex: itemIndex + 1 });
+  };
+
+  const removeProduct = (moduleIndex: number, itemIndex: number) => {
+    const items = watchedModules[moduleIndex]?.items || [];
+    if (items.length <= 1) {
+      toast.error('每个空间至少保留一个产品');
+      return;
+    }
+    updateModules((current) => {
+      current[moduleIndex]?.items.splice(itemIndex, 1);
+      return current;
+    }, { type: 'product', moduleIndex, itemIndex: Math.max(0, itemIndex - 1) });
+  };
+
+  const addTask = (moduleIndex: number, itemIndex: number, task?: ProductionTaskDraftFormValues) => {
+    const taskIndex = watchedModules[moduleIndex]?.items[itemIndex]?.tasks.length || 0;
+    updateModules((current) => {
+      current[moduleIndex]?.items[itemIndex]?.tasks.push(task || defaultTask());
+      return current;
+    }, { type: 'task', moduleIndex, itemIndex, taskIndex });
+  };
+
+  const addCabinetTasks = (moduleIndex: number, itemIndex: number) => {
+    const startIndex = watchedModules[moduleIndex]?.items[itemIndex]?.tasks.length || 0;
+    updateModules((current) => {
+      current[moduleIndex]?.items[itemIndex]?.tasks.push(...cabinetTasks());
+      return current;
+    }, { type: 'task', moduleIndex, itemIndex, taskIndex: startIndex });
+  };
+
+  const copyTask = (moduleIndex: number, itemIndex: number, taskIndex: number) => {
+    const source = watchedModules[moduleIndex]?.items[itemIndex]?.tasks[taskIndex];
+    if (!source) return;
+    updateModules((current) => {
+      const copied = JSON.parse(JSON.stringify(source)) as ProductionTaskDraftFormValues;
+      copied.task_name = `${copied.task_name || `任务 #${taskIndex + 1}`} 副本`;
+      current[moduleIndex]?.items[itemIndex]?.tasks.splice(taskIndex + 1, 0, copied);
+      return current;
+    }, { type: 'task', moduleIndex, itemIndex, taskIndex: taskIndex + 1 });
+  };
+
+  const removeTask = (moduleIndex: number, itemIndex: number, taskIndex: number) => {
+    updateModules((current) => {
+      current[moduleIndex]?.items[itemIndex]?.tasks.splice(taskIndex, 1);
+      return current;
+    }, { type: 'product', moduleIndex, itemIndex });
+  };
+
+  const saveDraft = () => {
+    window.localStorage.setItem(`erp-create-order-draft:${mode}`, JSON.stringify(form.getValues()));
+    toast.success('草稿已保存在当前浏览器');
+  };
+
+  const jumpToFirstIncomplete = () => {
+    const first = collectIncompleteNodes(form.getValues())[0];
+    if (!first) {
+      toast.success('当前订单结构已完整');
+      return;
+    }
+    selectStructureNode(first.node);
+    toast.warning(`还有字段未完整：${first.missing.join('、')}`);
+  };
+
+  const goPreviousObject = () => {
+    const nodes = flattenStructureNodes(form.getValues('modules') || []);
+    const currentKey = selectedNodeKey(normalizeSelectedNode(selectedNode, watchedModules));
+    const currentIndex = nodes.findIndex((node) => selectedNodeKey(node) === currentKey);
+    const previous = nodes[Math.max(0, currentIndex - 1)] || nodes[0];
+    selectStructureNode(previous);
   };
 
   const validateStep = async (step: StepId): Promise<boolean> => {
@@ -573,6 +846,20 @@ export function CreateOrderDialog({
     setActiveStep(prev.id);
   };
 
+  const goToCompactStep = (step: CompactStepId) => {
+    if (step === 'basic') {
+      selectStructureNode({ type: 'order' });
+      return;
+    }
+    if (step === 'structure') {
+      const normalized = normalizeSelectedNode(selectedNode, watchedModules);
+      if (normalized.type === 'order') selectStructureNode({ type: 'space', moduleIndex: 0 });
+      else selectStructureNode(normalized);
+      return;
+    }
+    void goToStep(step);
+  };
+
   const onSubmit: SubmitHandler<OrderFormValues> = async (values) => {
     setSubmitting(true);
     try {
@@ -600,147 +887,57 @@ export function CreateOrderDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="left-3 right-3 top-3 bottom-3 h-auto max-h-none w-auto max-w-none translate-x-0 translate-y-0 grid-rows-[auto_minmax(0,1fr)] gap-0 overflow-hidden rounded-xl p-0 shadow-2xl sm:max-w-none">
         <DialogHeader className="border-b bg-background px-8 py-5">
-          <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
-            <div>
-              <DialogTitle className="text-xl">
-                {mode === 'factory_material' ? '创建材料订单' : '创建经销商订单'}
-              </DialogTitle>
-              <DialogDescription className="mt-1">
-                作为订单录入入口，支持手动维护订单、空间、产品和四级生产草稿。
-              </DialogDescription>
+          <div className="flex flex-col gap-4">
+            <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+              <div>
+                <DialogTitle className="text-xl">
+                  {mode === 'factory_material' ? '创建材料订单' : '创建经销商订单'}
+                </DialogTitle>
+                <DialogDescription className="mt-1">
+                  左侧按订单树定位对象，右侧编辑当前选中的订单、空间、产品或任务。
+                </DialogDescription>
+              </div>
+              <Button type="button" variant="outline" className="gap-2" onClick={applyCabinetTemplate}>
+                <Sparkles className="h-4 w-4" />
+                柜子订单模板
+              </Button>
             </div>
-            <Button type="button" variant="outline" className="gap-2" onClick={applyCabinetTemplate}>
-              <Sparkles className="h-4 w-4" />
-              柜子订单模板
-            </Button>
+            <CompactOrderProgress
+              activeStep={compactStep}
+              progressValue={progressValue}
+              onSelect={goToCompactStep}
+            />
           </div>
         </DialogHeader>
 
-        <form onSubmit={form.handleSubmit(onSubmit)} className="grid min-h-0 bg-muted/10 lg:grid-cols-[300px_minmax(0,1fr)] xl:grid-cols-[340px_minmax(0,1fr)] 2xl:grid-cols-[380px_minmax(0,1fr)]">
+        <form onSubmit={form.handleSubmit(onSubmit)} className="grid min-h-0 bg-muted/10 lg:grid-cols-[360px_minmax(0,1fr)] 2xl:grid-cols-[420px_minmax(0,1fr)]">
           <aside className="min-h-0 border-r bg-muted/30">
-            <ScrollArea className="h-[calc(100vh-190px)]">
-              <div className="space-y-5 p-5">
-                <div className="space-y-2">
-                  <div className="flex items-center justify-between text-sm">
-                    <span className="font-medium">录入进度</span>
-                    <span className="text-muted-foreground">{progressValue}%</span>
-                  </div>
-                  <Progress value={progressValue} />
-                </div>
-
-                <div className="space-y-2">
-                  {STEPS.map((step, index) => (
-                    <button
-                      key={step.id}
-                      type="button"
-                      onClick={() => {
-                        void goToStep(step.id);
-                      }}
-                      className={cn(
-                        'w-full rounded-lg border px-4 py-3 text-left transition-colors',
-                        activeStep === step.id ? 'border-primary bg-background shadow-sm' : 'border-transparent hover:bg-background/80'
-                      )}
-                    >
-                      <div className="flex items-center justify-between gap-3">
-                        <div>
-                          <div className="text-sm font-medium">{index + 1}. {step.label}</div>
-                          <div className="mt-0.5 text-xs text-muted-foreground">{step.description}</div>
-                        </div>
-                        {activeStep === step.id ? <ChevronRight className="h-4 w-4 text-primary" /> : null}
-                      </div>
-                    </button>
-                  ))}
-                </div>
-
-                <Separator />
-
-                <OrderStructureTree
-                  modules={watchedModules}
-                  selectedModuleIndex={safeModuleIndex}
-                  selectedItemIndex={safeItemIndex}
-                  onSelectModule={(index) => {
-                    setSelectedModuleIndex(index);
-                    setSelectedItemIndex(0);
-                    setActiveStep('products');
-                  }}
-                  onSelectItem={(moduleIndex, itemIndex) => {
-                    setSelectedModuleIndex(moduleIndex);
-                    setSelectedItemIndex(itemIndex);
-                    setActiveStep('tasks');
-                  }}
-                  onSelectTask={(moduleIndex, itemIndex) => {
-                    setSelectedModuleIndex(moduleIndex);
-                    setSelectedItemIndex(itemIndex);
-                    setActiveStep('tasks');
-                  }}
-                />
-
-                <Separator />
-
-                <SummaryBox
-                  receiverName={selectedPartnerName}
-                  customerName={form.watch('customer_name')}
-                  modules={watchedModules}
-                  totalAmount={totalAmount}
-                />
-              </div>
+            <ScrollArea className="h-[calc(100vh-216px)]">
+              <OrderStructureSidebar
+                values={watchedValues}
+                selectedNode={normalizedSelectedNode}
+                incompleteNodes={incompleteNodes}
+                receiverName={selectedPartnerName}
+                totalAmount={totalAmount}
+                onSelectNode={selectStructureNode}
+                onAddSpace={addSpace}
+                onApplyCabinetTemplate={applyCabinetTemplate}
+                onCopySpace={copySpace}
+                onRemoveSpace={removeSpace}
+                onAddProduct={addProduct}
+                onCopyProduct={copyProduct}
+                onRemoveProduct={removeProduct}
+                onAddTask={(moduleIndex, itemIndex) => addTask(moduleIndex, itemIndex)}
+                onAddCabinetTasks={addCabinetTasks}
+                onCopyTask={copyTask}
+                onRemoveTask={removeTask}
+              />
             </ScrollArea>
           </aside>
 
           <div className="flex min-h-0 flex-col bg-background">
-            <ScrollArea className="h-[calc(100vh-262px)]">
+            <ScrollArea className="h-[calc(100vh-288px)]">
               <div className="w-full space-y-6 p-5 xl:p-8">
-                {activeStep === 'basic' ? (
-                  <BasicStep
-                    form={form}
-                    mode={mode}
-                    partnerLabel={partnerLabel}
-                    parentOrders={parentOrders}
-                    partners={partners}
-                    partnerOpen={partnerOpen}
-                    partnerSearch={partnerSearch}
-                    generatingOrderNo={generatingOrderNo}
-                    selectedPartnerName={selectedPartnerName}
-                    onPartnerOpenChange={setPartnerOpen}
-                    onPartnerSearchChange={(value) => {
-                      setPartnerSearch(value);
-                      fetchPartners(value);
-                    }}
-                    onSelectPartner={selectPartner}
-                    onGenerateOrderNo={generateOrderNo}
-                  />
-                ) : null}
-
-                {activeStep === 'spaces' ? (
-                  <SpacesStep
-                    form={form}
-                    modules={modules}
-                    selectedModuleIndex={safeModuleIndex}
-                    onSelectModule={(index) => {
-                      setSelectedModuleIndex(index);
-                      setSelectedItemIndex(0);
-                    }}
-                    onApplyCabinetTemplate={applyCabinetTemplate}
-                  />
-                ) : null}
-
-                {activeStep === 'products' ? (
-                  <ProductsStep
-                    form={form}
-                    moduleIndex={safeModuleIndex}
-                    selectedItemIndex={safeItemIndex}
-                    onSelectItem={setSelectedItemIndex}
-                  />
-                ) : null}
-
-                {activeStep === 'tasks' ? (
-                  <TasksStep
-                    form={form}
-                    moduleIndex={safeModuleIndex}
-                    itemIndex={safeItemIndex}
-                  />
-                ) : null}
-
                 {activeStep === 'attachments' ? (
                   <AttachmentsStep
                     form={form}
@@ -754,20 +951,67 @@ export function CreateOrderDialog({
                     totalAmount={totalAmount}
                   />
                 ) : null}
+
+                {activeStep !== 'attachments' && activeStep !== 'confirm' ? (
+                  <NodeEditorPanel
+                    form={form}
+                    mode={mode}
+                    partnerLabel={partnerLabel}
+                    parentOrders={parentOrders}
+                    partners={partners}
+                    partnerOpen={partnerOpen}
+                    partnerSearch={partnerSearch}
+                    generatingOrderNo={generatingOrderNo}
+                    selectedPartnerName={selectedPartnerName}
+                    selectedNode={normalizedSelectedNode}
+                    modules={watchedModules}
+                    onPartnerOpenChange={setPartnerOpen}
+                    onPartnerSearchChange={(value) => {
+                      setPartnerSearch(value);
+                      fetchPartners(value);
+                    }}
+                    onSelectPartner={selectPartner}
+                    onGenerateOrderNo={generateOrderNo}
+                    onAddSpace={addSpace}
+                    onApplyCabinetTemplate={applyCabinetTemplate}
+                    onSelectNode={selectStructureNode}
+                    onCopySpace={copySpace}
+                    onRemoveSpace={removeSpace}
+                    onAddProduct={addProduct}
+                    onCopyProduct={copyProduct}
+                    onRemoveProduct={removeProduct}
+                    onAddTask={(moduleIndex, itemIndex) => addTask(moduleIndex, itemIndex)}
+                    onAddCabinetTasks={addCabinetTasks}
+                    onCopyTask={copyTask}
+                    onRemoveTask={removeTask}
+                  />
+                ) : null}
               </div>
             </ScrollArea>
 
-            <DialogFooter className="border-t bg-background px-8 py-5">
-              <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>取消</Button>
-              <Button type="button" variant="outline" onClick={goPrev} disabled={activeStepIndex === 0}>上一步</Button>
-              {activeStep !== 'confirm' ? (
-                <Button type="button" onClick={goNext}>下一步</Button>
-              ) : (
-                <Button type="submit" disabled={submitting} className="min-w-[112px] gap-2">
-                  {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
-                  {submitting ? '提交中...' : '创建订单'}
-                </Button>
-              )}
+            <DialogFooter className="items-center justify-between gap-3 border-t bg-background px-8 py-5 sm:justify-between">
+              <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
+                {incompleteCount > 0 ? (
+                  <Button type="button" variant="outline" size="sm" onClick={jumpToFirstIncomplete}>
+                    还有 {incompleteCount} 处未完整
+                  </Button>
+                ) : (
+                  <span className="inline-flex items-center gap-1 text-emerald-600"><CircleCheck className="h-4 w-4" />结构已完整</span>
+                )}
+              </div>
+              <div className="flex flex-wrap justify-end gap-2">
+                <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>取消</Button>
+                <Button type="button" variant="outline" onClick={goPreviousObject}>上一个对象</Button>
+                <Button type="button" variant="outline" onClick={saveDraft}>保存草稿</Button>
+                {activeStep !== 'confirm' ? (
+                  <Button type="button" onClick={() => void goToStep('confirm')}>核对提交</Button>
+                ) : (
+                  <Button type="submit" disabled={submitting} className="min-w-[112px] gap-2">
+                    {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+                    {submitting ? '提交中...' : '创建订单'}
+                  </Button>
+                )}
+              </div>
             </DialogFooter>
           </div>
         </form>
@@ -1456,77 +1700,552 @@ function ConfirmStep({ values, totalAmount }: { values: OrderFormValues; totalAm
   );
 }
 
-function OrderStructureTree({
-  modules,
-  selectedModuleIndex,
-  selectedItemIndex,
-  onSelectModule,
-  onSelectItem,
-  onSelectTask,
+function CompactOrderProgress({
+  activeStep,
+  progressValue,
+  onSelect,
 }: {
-  modules: OrderModuleFormValues[];
-  selectedModuleIndex: number;
-  selectedItemIndex: number;
-  onSelectModule: (moduleIndex: number) => void;
-  onSelectItem: (moduleIndex: number, itemIndex: number) => void;
-  onSelectTask: (moduleIndex: number, itemIndex: number, taskIndex: number) => void;
+  activeStep: CompactStepId;
+  progressValue: number;
+  onSelect: (step: CompactStepId) => void;
 }) {
   return (
-    <div className="space-y-3">
-      <div className="flex items-center gap-2 text-sm font-medium">
-        <Layers3 className="h-4 w-4" />
-        订单结构树
-      </div>
-      <div className="space-y-2 text-sm">
-        {modules.map((module, moduleIndex) => (
-          <div key={`${module.module_name}-${moduleIndex}`} className="space-y-1">
-            <button
-              type="button"
-              onClick={() => onSelectModule(moduleIndex)}
-              className={cn(
-                'flex w-full items-center justify-between rounded-md px-2 py-1.5 text-left hover:bg-background',
-                selectedModuleIndex === moduleIndex ? 'bg-background font-medium' : ''
-              )}
-            >
-              <span>{module.module_name || `空间 #${moduleIndex + 1}`}</span>
-              <Badge variant="secondary">{module.items.length}</Badge>
-            </button>
-            <div className="space-y-1 pl-4">
-              {module.items.map((item, itemIndex) => (
-                <div key={`${item.product_name}-${itemIndex}`} className="space-y-1">
-                  <button
-                    type="button"
-                    onClick={() => onSelectItem(moduleIndex, itemIndex)}
-                    className={cn(
-                      'flex w-full items-center justify-between rounded-md px-2 py-1 text-left text-xs hover:bg-background',
-                      selectedModuleIndex === moduleIndex && selectedItemIndex === itemIndex ? 'bg-background font-medium' : ''
-                    )}
-                  >
-                    <span>{item.product_name || `产品 #${itemIndex + 1}`}</span>
-                    <span className="text-muted-foreground">{item.tasks.length} 任务</span>
-                  </button>
-                  {item.tasks.length > 0 ? (
-                    <div className="space-y-1 pl-3">
-                      {item.tasks.slice(0, 6).map((task, taskIndex) => (
-                        <button
-                          key={`${task.task_name}-${taskIndex}`}
-                          type="button"
-                          onClick={() => onSelectTask(moduleIndex, itemIndex, taskIndex)}
-                          className="block w-full truncate rounded px-2 py-0.5 text-left text-xs text-muted-foreground hover:bg-background hover:text-foreground"
-                        >
-                          {task.task_name || `任务 #${taskIndex + 1}`}
-                        </button>
-                      ))}
-                      {item.tasks.length > 6 ? <div className="px-2 text-xs text-muted-foreground">还有 {item.tasks.length - 6} 个任务</div> : null}
-                    </div>
-                  ) : null}
-                </div>
-              ))}
-            </div>
-          </div>
+    <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_180px] md:items-center">
+      <div className="grid gap-2 md:grid-cols-4">
+        {COMPACT_STEPS.map((step, index) => (
+          <button
+            key={step.id}
+            type="button"
+            onClick={() => onSelect(step.id)}
+            className={cn(
+              'rounded-md border px-3 py-2 text-left transition-colors',
+              activeStep === step.id ? 'border-primary bg-primary/5 text-primary' : 'border-border bg-background hover:bg-muted'
+            )}
+          >
+            <div className="text-sm font-medium">{index + 1}. {step.label}</div>
+            <div className="text-xs text-muted-foreground">{step.description}</div>
+          </button>
         ))}
       </div>
+      <div className="space-y-2">
+        <div className="flex items-center justify-between text-xs text-muted-foreground">
+          <span>录入进度</span>
+          <span>{progressValue}%</span>
+        </div>
+        <Progress value={progressValue} />
+      </div>
     </div>
+  );
+}
+
+function NodeCompletenessBadge({ missing }: { missing: string[] }) {
+  if (missing.length > 0) {
+    return (
+      <Badge variant="outline" className="gap-1 border-red-200 bg-red-50 text-red-700">
+        <CircleAlert className="h-3 w-3" />
+        缺 {missing.length}
+      </Badge>
+    );
+  }
+  return (
+    <Badge variant="outline" className="gap-1 border-emerald-200 bg-emerald-50 text-emerald-700">
+      <CircleCheck className="h-3 w-3" />
+      完整
+    </Badge>
+  );
+}
+
+function OrderStructureSidebar({
+  values,
+  selectedNode,
+  incompleteNodes,
+  receiverName,
+  totalAmount,
+  onSelectNode,
+  onAddSpace,
+  onApplyCabinetTemplate,
+  onCopySpace,
+  onRemoveSpace,
+  onAddProduct,
+  onCopyProduct,
+  onRemoveProduct,
+  onAddTask,
+  onAddCabinetTasks,
+  onCopyTask,
+  onRemoveTask,
+}: {
+  values: OrderFormValues;
+  selectedNode: SelectedNode;
+  incompleteNodes: IncompleteNode[];
+  receiverName: string;
+  totalAmount: number;
+  onSelectNode: (node: SelectedNode) => void;
+  onAddSpace: () => void;
+  onApplyCabinetTemplate: () => void;
+  onCopySpace: (moduleIndex: number) => void;
+  onRemoveSpace: (moduleIndex: number) => void;
+  onAddProduct: (moduleIndex: number) => void;
+  onCopyProduct: (moduleIndex: number, itemIndex: number) => void;
+  onRemoveProduct: (moduleIndex: number, itemIndex: number) => void;
+  onAddTask: (moduleIndex: number, itemIndex: number) => void;
+  onAddCabinetTasks: (moduleIndex: number, itemIndex: number) => void;
+  onCopyTask: (moduleIndex: number, itemIndex: number, taskIndex: number) => void;
+  onRemoveTask: (moduleIndex: number, itemIndex: number, taskIndex: number) => void;
+}) {
+  const missingByKey = new Map<string, string[]>();
+  incompleteNodes.forEach((item) => {
+    const key = selectedNodeKey(item.node);
+    missingByKey.set(key, Array.from(new Set([...(missingByKey.get(key) || []), ...item.missing])));
+  });
+  const selectedKey = selectedNodeKey(selectedNode);
+  const orderMissing = missingByKey.get('order') || [];
+
+  return (
+    <div className="space-y-5 p-4">
+      <div className="space-y-3 rounded-lg border bg-background p-4 shadow-sm">
+        <div className="flex items-center justify-between gap-2">
+          <div className="flex items-center gap-2 font-medium">
+            <ClipboardList className="h-4 w-4" />
+            四级订单结构
+          </div>
+          <NodeCompletenessBadge missing={incompleteNodes.flatMap((node) => node.missing)} />
+        </div>
+        <div className="grid grid-cols-4 gap-2 text-center text-xs">
+          <MiniStat label="空间" value={values.modules.length} />
+          <MiniStat label="产品" value={countProducts(values.modules)} />
+          <MiniStat label="任务" value={countTasks(values.modules)} />
+          <MiniStat label="附件" value={countAttachments(values.modules)} />
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <Button type="button" variant="outline" size="sm" onClick={onAddSpace}>
+            <Plus className="mr-1 h-3.5 w-3.5" />空间
+          </Button>
+          <Button type="button" variant="secondary" size="sm" onClick={onApplyCabinetTemplate}>
+            <Sparkles className="mr-1 h-3.5 w-3.5" />柜子模板
+          </Button>
+        </div>
+      </div>
+
+      <div className="space-y-2">
+        <div className="flex items-center gap-2 rounded-md">
+          <button
+            type="button"
+            onClick={() => onSelectNode({ type: 'order' })}
+            className={cn(
+              'flex min-w-0 flex-1 items-center justify-between rounded-md border px-3 py-2 text-left text-sm transition-colors',
+              selectedKey === 'order' ? 'border-primary bg-primary/5' : 'bg-background hover:bg-muted'
+            )}
+          >
+            <span className="min-w-0 truncate font-medium">{values.order_no || '订单基础信息'}</span>
+            <NodeCompletenessBadge missing={orderMissing} />
+          </button>
+        </div>
+
+        {values.modules.map((module, moduleIndex) => {
+          const spaceNode: SelectedNode = { type: 'space', moduleIndex };
+          const spaceKey = selectedNodeKey(spaceNode);
+          const spaceMissing = missingByKey.get(spaceKey) || [];
+          return (
+            <div key={`${module.module_name}-${moduleIndex}`} className="space-y-1">
+              <div className="flex items-center gap-1">
+                <button
+                  type="button"
+                  onClick={() => onSelectNode(spaceNode)}
+                  className={cn(
+                    'flex min-w-0 flex-1 items-center justify-between rounded-md border px-3 py-2 text-left text-sm transition-colors',
+                    selectedKey === spaceKey ? 'border-primary bg-primary/5' : 'bg-background hover:bg-muted'
+                  )}
+                >
+                  <span className="min-w-0 truncate">{module.module_name || `空间 #${moduleIndex + 1}`}</span>
+                  <span className="flex items-center gap-1">
+                    <Badge variant="secondary">{module.items.length} 产品</Badge>
+                    <NodeCompletenessBadge missing={spaceMissing} />
+                  </span>
+                </button>
+                <TreeIconButton label="新增产品" onClick={() => onAddProduct(moduleIndex)} icon={<Plus className="h-3.5 w-3.5" />} />
+                <TreeIconButton label="复制空间" onClick={() => onCopySpace(moduleIndex)} icon={<Copy className="h-3.5 w-3.5" />} />
+                <TreeIconButton label="删除空间" onClick={() => onRemoveSpace(moduleIndex)} icon={<Trash2 className="h-3.5 w-3.5" />} disabled={values.modules.length <= 1} destructive />
+              </div>
+
+              <div className="space-y-1 pl-5">
+                {module.items.map((item, itemIndex) => {
+                  const productNode: SelectedNode = { type: 'product', moduleIndex, itemIndex };
+                  const productKey = selectedNodeKey(productNode);
+                  const productMissing = missingByKey.get(productKey) || [];
+                  return (
+                    <div key={`${item.product_name}-${itemIndex}`} className="space-y-1">
+                      <div className="flex items-center gap-1">
+                        <button
+                          type="button"
+                          onClick={() => onSelectNode(productNode)}
+                          className={cn(
+                            'flex min-w-0 flex-1 items-center justify-between rounded-md px-3 py-1.5 text-left text-xs transition-colors',
+                            selectedKey === productKey ? 'bg-background font-medium ring-1 ring-primary' : 'hover:bg-background'
+                          )}
+                        >
+                          <span className="min-w-0 truncate">{item.product_name || `产品 #${itemIndex + 1}`}</span>
+                          <span className="flex items-center gap-1">
+                            <span className="text-muted-foreground">{item.tasks.length} 任务</span>
+                            <NodeCompletenessBadge missing={productMissing} />
+                          </span>
+                        </button>
+                        <TreeIconButton label="新增任务" onClick={() => onAddTask(moduleIndex, itemIndex)} icon={<Plus className="h-3.5 w-3.5" />} />
+                        <TreeIconButton label="生成柜子任务" onClick={() => onAddCabinetTasks(moduleIndex, itemIndex)} icon={<Sparkles className="h-3.5 w-3.5" />} />
+                        <TreeIconButton label="复制产品" onClick={() => onCopyProduct(moduleIndex, itemIndex)} icon={<Copy className="h-3.5 w-3.5" />} />
+                        <TreeIconButton label="删除产品" onClick={() => onRemoveProduct(moduleIndex, itemIndex)} icon={<Trash2 className="h-3.5 w-3.5" />} disabled={module.items.length <= 1} destructive />
+                      </div>
+
+                      <div className="space-y-1 pl-4">
+                        {item.tasks.map((task, taskIndex) => {
+                          const taskNode: SelectedNode = { type: 'task', moduleIndex, itemIndex, taskIndex };
+                          const taskKey = selectedNodeKey(taskNode);
+                          const taskMissing = missingByKey.get(taskKey) || [];
+                          return (
+                            <div key={`${task.task_name}-${taskIndex}`} className="flex items-center gap-1">
+                              <button
+                                type="button"
+                                onClick={() => onSelectNode(taskNode)}
+                                className={cn(
+                                  'flex min-w-0 flex-1 items-center justify-between rounded px-2 py-1 text-left text-xs text-muted-foreground transition-colors hover:bg-background hover:text-foreground',
+                                  selectedKey === taskKey ? 'bg-background font-medium text-foreground ring-1 ring-primary' : ''
+                                )}
+                              >
+                                <span className="min-w-0 truncate">{task.task_name || `任务 #${taskIndex + 1}`}</span>
+                                <NodeCompletenessBadge missing={taskMissing} />
+                              </button>
+                              <TreeIconButton label="复制任务" onClick={() => onCopyTask(moduleIndex, itemIndex, taskIndex)} icon={<Copy className="h-3.5 w-3.5" />} />
+                              <TreeIconButton label="删除任务" onClick={() => onRemoveTask(moduleIndex, itemIndex, taskIndex)} icon={<Trash2 className="h-3.5 w-3.5" />} destructive />
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      <SummaryBox
+        receiverName={receiverName}
+        customerName={values.customer_name}
+        modules={values.modules}
+        totalAmount={totalAmount}
+      />
+    </div>
+  );
+}
+
+function MiniStat({ label, value }: { label: string; value: number }) {
+  return (
+    <div className="rounded-md bg-muted/50 p-2">
+      <div className="font-semibold">{value}</div>
+      <div className="text-muted-foreground">{label}</div>
+    </div>
+  );
+}
+
+function TreeIconButton({
+  label,
+  icon,
+  onClick,
+  disabled,
+  destructive,
+}: {
+  label: string;
+  icon: ReactNode;
+  onClick: () => void;
+  disabled?: boolean;
+  destructive?: boolean;
+}) {
+  return (
+    <Button
+      type="button"
+      variant="ghost"
+      size="icon"
+      className={cn('h-7 w-7 shrink-0', destructive ? 'text-destructive hover:text-destructive' : '')}
+      title={label}
+      aria-label={label}
+      disabled={disabled}
+      onClick={onClick}
+    >
+      {icon}
+    </Button>
+  );
+}
+
+function NodeEditorPanel({
+  form,
+  mode,
+  partnerLabel,
+  parentOrders,
+  partners,
+  partnerOpen,
+  partnerSearch,
+  generatingOrderNo,
+  selectedPartnerName,
+  selectedNode,
+  modules,
+  onPartnerOpenChange,
+  onPartnerSearchChange,
+  onSelectPartner,
+  onGenerateOrderNo,
+  onAddSpace,
+  onApplyCabinetTemplate,
+  onSelectNode,
+  onCopySpace,
+  onRemoveSpace,
+  onAddProduct,
+  onCopyProduct,
+  onRemoveProduct,
+  onAddTask,
+  onAddCabinetTasks,
+  onCopyTask,
+  onRemoveTask,
+}: {
+  form: UseFormReturn<OrderFormValues, unknown, OrderFormValues>;
+  mode: OrderMode;
+  partnerLabel: string;
+  parentOrders: Order[];
+  partners: TenantOption[];
+  partnerOpen: boolean;
+  partnerSearch: string;
+  generatingOrderNo: boolean;
+  selectedPartnerName: string;
+  selectedNode: SelectedNode;
+  modules: OrderModuleFormValues[];
+  onPartnerOpenChange: (open: boolean) => void;
+  onPartnerSearchChange: (value: string) => void;
+  onSelectPartner: (partner: TenantOption) => void;
+  onGenerateOrderNo: () => void;
+  onAddSpace: () => void;
+  onApplyCabinetTemplate: () => void;
+  onSelectNode: (node: SelectedNode) => void;
+  onCopySpace: (moduleIndex: number) => void;
+  onRemoveSpace: (moduleIndex: number) => void;
+  onAddProduct: (moduleIndex: number) => void;
+  onCopyProduct: (moduleIndex: number, itemIndex: number) => void;
+  onRemoveProduct: (moduleIndex: number, itemIndex: number) => void;
+  onAddTask: (moduleIndex: number, itemIndex: number) => void;
+  onAddCabinetTasks: (moduleIndex: number, itemIndex: number) => void;
+  onCopyTask: (moduleIndex: number, itemIndex: number, taskIndex: number) => void;
+  onRemoveTask: (moduleIndex: number, itemIndex: number, taskIndex: number) => void;
+}) {
+  if (selectedNode.type === 'order') {
+    return (
+      <BasicStep
+        form={form}
+        mode={mode}
+        partnerLabel={partnerLabel}
+        parentOrders={parentOrders}
+        partners={partners}
+        partnerOpen={partnerOpen}
+        partnerSearch={partnerSearch}
+        generatingOrderNo={generatingOrderNo}
+        selectedPartnerName={selectedPartnerName}
+        onPartnerOpenChange={onPartnerOpenChange}
+        onPartnerSearchChange={onPartnerSearchChange}
+        onSelectPartner={onSelectPartner}
+        onGenerateOrderNo={onGenerateOrderNo}
+      />
+    );
+  }
+
+  if (selectedNode.type === 'space') {
+    return (
+      <SpaceNodePanel
+        form={form}
+        moduleIndex={selectedNode.moduleIndex}
+        moduleCount={modules.length}
+        onAddProduct={() => onAddProduct(selectedNode.moduleIndex)}
+        onCopy={() => onCopySpace(selectedNode.moduleIndex)}
+        onRemove={() => onRemoveSpace(selectedNode.moduleIndex)}
+        onApplyCabinetTemplate={onApplyCabinetTemplate}
+      />
+    );
+  }
+
+  if (selectedNode.type === 'product') {
+    const items = modules[selectedNode.moduleIndex]?.items || [];
+    return (
+      <ProductNodePanel
+        form={form}
+        moduleIndex={selectedNode.moduleIndex}
+        itemIndex={selectedNode.itemIndex}
+        canRemove={items.length > 1}
+        onAddTask={() => onAddTask(selectedNode.moduleIndex, selectedNode.itemIndex)}
+        onAddCabinetTasks={() => onAddCabinetTasks(selectedNode.moduleIndex, selectedNode.itemIndex)}
+        onCopy={() => onCopyProduct(selectedNode.moduleIndex, selectedNode.itemIndex)}
+        onRemove={() => onRemoveProduct(selectedNode.moduleIndex, selectedNode.itemIndex)}
+        onSelectNode={onSelectNode}
+      />
+    );
+  }
+
+  return (
+    <TaskNodePanel
+      form={form}
+      moduleIndex={selectedNode.moduleIndex}
+      itemIndex={selectedNode.itemIndex}
+      taskIndex={selectedNode.taskIndex}
+      onCopy={() => onCopyTask(selectedNode.moduleIndex, selectedNode.itemIndex, selectedNode.taskIndex)}
+      onRemove={() => onRemoveTask(selectedNode.moduleIndex, selectedNode.itemIndex, selectedNode.taskIndex)}
+      onSelectProduct={() => onSelectNode({ type: 'product', moduleIndex: selectedNode.moduleIndex, itemIndex: selectedNode.itemIndex })}
+    />
+  );
+}
+
+function SpaceNodePanel({
+  form,
+  moduleIndex,
+  moduleCount,
+  onAddProduct,
+  onCopy,
+  onRemove,
+  onApplyCabinetTemplate,
+}: {
+  form: UseFormReturn<OrderFormValues, unknown, OrderFormValues>;
+  moduleIndex: number;
+  moduleCount: number;
+  onAddProduct: () => void;
+  onCopy: () => void;
+  onRemove: () => void;
+  onApplyCabinetTemplate: () => void;
+}) {
+  const error = form.formState.errors.modules?.[moduleIndex]?.module_name?.message;
+  const orderModule = form.watch(`modules.${moduleIndex}`);
+  return (
+    <section className="space-y-5">
+      <StepTitle icon={<Layers3 className="h-5 w-5" />} title={orderModule?.module_name || `空间 #${moduleIndex + 1}`} description="二级单元。一个订单可以包含多个空间，每个空间下面录入多个产品。" />
+      <div className="flex flex-wrap gap-2">
+        <Button type="button" variant="outline" onClick={onAddProduct}>
+          <Plus className="mr-1 h-4 w-4" />新增产品
+        </Button>
+        <Button type="button" variant="secondary" onClick={onApplyCabinetTemplate}>
+          <Sparkles className="mr-1 h-4 w-4" />套用柜子模板
+        </Button>
+        <Button type="button" variant="outline" onClick={onCopy}>
+          <Copy className="mr-1 h-4 w-4" />复制空间
+        </Button>
+        <Button type="button" variant="ghost" onClick={onRemove} disabled={moduleCount <= 1}>
+          <Trash2 className="mr-1 h-4 w-4 text-destructive" />删除空间
+        </Button>
+      </div>
+      <div className="rounded-lg border bg-background p-5 shadow-sm">
+        <div className="grid gap-4 md:grid-cols-2">
+          <Field label="空间名称 *" error={error}>
+            <Input
+              list={`module-presets-node-${moduleIndex}`}
+              {...form.register(`modules.${moduleIndex}.module_name`)}
+              placeholder="主卧 / 厨房 / 客厅 / 自定义"
+            />
+            <OptionList id={`module-presets-node-${moduleIndex}`} values={ORDER_MODULE_PRESETS} />
+          </Field>
+          <Field label="空间备注">
+            <Input {...form.register(`modules.${moduleIndex}.remark`)} placeholder="可选" />
+          </Field>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function ProductNodePanel({
+  form,
+  moduleIndex,
+  itemIndex,
+  canRemove,
+  onAddTask,
+  onAddCabinetTasks,
+  onCopy,
+  onRemove,
+  onSelectNode,
+}: {
+  form: UseFormReturn<OrderFormValues, unknown, OrderFormValues>;
+  moduleIndex: number;
+  itemIndex: number;
+  canRemove: boolean;
+  onAddTask: () => void;
+  onAddCabinetTasks: () => void;
+  onCopy: () => void;
+  onRemove: () => void;
+  onSelectNode: (node: SelectedNode) => void;
+}) {
+  const productName = form.watch(`modules.${moduleIndex}.items.${itemIndex}.product_name`);
+  const spaceName = form.watch(`modules.${moduleIndex}.module_name`);
+  return (
+    <section className="space-y-5">
+      <StepTitle icon={<Package className="h-5 w-5" />} title={productName || `产品 #${itemIndex + 1}`} description={`三级对象，归属：${spaceName || `空间 #${moduleIndex + 1}`}`} />
+      <div className="flex flex-wrap gap-2">
+        <Button type="button" variant="outline" onClick={onAddTask}>
+          <Plus className="mr-1 h-4 w-4" />新增任务
+        </Button>
+        <Button type="button" variant="secondary" onClick={onAddCabinetTasks}>
+          <Sparkles className="mr-1 h-4 w-4" />生成柜子任务
+        </Button>
+        <Button type="button" variant="outline" onClick={onCopy}>
+          <Copy className="mr-1 h-4 w-4" />复制产品
+        </Button>
+        <Button type="button" variant="ghost" onClick={onRemove} disabled={!canRemove}>
+          <Trash2 className="mr-1 h-4 w-4 text-destructive" />删除产品
+        </Button>
+      </div>
+      <ProductFields
+        form={form}
+        moduleIndex={moduleIndex}
+        itemIndex={itemIndex}
+        selected
+        canRemove={canRemove}
+        onFocus={() => onSelectNode({ type: 'product', moduleIndex, itemIndex })}
+        onRemove={onRemove}
+      />
+    </section>
+  );
+}
+
+function TaskNodePanel({
+  form,
+  moduleIndex,
+  itemIndex,
+  taskIndex,
+  onCopy,
+  onRemove,
+  onSelectProduct,
+}: {
+  form: UseFormReturn<OrderFormValues, unknown, OrderFormValues>;
+  moduleIndex: number;
+  itemIndex: number;
+  taskIndex: number;
+  onCopy: () => void;
+  onRemove: () => void;
+  onSelectProduct: () => void;
+}) {
+  const taskName = form.watch(`modules.${moduleIndex}.items.${itemIndex}.tasks.${taskIndex}.task_name`);
+  const productName = form.watch(`modules.${moduleIndex}.items.${itemIndex}.product_name`);
+  return (
+    <section className="space-y-5">
+      <StepTitle icon={<Workflow className="h-5 w-5" />} title={taskName || `任务 #${taskIndex + 1}`} description={`四级任务，解释并拆解产品：${productName || `产品 #${itemIndex + 1}`}`} />
+      <div className="flex flex-wrap gap-2">
+        <Button type="button" variant="outline" onClick={onSelectProduct}>
+          返回产品
+        </Button>
+        <Button type="button" variant="outline" onClick={onCopy}>
+          <Copy className="mr-1 h-4 w-4" />复制任务
+        </Button>
+        <Button type="button" variant="ghost" onClick={onRemove}>
+          <Trash2 className="mr-1 h-4 w-4 text-destructive" />删除任务
+        </Button>
+      </div>
+      <TaskFields
+        form={form}
+        moduleIndex={moduleIndex}
+        itemIndex={itemIndex}
+        taskIndex={taskIndex}
+        onRemove={onRemove}
+      />
+    </section>
   );
 }
 
