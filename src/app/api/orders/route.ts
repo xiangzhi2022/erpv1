@@ -1,315 +1,625 @@
+import { NextResponse } from 'next/server';
 import { getSupabaseClient } from '@/db/client';
 import { getUserFromRequest, type AuthUser } from '@/lib/auth';
 import { isSuperAdmin } from '@/lib/role-access';
-import { ORDER_STATUSES, STATUS_TRANSITIONS } from '@/app/orders/schemas';
+import {
+  ORDER_MODE_CONFIG,
+  canCreateOrderInMode,
+  getVisibleOrderModes,
+  normalizeOrderMode,
+  type OrderFlow,
+  type OrderMode,
+} from '@/lib/order-flow';
+import { ORDER_STATUSES, orderFormSchema, type OrderStats } from '@/app/orders/schemas';
 
-const getServiceClient = () => getSupabaseClient();
-
-function canAccessAllTenants(user: AuthUser): boolean {
-  return isSuperAdmin(user);
-}
-
-// Valid status values for filtering
 const VALID_STATUSES = new Set<string>(ORDER_STATUSES);
 
-// GET /api/orders - Fetch orders with pagination, search, filtering, and items
+interface TenantRow {
+  id: string;
+  name: string | null;
+  company_name: string | null;
+  tenant_type: string | null;
+  contact_person?: string | null;
+  contact_phone?: string | null;
+  address?: string | null;
+  status?: string | null;
+}
+
+interface OrderRow {
+  id: string;
+  order_no: string;
+  tenant_id: string | null;
+  target_factory_id: string | null;
+  dealer_id: string | null;
+  order_flow: OrderFlow | null;
+  from_tenant_id: string | null;
+  to_tenant_id: string | null;
+  parent_order_id: string | null;
+  customer_name: string;
+  customer_phone: string | null;
+  status: string;
+  total_amount: string | number | null;
+  delivery_date: string | null;
+  remark: string | null;
+  created_by?: string | null;
+  created_at: string;
+  updated_at: string | null;
+  items?: OrderItemRow[];
+}
+
+interface OrderModuleRow {
+  id: string;
+  order_id: string;
+  module_no: string;
+  module_name: string;
+  sort_order: number;
+  remark: string | null;
+  created_at: string;
+  updated_at: string | null;
+}
+
+interface OrderItemRow {
+  id: string;
+  order_id: string;
+  module_id: string | null;
+  item_no: string | null;
+  product_name: string;
+  specifications: string | null;
+  woodworking_craft: string | null;
+  forming_craft: string | null;
+  painting_craft: string | null;
+  length_mm: string | number | null;
+  width_mm: string | number | null;
+  thickness_mm: string | number | null;
+  quantity: string | number;
+  unit: string | null;
+  color: string | null;
+  hardware: string | null;
+  hardware_quantity: string | number | null;
+  construction_surface: string | null;
+  unit_price: string | number;
+  subtotal: string | number;
+  remark: string | null;
+  sort_order: number | null;
+  created_at: string;
+  updated_at: string | null;
+}
+
+interface AttachmentRow {
+  id: string;
+  order_id: string;
+  module_id: string | null;
+  order_item_id: string;
+  tenant_id: string | null;
+  file_name: string;
+  file_path: string;
+  file_url: string;
+  file_type: string | null;
+  file_size: number | null;
+  uploaded_by: string | null;
+  created_at: string;
+}
+
+function jsonError(error: string, status: number) {
+  return NextResponse.json({ success: false, error }, { status });
+}
+
+function emptyStats(): OrderStats {
+  return {
+    total: 0,
+    pending: 0,
+    returned: 0,
+    confirmed: 0,
+    pool: 0,
+    producing: 0,
+    shipped: 0,
+    completed: 0,
+    cancelled: 0,
+  };
+}
+
+interface ScopedQuery<T> {
+  eq(column: string, value: string): T;
+  in(column: string, values: readonly string[]): T;
+}
+
+function applyModeScope<T extends ScopedQuery<T>>(query: T, user: AuthUser, mode: OrderMode): T {
+  if (mode === 'dealer') {
+    query = query.in('order_flow', ['dealer_to_factory', 'legacy']);
+    if (!isSuperAdmin(user)) query = query.eq('from_tenant_id', user.tenant_id || '');
+  } else if (mode === 'factory_received') {
+    query = query.eq('order_flow', 'dealer_to_factory');
+    if (!isSuperAdmin(user)) query = query.eq('to_tenant_id', user.tenant_id || '');
+  } else if (mode === 'factory_material') {
+    query = query.eq('order_flow', 'factory_to_supplier');
+    if (!isSuperAdmin(user)) query = query.eq('from_tenant_id', user.tenant_id || '');
+  } else {
+    query = query.eq('order_flow', 'factory_to_supplier');
+    if (!isSuperAdmin(user)) query = query.eq('to_tenant_id', user.tenant_id || '');
+  }
+  return query;
+}
+
+async function hydrateOrders(supabase: ReturnType<typeof getSupabaseClient>, rows: OrderRow[]) {
+  const orderIds = rows.map((order) => order.id);
+  if (orderIds.length === 0) return [];
+
+  const tenantIds = new Set<string>();
+  const parentIds = new Set<string>();
+  rows.forEach((order) => {
+    if (order.from_tenant_id) tenantIds.add(order.from_tenant_id);
+    if (order.to_tenant_id) tenantIds.add(order.to_tenant_id);
+    if (order.parent_order_id) parentIds.add(order.parent_order_id);
+  });
+
+  const [modulesRes, attachmentsRes, tenantsRes, parentsRes] = await Promise.all([
+    supabase.from('order_modules').select('*').in('order_id', orderIds).order('sort_order', { ascending: true }),
+    supabase.from('order_item_attachments').select('*').in('order_id', orderIds),
+    tenantIds.size > 0
+      ? supabase.from('tenants').select('id, name, company_name, tenant_type, contact_person, contact_phone, address, status').in('id', Array.from(tenantIds))
+      : Promise.resolve({ data: [] as TenantRow[], error: null }),
+    parentIds.size > 0
+      ? supabase.from('orders').select('id, order_no, customer_name').in('id', Array.from(parentIds))
+      : Promise.resolve({ data: [] as Pick<OrderRow, 'id' | 'order_no' | 'customer_name'>[], error: null }),
+  ]);
+
+  if (modulesRes.error) throw new Error(modulesRes.error.message);
+  if (attachmentsRes.error) throw new Error(attachmentsRes.error.message);
+  if (tenantsRes.error) throw new Error(tenantsRes.error.message);
+  if (parentsRes.error) throw new Error(parentsRes.error.message);
+
+  const modules = (modulesRes.data || []) as OrderModuleRow[];
+  const attachments = (attachmentsRes.data || []) as AttachmentRow[];
+  const tenants = (tenantsRes.data || []) as TenantRow[];
+  const parents = (parentsRes.data || []) as Pick<OrderRow, 'id' | 'order_no' | 'customer_name'>[];
+
+  const moduleMap = new Map<string, OrderModuleRow[]>();
+  modules.forEach((module) => {
+    const list = moduleMap.get(module.order_id) || [];
+    list.push(module);
+    moduleMap.set(module.order_id, list);
+  });
+
+  const attachmentByItem = new Map<string, AttachmentRow[]>();
+  attachments.forEach((attachment) => {
+    const list = attachmentByItem.get(attachment.order_item_id) || [];
+    list.push(attachment);
+    attachmentByItem.set(attachment.order_item_id, list);
+  });
+
+  const tenantMap = new Map(tenants.map((tenant) => [tenant.id, tenant]));
+  const parentMap = new Map(parents.map((parent) => [parent.id, parent]));
+
+  return rows.map((order) => {
+    const items = (order.items || [])
+      .map((item) => ({ ...item, attachments: attachmentByItem.get(item.id) || [] }))
+      .sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0));
+    const orderModules = (moduleMap.get(order.id) || []).map((module) => ({
+      ...module,
+      items: items.filter((item) => item.module_id === module.id),
+      attachments: attachments.filter((attachment) => attachment.module_id === module.id),
+    }));
+
+    return {
+      ...order,
+      items,
+      modules: orderModules,
+      from_tenant: order.from_tenant_id ? tenantMap.get(order.from_tenant_id) || null : null,
+      to_tenant: order.to_tenant_id ? tenantMap.get(order.to_tenant_id) || null : null,
+      parent_order: order.parent_order_id ? parentMap.get(order.parent_order_id) || null : null,
+    };
+  });
+}
+
+function statsFromRows(rows: { status: string }[]): OrderStats {
+  const stats = emptyStats();
+  stats.total = rows.length;
+  rows.forEach((row) => {
+    if (row.status in stats) stats[row.status as keyof OrderStats] += 1;
+  });
+  return stats;
+}
+
+function yuanToCents(value: number): number {
+  return Math.round((Number(value) || 0) * 100);
+}
+
+function nullableText(value: string | undefined | null): string | null {
+  const trimmed = value?.trim();
+  return trimmed ? trimmed : null;
+}
+
 export async function GET(request: Request) {
   try {
     const user = await getUserFromRequest(request);
-    if (!user) {
-      return Response.json({ success: false, error: '请先登录' }, { status: 401 });
-    }
+    if (!user) return jsonError('请先登录', 401);
 
-    const supabase = getServiceClient();
+    const supabase = getSupabaseClient();
     const { searchParams } = new URL(request.url);
-    const status = searchParams.get('status');
-    const search = searchParams.get('search');
-    const page = Math.max(1, parseInt(searchParams.get('page') || '1', 10));
-    const pageSize = Math.min(100, Math.max(1, parseInt(searchParams.get('pageSize') || '20', 10)));
-    const dateFrom = searchParams.get('dateFrom');
-    const dateTo = searchParams.get('dateTo');
+    const mode = normalizeOrderMode(searchParams.get('mode'), user);
+    if (!mode) return jsonError('无权限访问该订单模块', 403);
 
+    const status = searchParams.get('status');
+    const search = searchParams.get('search')?.trim();
+    const page = Math.max(1, Number.parseInt(searchParams.get('page') || '1', 10));
+    const pageSize = Math.min(100, Math.max(1, Number.parseInt(searchParams.get('pageSize') || '20', 10)));
     const from = (page - 1) * pageSize;
     const to = from + pageSize - 1;
 
-    // Build query with order items
+    if (!isSuperAdmin(user) && !user.tenant_id) return jsonError('当前用户未关联企业', 403);
+
     let query = supabase
       .from('orders')
       .select('*, items:order_items(*)', { count: 'exact' })
       .order('created_at', { ascending: false })
       .range(from, to);
+    query = applyModeScope(query, user, mode);
 
-    // Non-platform users are scoped by tenant_id instead of per-user ownership.
-    if (!canAccessAllTenants(user)) {
-      if (!user.tenant_id) {
-        return Response.json({ success: false, error: '当前用户未关联租户' }, { status: 403 });
-      }
-      query = query.eq('tenant_id', user.tenant_id);
-    }
-
-    // Status filter - validate before applying
     if (status && status !== 'all') {
-      const requestedStatuses = status.split(',').map((s) => s.trim()).filter(Boolean);
-      const statuses = requestedStatuses.filter((s) => VALID_STATUSES.has(s));
-      if (statuses.length !== requestedStatuses.length) {
-        return Response.json({ success: false, error: '订单状态筛选值无效' }, { status: 400 });
-      }
-      if (statuses.length === 1) {
-        query = query.eq('status', statuses[0]);
-      } else if (statuses.length > 1) {
-        query = query.in('status', statuses);
-      }
+      const statuses = status.split(',').map((item) => item.trim()).filter(Boolean);
+      if (statuses.some((item) => !VALID_STATUSES.has(item))) return jsonError('订单状态筛选值无效', 400);
+      query = statuses.length === 1 ? query.eq('status', statuses[0]) : query.in('status', statuses);
     }
 
-    // Search filter (order number or customer name)
-    if (search && search.trim()) {
-      query = query.or(`order_no.ilike.%${search.trim()}%,customer_name.ilike.%${search.trim()}%`);
-    }
-
-    // Date range filter
-    if (dateFrom) {
-      query = query.gte('created_at', dateFrom);
-    }
-    if (dateTo) {
-      query = query.lte('created_at', dateTo + 'T23:59:59');
+    if (search) {
+      query = query.or(`order_no.ilike.%${search}%,customer_name.ilike.%${search}%`);
     }
 
     const { data, error, count } = await query;
+    if (error) return jsonError(error.message, 500);
 
-    if (error) {
-      console.error('Get orders error:', error);
-      return Response.json({ success: false, error: error.message }, { status: 500 });
-    }
-
-    // Get status statistics (using same permission scope)
     let statsQuery = supabase.from('orders').select('status');
-    if (!canAccessAllTenants(user)) {
-      statsQuery = statsQuery.eq('tenant_id', user.tenant_id);
-    }
-    const { data: allOrders, error: statsError } = await statsQuery;
+    statsQuery = applyModeScope(statsQuery, user, mode);
+    const { data: statsRows, error: statsError } = await statsQuery;
+    if (statsError) return jsonError(statsError.message, 500);
 
-    if (statsError) {
-      console.error('Get order stats error:', statsError);
-      return Response.json({ success: false, error: statsError.message }, { status: 500 });
-    }
+    const orders = await hydrateOrders(supabase, (data || []) as OrderRow[]);
+    const config = ORDER_MODE_CONFIG[mode];
+    const visibleModes = getVisibleOrderModes(user);
 
-    const stats = {
-      total: allOrders?.length || 0,
-      pending: allOrders?.filter((o: { status: string }) => o.status === 'pending').length || 0,
-      returned: allOrders?.filter((o: { status: string }) => o.status === 'returned').length || 0,
-      confirmed: allOrders?.filter((o: { status: string }) => o.status === 'confirmed').length || 0,
-      pool: allOrders?.filter((o: { status: string }) => o.status === 'pool').length || 0,
-      producing: allOrders?.filter((o: { status: string }) => o.status === 'producing').length || 0,
-      shipped: allOrders?.filter((o: { status: string }) => o.status === 'shipped').length || 0,
-      completed: allOrders?.filter((o: { status: string }) => o.status === 'completed').length || 0,
-      cancelled: allOrders?.filter((o: { status: string }) => o.status === 'cancelled').length || 0,
-    };
-
-    return Response.json({
+    return NextResponse.json({
       success: true,
-      data: data || [],
+      data: orders,
       pagination: {
         page,
         pageSize,
         total: count || 0,
         totalPages: Math.ceil((count || 0) / pageSize),
       },
-      stats,
+      stats: statsFromRows((statsRows || []) as { status: string }[]),
+      context: {
+        mode,
+        visibleModes,
+        canCreate: canCreateOrderInMode(user, mode),
+        title: config.title,
+        description: config.description,
+        createLabel: config.createLabel,
+        partnerLabel: config.partnerLabel,
+      },
     });
-  } catch (err) {
-    console.error('Get orders error:', err);
-    return Response.json({ success: false, error: '服务器错误' }, { status: 500 });
+  } catch (error) {
+    console.error('get orders failed:', error);
+    return jsonError('获取订单失败', 500);
   }
 }
 
-// POST /api/orders - Create order with items
 export async function POST(request: Request) {
   try {
     const user = await getUserFromRequest(request);
-    if (!user) {
-      return Response.json({ success: false, error: '请先登录' }, { status: 401 });
+    if (!user) return jsonError('请先登录', 401);
+    if (!user.tenant_id) return jsonError('当前用户未关联企业', 403);
+
+    const parsed = orderFormSchema.safeParse(await request.json());
+    if (!parsed.success) {
+      return jsonError(parsed.error.issues[0]?.message || '订单数据无效', 400);
     }
 
-    const body = await request.json();
-    const { order_no, customer_name, customer_phone, delivery_date, remark, items, target_factory_id } = body;
+    const values = parsed.data;
+    const mode: OrderMode = values.order_flow === 'dealer_to_factory' ? 'dealer' : 'factory_material';
+    if (!canCreateOrderInMode(user, mode)) return jsonError('无权限创建该类型订单', 403);
 
-    // Validate required fields
-    if (!order_no || !order_no.trim()) {
-      return Response.json({ success: false, error: '订单号不能为空' }, { status: 400 });
-    }
-    if (!customer_name || !customer_name.trim()) {
-      return Response.json({ success: false, error: '客户名称不能为空' }, { status: 400 });
-    }
-    if (!items || !Array.isArray(items) || items.length === 0) {
-      return Response.json({ success: false, error: '订单项不能为空' }, { status: 400 });
-    }
+    const expectedTenantType = values.order_flow === 'dealer_to_factory' ? 'manufacturer' : 'material_supplier';
+    const supabase = getSupabaseClient();
 
-    // Validate each order item
-    for (let i = 0; i < items.length; i++) {
-      const item = items[i];
-      if (!item.product_name || !item.product_name.trim()) {
-        return Response.json({ success: false, error: `第${i + 1}项: 产品名称不能为空` }, { status: 400 });
+    const { data: toTenant, error: tenantError } = await supabase
+      .from('tenants')
+      .select('id, name, company_name, tenant_type, contact_phone, status')
+      .eq('id', values.to_tenant_id)
+      .eq('tenant_type', expectedTenantType)
+      .eq('status', 'active')
+      .maybeSingle();
+
+    if (tenantError) return jsonError(tenantError.message, 500);
+    if (!toTenant) return jsonError('接收企业不存在或类型不正确', 400);
+
+    if (values.parent_order_id) {
+      const { data: parentOrder, error: parentError } = await supabase
+        .from('orders')
+        .select('id, to_tenant_id, target_factory_id, order_flow')
+        .eq('id', values.parent_order_id)
+        .maybeSingle();
+      if (parentError) return jsonError(parentError.message, 500);
+      if (!parentOrder) return jsonError('关联经销商订单不存在', 400);
+      const parentReceiver = parentOrder.to_tenant_id || parentOrder.target_factory_id;
+      if (!isSuperAdmin(user) && parentReceiver !== user.tenant_id) {
+        return jsonError('只能关联本工厂接收的经销商订单', 403);
       }
-      if (!item.quantity || item.quantity < 1) {
-        return Response.json({ success: false, error: `第${i + 1}项: 数量必须大于0` }, { status: 400 });
-      }
     }
 
-    const supabase = getServiceClient();
-
-    // Check for duplicate order_no
     const { data: existing } = await supabase
       .from('orders')
       .select('id')
-      .eq('order_no', order_no.trim())
+      .eq('order_no', values.order_no.trim())
       .maybeSingle();
+    if (existing) return jsonError('订单号已存在，请重新生成', 409);
 
-    if (existing) {
-      return Response.json({ success: false, error: '订单号已存在，请重新生成' }, { status: 409 });
-    }
-
-    // Calculate total amount from items (all amounts in cents)
     let totalAmount = 0;
-    const orderItems = items.map((item: { product_name: string; specification?: string; quantity: number; unit: string; unit_price: number; remark?: string }) => {
-      const subtotal = (item.quantity || 1) * (item.unit_price || 0);
-      totalAmount += subtotal;
-      return {
-        product_name: item.product_name,
-        specifications: item.specification || null,
-        quantity: item.quantity || 1,
-        unit: item.unit || '件',
-        unit_price: item.unit_price || 0,
-        subtotal,
-        remark: item.remark || null,
-      };
+    values.modules.forEach((module) => {
+      module.items.forEach((item) => {
+        totalAmount += yuanToCents(item.unit_price) * Number(item.quantity || 1);
+      });
     });
 
-    // Create order - only use columns that exist in DB schema
+    const receiverName = toTenant.company_name || toTenant.name || values.customer_name;
     const { data: order, error: orderError } = await supabase
       .from('orders')
       .insert({
-        order_no: order_no.trim(),
-        customer_name: customer_name.trim(),
-        customer_phone: customer_phone?.trim() || null,
+        order_no: values.order_no.trim(),
+        customer_name: values.customer_name.trim(),
+        customer_phone: values.customer_phone?.trim() || null,
         status: 'pending',
         total_amount: totalAmount,
-        delivery_date: delivery_date || null,
-        remark: remark || null,
-        tenant_id: user.tenant_id || null,
-        target_factory_id: target_factory_id || null,
+        delivery_date: values.delivery_date || null,
+        remark: nullableText(values.remark),
+        tenant_id: user.tenant_id,
+        target_factory_id: values.to_tenant_id,
+        dealer_id: values.order_flow === 'dealer_to_factory' ? user.tenant_id : null,
+        order_flow: values.order_flow,
+        from_tenant_id: user.tenant_id,
+        to_tenant_id: values.to_tenant_id,
+        parent_order_id: values.parent_order_id || null,
+        created_by: user.id,
+        updated_at: new Date().toISOString(),
       })
       .select()
       .single();
 
-    if (orderError) {
-      console.error('Create order error:', orderError);
-      return Response.json({ success: false, error: orderError.message }, { status: 500 });
-    }
+    if (orderError || !order) return jsonError(orderError?.message || '创建订单失败', 500);
 
-    // Create order items
-    const itemsWithOrderId = orderItems.map((item: Record<string, unknown>) => ({
-      ...item,
-      order_id: order.id,
-    }));
+    try {
+      const moduleInserts = values.modules.map((module, moduleIndex) => ({
+        order_id: order.id,
+        module_no: `${values.order_no.trim()}-M${String(moduleIndex + 1).padStart(2, '0')}`,
+        module_name: module.module_name.trim(),
+        sort_order: moduleIndex + 1,
+        remark: nullableText(module.remark),
+        updated_at: new Date().toISOString(),
+      }));
 
-    const { error: itemsError } = await supabase
-      .from('order_items')
-      .insert(itemsWithOrderId);
+      const { data: insertedModules, error: moduleError } = await supabase
+        .from('order_modules')
+        .insert(moduleInserts)
+        .select();
+      if (moduleError) throw new Error(moduleError.message);
 
-    if (itemsError) {
-      console.error('Create order items error:', itemsError);
-      // Rollback: delete the created order
-      await supabase.from('orders').delete().eq('id', order.id);
-      return Response.json({ success: false, error: '创建订单明细失败' }, { status: 500 });
-    }
+      const modules = insertedModules as OrderModuleRow[];
+      const moduleByNo = new Map(modules.map((module) => [module.module_no, module]));
+      const itemInserts = values.modules.flatMap((module, moduleIndex) => {
+        const moduleNo = `${values.order_no.trim()}-M${String(moduleIndex + 1).padStart(2, '0')}`;
+        const insertedModule = moduleByNo.get(moduleNo);
+        if (!insertedModule) return [];
 
-    // Return full order with items
-    const { data: fullOrder } = await supabase
-      .from('orders')
-      .select('*, items:order_items(*)')
-      .eq('id', order.id)
-      .single();
+        return module.items.map((item, itemIndex) => {
+          const unitPrice = yuanToCents(item.unit_price);
+          const quantity = Number(item.quantity || 1);
+          return {
+            order_id: order.id,
+            module_id: insertedModule.id,
+            item_no: `${moduleNo}-I${String(itemIndex + 1).padStart(2, '0')}`,
+            product_name: item.product_name.trim(),
+            specifications: nullableText(item.specification),
+            woodworking_craft: nullableText(item.woodworking_craft),
+            forming_craft: nullableText(item.forming_craft),
+            painting_craft: nullableText(item.painting_craft),
+            length_mm: item.length_mm ?? null,
+            width_mm: item.width_mm ?? null,
+            thickness_mm: item.thickness_mm ?? null,
+            quantity,
+            unit: item.unit || '件',
+            color: nullableText(item.color),
+            hardware: nullableText(item.hardware),
+            hardware_quantity: item.hardware_quantity ?? null,
+            construction_surface: nullableText(item.construction_surface),
+            unit_price: unitPrice,
+            subtotal: unitPrice * quantity,
+            remark: nullableText(item.remark),
+            sort_order: itemIndex + 1,
+            updated_at: new Date().toISOString(),
+          };
+        });
+      });
 
-    return Response.json({ success: true, data: fullOrder || order });
-  } catch (err) {
-    console.error('Create order error:', err);
-    return Response.json({ success: false, error: '服务器错误' }, { status: 500 });
-  }
-}
+      const { data: insertedItems, error: itemError } = await supabase
+        .from('order_items')
+        .insert(itemInserts)
+        .select();
+      if (itemError) throw new Error(itemError.message);
 
-// PUT /api/orders - Backward-compatible status update endpoint.
-export async function PUT(request: Request) {
-  try {
-    const user = await getUserFromRequest(request);
-    if (!user) {
-      return Response.json({ success: false, error: '请先登录' }, { status: 401 });
-    }
-    if (!canAccessAllTenants(user) && !user.tenant_id) {
-      return Response.json({ success: false, error: '当前用户未关联租户' }, { status: 403 });
-    }
+      const items = insertedItems as OrderItemRow[];
+      const itemByNo = new Map(items.map((item) => [item.item_no || '', item]));
 
-    const body = await request.json();
-    const { id, status, notes } = body as { id?: string; status?: string; notes?: string };
+      const spaceInserts = values.modules.map((module, moduleIndex) => ({
+        order_id: order.id,
+        space_no: `${values.order_no.trim()}-S${String(moduleIndex + 1).padStart(2, '0')}`,
+        space_name: module.module_name.trim(),
+        space_type: 'custom',
+        sort_order: moduleIndex + 1,
+        status: 'draft',
+        remark: nullableText(module.remark),
+        updated_at: new Date().toISOString(),
+      }));
+      const { data: insertedSpaces, error: spaceError } = await supabase
+        .from('order_spaces')
+        .insert(spaceInserts)
+        .select();
+      if (spaceError) throw new Error(spaceError.message);
 
-    if (!id) {
-      return Response.json({ success: false, error: '订单 ID 不能为空' }, { status: 400 });
-    }
-    if (!status || !VALID_STATUSES.has(status)) {
-      return Response.json({ success: false, error: '无效的状态值' }, { status: 400 });
-    }
+      const spaces = (insertedSpaces || []) as { id: string; space_no: string }[];
+      const spaceByNo = new Map(spaces.map((space) => [space.space_no, space]));
+      const productInserts = values.modules.flatMap((module, moduleIndex) => {
+        const spaceNo = `${values.order_no.trim()}-S${String(moduleIndex + 1).padStart(2, '0')}`;
+        const insertedSpace = spaceByNo.get(spaceNo);
+        if (!insertedSpace) return [];
 
-    const supabase = getServiceClient();
-    let fetchQuery = supabase
-      .from('orders')
-      .select('id, status, tenant_id')
-      .eq('id', id);
+        return module.items.map((item, itemIndex) => {
+          const unitPrice = yuanToCents(item.unit_price);
+          const quantity = Number(item.quantity || 1);
+          const productNo = `${spaceNo}-P${String(itemIndex + 1).padStart(2, '0')}`;
+          return {
+            order_id: order.id,
+            space_id: insertedSpace.id,
+            product_no: productNo,
+            product_name: item.product_name.trim(),
+            product_type: item.product_type || (item.hardware ? 'hardware' : 'custom'),
+            width: item.width_mm ?? null,
+            height: item.length_mm ?? null,
+            depth: item.thickness_mm ?? null,
+            quantity,
+            material: nullableText(item.material) || nullableText(item.specification),
+            color: nullableText(item.color),
+            status: 'draft',
+            quoted_amount: unitPrice * quantity,
+            cost_amount: 0,
+            profit_amount: 0,
+            sort_order: itemIndex + 1,
+            remark: nullableText(item.remark),
+            updated_at: new Date().toISOString(),
+          };
+        });
+      });
 
-    if (!canAccessAllTenants(user)) {
-      if (!user.tenant_id) {
-        return Response.json({ success: false, error: '当前用户未关联租户' }, { status: 403 });
+      let productByNo = new Map<string, { id: string; product_no: string; space_id: string }>();
+      if (productInserts.length > 0) {
+        const { data: insertedProducts, error: productError } = await supabase
+          .from('order_products')
+          .insert(productInserts)
+          .select('id, product_no, space_id');
+        if (productError) throw new Error(productError.message);
+        productByNo = new Map(
+          ((insertedProducts || []) as { id: string; product_no: string; space_id: string }[])
+            .map((product) => [product.product_no, product])
+        );
       }
-      fetchQuery = fetchQuery.eq('tenant_id', user.tenant_id);
+
+      const taskInserts = values.modules.flatMap((module, moduleIndex) => {
+        const spaceNo = `${values.order_no.trim()}-S${String(moduleIndex + 1).padStart(2, '0')}`;
+        const insertedSpace = spaceByNo.get(spaceNo);
+        if (!insertedSpace) return [];
+
+        return module.items.flatMap((item, itemIndex) => {
+          const productNo = `${spaceNo}-P${String(itemIndex + 1).padStart(2, '0')}`;
+          const insertedProduct = productByNo.get(productNo);
+          if (!insertedProduct) return [];
+
+          return item.tasks.map((task, taskIndex) => {
+            const taskNotes = [
+              nullableText(task.construction_surface) ? `施工面：${task.construction_surface.trim()}` : null,
+              nullableText(task.hardware) ? `五金：${task.hardware.trim()}` : null,
+              task.hardware_quantity !== undefined && task.hardware_quantity !== null ? `五金数量：${task.hardware_quantity}` : null,
+              nullableText(task.remark),
+            ].filter(Boolean).join('\n');
+
+            return {
+              order_id: order.id,
+              space_id: insertedSpace.id,
+              product_id: insertedProduct.id,
+              tenant_id: values.to_tenant_id,
+              task_no: `${productNo}-T${String(taskIndex + 1).padStart(2, '0')}`,
+              task_type: task.task_type,
+              task_name: task.task_name.trim(),
+              task_code: nullableText(task.task_code),
+              product_name: item.product_name.trim(),
+              quantity: Number(task.quantity || 1),
+              unit: task.unit || item.unit || '件',
+              length: task.length_mm ?? item.length_mm ?? null,
+              width: task.width_mm ?? item.width_mm ?? null,
+              thickness: task.thickness_mm ?? item.thickness_mm ?? null,
+              area: task.area ?? null,
+              material: nullableText(task.material) || nullableText(item.material) || nullableText(item.specification),
+              color: nullableText(task.color) || nullableText(item.color),
+              process_name: nullableText(task.process_name),
+              status: 'pending_generate',
+              remark: nullableText(taskNotes),
+              updated_at: new Date().toISOString(),
+            };
+          });
+        });
+      });
+
+      if (taskInserts.length > 0) {
+        const { error: taskError } = await supabase
+          .from('production_tasks')
+          .insert(taskInserts);
+        if (taskError) throw new Error(taskError.message);
+      }
+
+      const attachmentInserts = values.modules.flatMap((module, moduleIndex) => {
+        const moduleNo = `${values.order_no.trim()}-M${String(moduleIndex + 1).padStart(2, '0')}`;
+        const insertedModule = moduleByNo.get(moduleNo);
+        if (!insertedModule) return [];
+
+        return module.items.flatMap((item, itemIndex) => {
+          const itemNo = `${moduleNo}-I${String(itemIndex + 1).padStart(2, '0')}`;
+          const insertedItem = itemByNo.get(itemNo);
+          if (!insertedItem) return [];
+
+          return item.attachments.map((attachment) => ({
+            order_id: order.id,
+            module_id: insertedModule.id,
+            order_item_id: insertedItem.id,
+            tenant_id: user.tenant_id,
+            file_name: attachment.file_name,
+            file_path: attachment.file_path,
+            file_url: attachment.file_url,
+            file_type: attachment.file_type || null,
+            file_size: attachment.file_size || null,
+            uploaded_by: user.id,
+          }));
+        });
+      });
+
+      if (attachmentInserts.length > 0) {
+        const { error: attachmentError } = await supabase
+          .from('order_item_attachments')
+          .insert(attachmentInserts);
+        if (attachmentError) throw new Error(attachmentError.message);
+      }
+
+      await supabase.from('order_exchanges').insert({
+        order_id: order.id,
+        from_tenant_id: user.tenant_id,
+        to_tenant_id: values.to_tenant_id,
+        from_user_id: user.id,
+        status: 'sent',
+        message: nullableText(values.remark),
+        updated_at: new Date().toISOString(),
+      });
+
+      const { data: fullOrder, error: fullError } = await supabase
+        .from('orders')
+        .select('*, items:order_items(*)')
+        .eq('id', order.id)
+        .single();
+      if (fullError) throw new Error(fullError.message);
+
+      const hydrated = await hydrateOrders(supabase, [fullOrder as OrderRow]);
+      return NextResponse.json({ success: true, data: hydrated[0] || fullOrder });
+    } catch (nestedError) {
+      await supabase.from('orders').delete().eq('id', order.id);
+      throw nestedError;
     }
-
-    const { data: existingOrder, error: fetchError } = await fetchQuery.single();
-
-    if (fetchError || !existingOrder) {
-      return Response.json({ success: false, error: '订单不存在或无权操作' }, { status: 404 });
-    }
-
-    const currentStatus = existingOrder.status as string;
-    const allowedTransitions = STATUS_TRANSITIONS[currentStatus];
-    if (status !== currentStatus && (!allowedTransitions || !allowedTransitions.has(status))) {
-      return Response.json(
-        { success: false, error: `不允许从「${currentStatus}」变更为「${status}」` },
-        { status: 400 }
-      );
-    }
-
-    const updateData: Record<string, unknown> = {
-      status,
-      updated_at: new Date().toISOString(),
-    };
-
-    if (typeof notes === 'string' && notes.trim()) {
-      updateData.remark = notes.trim();
-    }
-
-    const { data, error } = await supabase
-      .from('orders')
-      .update(updateData)
-      .eq('id', id)
-      .select('*, items:order_items(*)')
-      .single();
-
-    if (error) {
-      console.error('Update order status error:', error);
-      return Response.json({ success: false, error: error.message }, { status: 500 });
-    }
-
-    return Response.json({ success: true, data });
-  } catch (err) {
-    console.error('Update order status error:', err);
-    return Response.json({ success: false, error: '服务器错误' }, { status: 500 });
+  } catch (error) {
+    console.error('create order failed:', error);
+    return jsonError(error instanceof Error ? error.message : '创建订单失败', 500);
   }
 }

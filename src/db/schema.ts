@@ -22,6 +22,7 @@ export const users = pgTable("users", {
 	nickname: varchar("nickname", { length: 100 }),
 	avatar_url: varchar("avatar_url", { length: 512 }),
 	role: varchar("role", { length: 50 }).notNull().default("user"),
+	department: varchar("department", { length: 100 }),
 	tenant_id: uuid("tenant_id"),
 	tenant_type: varchar("tenant_type", { length: 50 }),
 	is_active: boolean("is_active").default(true).notNull(),
@@ -98,22 +99,108 @@ export const orders = pgTable(
 		customer_name: varchar("customer_name", { length: 200 }).notNull(),
 		customer_phone: varchar("customer_phone", { length: 20 }),
 		customer_address: text("customer_address"),
+		order_source: varchar("order_source", { length: 50 }),
 		status: varchar("status", { length: 50 }).notNull().default("pending"),
 		total_amount: numeric("total_amount", { precision: 12, scale: 2 }).default("0"),
+		cost_amount: numeric("cost_amount", { precision: 12, scale: 2 }).default("0"),
+		profit_amount: numeric("profit_amount", { precision: 12, scale: 2 }).default("0"),
 		deposit_amount: numeric("deposit_amount", { precision: 12, scale: 2 }).default("0"),
 		tenant_id: uuid("tenant_id"),
 		target_factory_id: uuid("target_factory_id"),
 		dealer_id: uuid("dealer_id"),
+		order_flow: varchar("order_flow", { length: 40 }).default("legacy"),
+		from_tenant_id: uuid("from_tenant_id"),
+		to_tenant_id: uuid("to_tenant_id"),
+		parent_order_id: uuid("parent_order_id"),
 		delivery_date: date("delivery_date"),
 		remark: text("remark"),
+		internal_remark: text("internal_remark"),
 		created_by: uuid("created_by"),
 		created_at: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
 		updated_at: timestamp("updated_at", { withTimezone: true }),
 	},
 	(table) => [
 		index("orders_tenant_id_idx").on(table.tenant_id),
+		index("orders_order_flow_idx").on(table.order_flow),
+		index("orders_from_tenant_id_idx").on(table.from_tenant_id),
+		index("orders_to_tenant_id_idx").on(table.to_tenant_id),
+		index("orders_parent_order_id_idx").on(table.parent_order_id),
 		index("orders_status_idx").on(table.status),
 		index("orders_created_by_idx").on(table.created_by),
+	]
+);
+
+export const orderSpaces = pgTable(
+	"order_spaces",
+	{
+		id: uuid("id").primaryKey().defaultRandom(),
+		order_id: uuid("order_id").notNull(),
+		space_no: varchar("space_no", { length: 80 }).notNull(),
+		space_name: varchar("space_name", { length: 120 }).notNull(),
+		space_type: varchar("space_type", { length: 50 }),
+		sort_order: integer("sort_order").notNull().default(1),
+		status: varchar("status", { length: 50 }).notNull().default("draft"),
+		remark: text("remark"),
+		created_at: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+		updated_at: timestamp("updated_at", { withTimezone: true }),
+	},
+	(table) => [
+		index("order_spaces_order_id_idx").on(table.order_id),
+		index("order_spaces_space_no_idx").on(table.space_no),
+		index("order_spaces_status_idx").on(table.status),
+	]
+);
+
+export const orderProducts = pgTable(
+	"order_products",
+	{
+		id: uuid("id").primaryKey().defaultRandom(),
+		order_id: uuid("order_id").notNull(),
+		space_id: uuid("space_id").notNull(),
+		product_no: varchar("product_no", { length: 100 }).notNull(),
+		product_name: varchar("product_name", { length: 200 }).notNull(),
+		product_type: varchar("product_type", { length: 50 }).notNull().default("custom"),
+		product_model: varchar("product_model", { length: 120 }),
+		width: numeric("width", { precision: 10, scale: 2 }),
+		height: numeric("height", { precision: 10, scale: 2 }),
+		depth: numeric("depth", { precision: 10, scale: 2 }),
+		area: numeric("area", { precision: 12, scale: 4 }),
+		quantity: numeric("quantity", { precision: 10, scale: 2 }).notNull().default("1"),
+		material: varchar("material", { length: 120 }),
+		color: varchar("color", { length: 120 }),
+		status: varchar("status", { length: 50 }).notNull().default("draft"),
+		quoted_amount: numeric("quoted_amount", { precision: 12, scale: 2 }).default("0"),
+		cost_amount: numeric("cost_amount", { precision: 12, scale: 2 }).default("0"),
+		profit_amount: numeric("profit_amount", { precision: 12, scale: 2 }).default("0"),
+		sort_order: integer("sort_order").notNull().default(1),
+		remark: text("remark"),
+		internal_remark: text("internal_remark"),
+		created_at: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+		updated_at: timestamp("updated_at", { withTimezone: true }),
+	},
+	(table) => [
+		index("order_products_order_id_idx").on(table.order_id),
+		index("order_products_space_id_idx").on(table.space_id),
+		index("order_products_product_no_idx").on(table.product_no),
+		index("order_products_status_idx").on(table.status),
+	]
+);
+
+export const orderModules = pgTable(
+	"order_modules",
+	{
+		id: uuid("id").primaryKey().defaultRandom(),
+		order_id: uuid("order_id").notNull(),
+		module_no: varchar("module_no", { length: 80 }).notNull(),
+		module_name: varchar("module_name", { length: 120 }).notNull(),
+		sort_order: integer("sort_order").notNull().default(1),
+		remark: text("remark"),
+		created_at: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+		updated_at: timestamp("updated_at", { withTimezone: true }),
+	},
+	(table) => [
+		index("order_modules_order_id_idx").on(table.order_id),
+		index("order_modules_module_no_idx").on(table.module_no),
 	]
 );
 
@@ -122,18 +209,57 @@ export const orderItems = pgTable(
 	{
 		id: uuid("id").primaryKey().defaultRandom(),
 		order_id: uuid("order_id").notNull(),
+		module_id: uuid("module_id"),
+		item_no: varchar("item_no", { length: 100 }),
 		product_name: varchar("product_name", { length: 200 }).notNull(),
 		specifications: text("specifications"),
+		woodworking_craft: text("woodworking_craft"),
+		forming_craft: text("forming_craft"),
+		painting_craft: text("painting_craft"),
+		length_mm: numeric("length_mm", { precision: 10, scale: 2 }),
+		width_mm: numeric("width_mm", { precision: 10, scale: 2 }),
+		thickness_mm: numeric("thickness_mm", { precision: 10, scale: 2 }),
 		quantity: numeric("quantity", { precision: 10, scale: 2 }).notNull().default("1"),
 		unit: varchar("unit", { length: 20 }).default("件"),
+		color: varchar("color", { length: 100 }),
+		hardware: varchar("hardware", { length: 200 }),
+		hardware_quantity: numeric("hardware_quantity", { precision: 10, scale: 2 }),
+		construction_surface: varchar("construction_surface", { length: 100 }),
 		unit_price: numeric("unit_price", { precision: 12, scale: 2 }).default("0"),
 		subtotal: numeric("subtotal", { precision: 12, scale: 2 }).default("0"),
 		remark: text("remark"),
+		sort_order: integer("sort_order").notNull().default(1),
 		created_at: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
 		updated_at: timestamp("updated_at", { withTimezone: true }),
 	},
 	(table) => [
 		index("order_items_order_id_idx").on(table.order_id),
+		index("order_items_module_id_idx").on(table.module_id),
+		index("order_items_item_no_idx").on(table.item_no),
+	]
+);
+
+export const orderItemAttachments = pgTable(
+	"order_item_attachments",
+	{
+		id: uuid("id").primaryKey().defaultRandom(),
+		order_id: uuid("order_id").notNull(),
+		module_id: uuid("module_id"),
+		order_item_id: uuid("order_item_id").notNull(),
+		tenant_id: uuid("tenant_id"),
+		file_name: varchar("file_name", { length: 255 }).notNull(),
+		file_path: varchar("file_path", { length: 512 }).notNull(),
+		file_url: text("file_url").notNull(),
+		file_type: varchar("file_type", { length: 120 }),
+		file_size: integer("file_size"),
+		uploaded_by: uuid("uploaded_by"),
+		created_at: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+	},
+	(table) => [
+		index("order_item_attachments_order_id_idx").on(table.order_id),
+		index("order_item_attachments_module_id_idx").on(table.module_id),
+		index("order_item_attachments_order_item_id_idx").on(table.order_item_id),
+		index("order_item_attachments_tenant_id_idx").on(table.tenant_id),
 	]
 );
 
@@ -216,25 +342,44 @@ export const productionTasks = pgTable(
 	{
 		id: uuid("id").primaryKey().defaultRandom(),
 		order_id: uuid("order_id"),
+		space_id: uuid("space_id"),
+		product_id: uuid("product_id"),
 		task_no: varchar("task_no", { length: 50 }),
+		task_type: varchar("task_type", { length: 40 }).notNull().default("process"),
 		task_name: varchar("task_name", { length: 200 }),
+		task_code: varchar("task_code", { length: 80 }),
 		product_name: varchar("product_name", { length: 200 }).notNull(),
 		quantity: numeric("quantity", { precision: 10, scale: 2 }).notNull().default("1"),
 		unit: varchar("unit", { length: 20 }).default("件"),
+		length: numeric("length", { precision: 10, scale: 2 }),
+		width: numeric("width", { precision: 10, scale: 2 }),
+		thickness: numeric("thickness", { precision: 10, scale: 2 }),
+		area: numeric("area", { precision: 12, scale: 4 }),
+		material: varchar("material", { length: 120 }),
+		color: varchar("color", { length: 120 }),
+		process_name: varchar("process_name", { length: 120 }),
 		completed: integer("completed").notNull().default(0),
 		status: varchar("status", { length: 30 }).notNull().default("pending"),
 		priority: integer("priority").default(0),
 		progress: varchar("progress", { length: 30 }).default("pending"),
 		worker_id: uuid("worker_id"),
 		assigned_to: uuid("assigned_to"),
+		assigned_worker_id: uuid("assigned_worker_id"),
 		workshop_id: uuid("workshop_id"),
+		workstation_id: uuid("workstation_id"),
 		tenant_id: uuid("tenant_id"),
+		wage_rule_id: uuid("wage_rule_id"),
+		estimated_wage_amount: numeric("estimated_wage_amount", { precision: 12, scale: 2 }).default("0"),
+		final_wage_amount: numeric("final_wage_amount", { precision: 12, scale: 2 }).default("0"),
 		planned_start_date: date("planned_start_date"),
 		planned_end_date: date("planned_end_date"),
 		actual_start_date: date("actual_start_date"),
 		actual_end_date: date("actual_end_date"),
 		started_at: timestamp("started_at", { withTimezone: true }),
+		submitted_at: timestamp("submitted_at", { withTimezone: true }),
 		completed_at: timestamp("completed_at", { withTimezone: true }),
+		approved_at: timestamp("approved_at", { withTimezone: true }),
+		approved_by: uuid("approved_by"),
 		start_date: timestamp("start_date", { withTimezone: true }),
 		end_date: timestamp("end_date", { withTimezone: true }),
 		remark: text("remark"),
@@ -243,9 +388,84 @@ export const productionTasks = pgTable(
 	},
 	(table) => [
 		index("production_tasks_order_id_idx").on(table.order_id),
+		index("production_tasks_space_id_idx").on(table.space_id),
+		index("production_tasks_product_id_idx").on(table.product_id),
 		index("production_tasks_workshop_id_idx").on(table.workshop_id),
 		index("production_tasks_tenant_id_idx").on(table.tenant_id),
 		index("production_tasks_worker_id_idx").on(table.worker_id),
+		index("production_tasks_assigned_worker_id_idx").on(table.assigned_worker_id),
+		index("production_tasks_status_idx").on(table.status),
+	]
+);
+
+export const wageRules = pgTable(
+	"wage_rules",
+	{
+		id: uuid("id").primaryKey().defaultRandom(),
+		tenant_id: uuid("tenant_id"),
+		rule_name: varchar("rule_name", { length: 160 }).notNull(),
+		task_type: varchar("task_type", { length: 40 }).notNull(),
+		process_name: varchar("process_name", { length: 120 }),
+		unit: varchar("unit", { length: 20 }).notNull().default("件"),
+		unit_price: numeric("unit_price", { precision: 12, scale: 2 }).notNull().default("0"),
+		calculation_method: varchar("calculation_method", { length: 40 }).notNull().default("by_piece"),
+		role_scope: varchar("role_scope", { length: 80 }),
+		enabled: boolean("enabled").default(true).notNull(),
+		created_by: uuid("created_by"),
+		created_at: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+		updated_at: timestamp("updated_at", { withTimezone: true }),
+	},
+	(table) => [
+		index("wage_rules_tenant_id_idx").on(table.tenant_id),
+		index("wage_rules_task_type_idx").on(table.task_type),
+		index("wage_rules_enabled_idx").on(table.enabled),
+	]
+);
+
+export const workerWageRecords = pgTable(
+	"worker_wage_records",
+	{
+		id: uuid("id").primaryKey().defaultRandom(),
+		worker_id: uuid("worker_id").notNull(),
+		order_id: uuid("order_id"),
+		space_id: uuid("space_id"),
+		product_id: uuid("product_id"),
+		task_id: uuid("task_id").notNull(),
+		wage_rule_id: uuid("wage_rule_id"),
+		quantity: numeric("quantity", { precision: 10, scale: 2 }).notNull().default("1"),
+		unit_price: numeric("unit_price", { precision: 12, scale: 2 }).notNull().default("0"),
+		wage_amount: numeric("wage_amount", { precision: 12, scale: 2 }).notNull().default("0"),
+		status: varchar("status", { length: 30 }).notNull().default("pending"),
+		submitted_at: timestamp("submitted_at", { withTimezone: true }),
+		approved_by: uuid("approved_by"),
+		approved_at: timestamp("approved_at", { withTimezone: true }),
+		paid_at: timestamp("paid_at", { withTimezone: true }),
+		created_at: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+		updated_at: timestamp("updated_at", { withTimezone: true }),
+	},
+	(table) => [
+		index("worker_wage_records_worker_id_idx").on(table.worker_id),
+		index("worker_wage_records_task_id_idx").on(table.task_id),
+		index("worker_wage_records_order_id_idx").on(table.order_id),
+		index("worker_wage_records_status_idx").on(table.status),
+	]
+);
+
+export const orderStatusLogs = pgTable(
+	"order_status_logs",
+	{
+		id: uuid("id").primaryKey().defaultRandom(),
+		target_type: varchar("target_type", { length: 40 }).notNull(),
+		target_id: uuid("target_id").notNull(),
+		from_status: varchar("from_status", { length: 50 }),
+		to_status: varchar("to_status", { length: 50 }).notNull(),
+		changed_by: uuid("changed_by"),
+		changed_at: timestamp("changed_at", { withTimezone: true }).defaultNow().notNull(),
+		remark: text("remark"),
+	},
+	(table) => [
+		index("order_status_logs_target_idx").on(table.target_type, table.target_id),
+		index("order_status_logs_changed_at_idx").on(table.changed_at),
 	]
 );
 
@@ -306,6 +526,7 @@ export const workers = pgTable(
 	"workers",
 	{
 		id: uuid("id").primaryKey().defaultRandom(),
+		user_id: uuid("user_id"),
 		worker_no: varchar("worker_no", { length: 20 }).notNull().unique(),
 		name: varchar("name", { length: 100 }).notNull(),
 		phone: varchar("phone", { length: 20 }),
@@ -323,6 +544,7 @@ export const workers = pgTable(
 	},
 	(table) => [
 		index("workers_worker_no_idx").on(table.worker_no),
+		index("workers_user_id_idx").on(table.user_id),
 		index("workers_craft_type_idx").on(table.craft_type),
 		index("workers_workshop_id_idx").on(table.workshop_id),
 		index("workers_status_idx").on(table.status),
@@ -472,12 +694,19 @@ export type TenantUser = typeof tenantUsers.$inferSelect;
 export type UserPermission = typeof userPermissions.$inferSelect;
 export type Customer = typeof customers.$inferSelect;
 export type Order = typeof orders.$inferSelect;
+export type OrderSpace = typeof orderSpaces.$inferSelect;
+export type OrderProduct = typeof orderProducts.$inferSelect;
+export type OrderModule = typeof orderModules.$inferSelect;
 export type OrderItem = typeof orderItems.$inferSelect;
+export type OrderItemAttachment = typeof orderItemAttachments.$inferSelect;
 export type OrderPrefix = typeof orderPrefixes.$inferSelect;
 export type OrderExchange = typeof orderExchanges.$inferSelect;
 export type Workshop = typeof workshops.$inferSelect;
 export type FactoryWorkshop = typeof factoryWorkshops.$inferSelect;
 export type ProductionTask = typeof productionTasks.$inferSelect;
+export type WageRule = typeof wageRules.$inferSelect;
+export type WorkerWageRecord = typeof workerWageRecords.$inferSelect;
+export type OrderStatusLog = typeof orderStatusLogs.$inferSelect;
 export type WorkOrder = typeof workOrders.$inferSelect;
 export type ProgressLog = typeof progressLogs.$inferSelect;
 export type Worker = typeof workers.$inferSelect;

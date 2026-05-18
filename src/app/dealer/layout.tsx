@@ -6,7 +6,7 @@ export default function ProtectedLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <ProtectedAppShell title={'\u7ecf\u9500\u5546\u7ba1\u7406'} path="/dealer">
+    <ProtectedAppShell title="企业库" path="/dealer">
       {children}
     </ProtectedAppShell>
   );
