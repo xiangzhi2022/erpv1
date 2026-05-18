@@ -68,7 +68,7 @@ export const orderAttachmentSchema = z.object({
 
 export const productionTaskDraftSchema = z.object({
   task_type: z.enum(PRODUCTION_TASK_TYPES),
-  task_name: z.string().min(1, '任务名称不能为空'),
+  task_name: z.string().min(1, '拆单任务名称不能为空'),
   task_code: z.string().optional().default(''),
   quantity: z.coerce.number().min(0.01, '数量必须大于0'),
   unit: z.string().min(1, '单位不能为空'),
@@ -123,6 +123,7 @@ export const orderFormSchema = z.object({
   parent_order_id: z.string().optional().default(''),
   customer_name: z.string().min(1, '接收企业不能为空'),
   customer_phone: z.string().optional().default(''),
+  customer_address: z.string().optional().default(''),
   delivery_date: z.string().optional().default(''),
   remark: z.string().optional().default(''),
   modules: z.array(orderModuleSchema).min(1, '至少需要一个二级模块'),

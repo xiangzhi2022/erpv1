@@ -223,7 +223,8 @@ export default function ProductionTasksPage() {
 
   const submitAudit = async () => {
     if (!auditTask) return;
-    const res = await fetch(`/api/production/tasks/${auditTask.id}/approve`, {
+    const endpoint = auditAction === 'approve' ? 'review' : auditAction;
+    const res = await fetch(`/api/production/tasks/${auditTask.id}/${endpoint}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ action: auditAction, remark: auditRemark.trim() || undefined }),

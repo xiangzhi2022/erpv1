@@ -21,7 +21,6 @@ interface TaskRow {
   material?: string;
   color?: string;
   status?: string;
-  estimated_wage_amount?: number | string;
   wage_record?: { wage_amount?: number | string; status?: string } | null;
   order?: { order_no?: string; customer_name?: string } | null;
   space?: { space_name?: string } | null;
@@ -88,7 +87,6 @@ export default function WorkerTasksPage() {
               <div>尺寸：{task.length || '-'} × {task.width || '-'} × {task.thickness || '-'}</div>
               <div>材质 / 颜色：{task.material || '-'} / {task.color || '-'}</div>
               {task.wage_record ? <div>本任务工资：{wage(task.wage_record.wage_amount)}（{task.wage_record.status || '待审核'}）</div> : null}
-              {!task.wage_record && task.estimated_wage_amount !== undefined ? <div>本任务工资：{wage(task.estimated_wage_amount)}</div> : null}
               <div className="flex gap-2 pt-2">
                 {task.status === 'assigned' || task.status === 'pending_start' ? (
                   <Button disabled={loadingId === task.id} onClick={() => action(task.id, 'start')}>开始生产</Button>

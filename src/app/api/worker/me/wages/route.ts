@@ -30,7 +30,7 @@ export async function GET(request: Request) {
     if (!canOperateWorkerTask(user)) return jsonError('无权查看工资', 403);
     const supabase = getSupabaseClient();
     const worker = await getWorkerForUser(supabase, user);
-    if (!worker) return Response.json({ success: true, worker: null, data: [], summary: { pending: 0, approved: 0, paid: 0, month_total: 0 } });
+    if (!worker) return Response.json({ success: true, worker: null, data: [], summary: { pending: 0, approved: 0, settled: 0, paid: 0, month_total: 0 } });
     const { data, error } = await supabase
       .from('worker_wage_records')
       .select('*, task:production_tasks(id, task_no, task_name, process_name)')
@@ -51,7 +51,7 @@ export async function GET(request: Request) {
       if (Number.isFinite(createdAt) && createdAt >= weekStart) acc.week_total += wageAmount;
       if (String(row.created_at || '').startsWith(monthPrefix)) acc.month_total += wageAmount;
       return acc;
-    }, { pending: 0, approved: 0, rejected: 0, paid: 0, today_total: 0, week_total: 0, month_total: 0 });
+    }, { pending: 0, approved: 0, rejected: 0, settled: 0, paid: 0, today_total: 0, week_total: 0, month_total: 0 });
     const sanitizedRows = rows.map((row) => {
       const copy = { ...row };
       delete copy.unit_price;

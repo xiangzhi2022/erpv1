@@ -25,6 +25,13 @@ type AuthMode = 'login' | 'register';
 
 const DEFAULT_REDIRECT_PATH = '/board';
 
+interface LoginResponse {
+  success?: boolean;
+  error?: string;
+  error_code?: string;
+  redirectTo?: string;
+}
+
 function WechatIcon() {
   return (
     <svg viewBox="0 0 24 24" className="h-5 w-5" fill="currentColor" aria-hidden="true">
@@ -64,6 +71,7 @@ export default function LoginPage() {
   const [rememberMe, setRememberMe] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [loginError, setLoginError] = useState('');
   const [registerForm, setRegisterForm] = useState({
     phone: '',
     companyName: '',
@@ -110,6 +118,7 @@ export default function LoginPage() {
 
   const switchMode = (nextMode: AuthMode) => {
     setMode(nextMode);
+    setLoginError('');
     const target = nextMode === 'register' ? '/login?mode=register' : '/login';
     router.replace(target, { scroll: false });
   };
@@ -129,11 +138,13 @@ export default function LoginPage() {
     e.preventDefault();
     const error = validateLogin();
     if (error) {
+      setLoginError(error);
       toast.error(error);
       return;
     }
 
     setLoading(true);
+    setLoginError('');
     try {
       const res = await fetch('/api/auth/login', {
         method: 'POST',
@@ -146,10 +157,12 @@ export default function LoginPage() {
           rememberMe,
         }),
       });
-      const data = await res.json();
+      const data = await res.json() as LoginResponse;
 
-      if (!res.ok) {
-        toast.error(data.error || '登录失败');
+      if (!res.ok || !data.success) {
+        const message = data.error || '登录失败';
+        setLoginError(message);
+        toast.error(message);
         setCaptchaCode('');
         fetchCaptcha();
         return;
@@ -165,7 +178,9 @@ export default function LoginPage() {
       toast.success('登录成功，正在进入工作台...');
       router.replace(redirectTo);
     } catch {
-      toast.error('网络错误，请检查网络连接');
+      const message = '网络错误，请检查网络连接';
+      setLoginError(message);
+      toast.error(message);
       setCaptchaCode('');
       fetchCaptcha();
     } finally {
@@ -327,7 +342,10 @@ export default function LoginPage() {
                       <Input
                         id="account"
                         value={account}
-                        onChange={(event) => setAccount(event.target.value)}
+                        onChange={(event) => {
+                          setAccount(event.target.value);
+                          setLoginError('');
+                        }}
                         placeholder="请输入手机号或邮箱"
                         autoComplete="username"
                         className="h-11 rounded-xl pl-10"
@@ -347,7 +365,10 @@ export default function LoginPage() {
                         id="password"
                         type={showPassword ? 'text' : 'password'}
                         value={password}
-                        onChange={(event) => setPassword(event.target.value)}
+                        onChange={(event) => {
+                          setPassword(event.target.value);
+                          setLoginError('');
+                        }}
                         placeholder="请输入密码"
                         autoComplete="current-password"
                         className="h-11 rounded-xl pr-10"
@@ -368,7 +389,10 @@ export default function LoginPage() {
                       <Input
                         id="captcha"
                         value={captchaCode}
-                        onChange={(event) => setCaptchaCode(event.target.value)}
+                        onChange={(event) => {
+                          setCaptchaCode(event.target.value);
+                          setLoginError('');
+                        }}
                         placeholder="请输入验证码"
                         maxLength={4}
                         autoComplete="off"
@@ -391,6 +415,12 @@ export default function LoginPage() {
                       记住账号
                     </Label>
                   </div>
+
+                  {loginError ? (
+                    <div role="alert" className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+                      {loginError}
+                    </div>
+                  ) : null}
 
                   <Button type="submit" disabled={loading} className="h-11 w-full rounded-xl bg-slate-950 text-white hover:bg-slate-800">
                     {loading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <ArrowRight className="mr-2 h-4 w-4" />}

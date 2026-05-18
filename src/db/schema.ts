@@ -75,6 +75,169 @@ export const userPermissions = pgTable(
 	]
 );
 
+export const departments = pgTable(
+	"departments",
+	{
+		id: uuid("id").primaryKey().defaultRandom(),
+		name: varchar("name", { length: 120 }).notNull(),
+		code: varchar("code", { length: 80 }).notNull(),
+		parent_id: uuid("parent_id"),
+		sort_order: integer("sort_order").notNull().default(0),
+		status: varchar("status", { length: 20 }).notNull().default("active"),
+		tenant_id: uuid("tenant_id"),
+		remark: text("remark"),
+		created_at: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+		updated_at: timestamp("updated_at", { withTimezone: true }),
+	},
+	(table) => [
+		index("departments_code_idx").on(table.code),
+		index("departments_parent_id_idx").on(table.parent_id),
+		index("departments_tenant_id_idx").on(table.tenant_id),
+		index("departments_status_idx").on(table.status),
+	]
+);
+
+export const positions = pgTable(
+	"positions",
+	{
+		id: uuid("id").primaryKey().defaultRandom(),
+		name: varchar("name", { length: 120 }).notNull(),
+		code: varchar("code", { length: 80 }).notNull(),
+		department_id: uuid("department_id"),
+		position_type: varchar("position_type", { length: 50 }).notNull().default("general"),
+		can_receive_production_task: boolean("can_receive_production_task").default(false).notNull(),
+		can_calculate_piece_wage: boolean("can_calculate_piece_wage").default(false).notNull(),
+		can_review_task: boolean("can_review_task").default(false).notNull(),
+		can_assign_task: boolean("can_assign_task").default(false).notNull(),
+		default_role_code: varchar("default_role_code", { length: 80 }),
+		status: varchar("status", { length: 20 }).notNull().default("active"),
+		tenant_id: uuid("tenant_id"),
+		remark: text("remark"),
+		created_at: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+		updated_at: timestamp("updated_at", { withTimezone: true }),
+	},
+	(table) => [
+		index("positions_code_idx").on(table.code),
+		index("positions_department_id_idx").on(table.department_id),
+		index("positions_tenant_id_idx").on(table.tenant_id),
+		index("positions_status_idx").on(table.status),
+	]
+);
+
+export const employees = pgTable(
+	"employees",
+	{
+		id: uuid("id").primaryKey().defaultRandom(),
+		user_id: uuid("user_id"),
+		employee_no: varchar("employee_no", { length: 40 }).notNull(),
+		name: varchar("name", { length: 100 }).notNull(),
+		phone: varchar("phone", { length: 20 }),
+		email: varchar("email", { length: 120 }),
+		avatar_url: varchar("avatar_url", { length: 512 }),
+		department_id: uuid("department_id"),
+		primary_position_id: uuid("primary_position_id"),
+		employee_type: varchar("employee_type", { length: 50 }).notNull().default("full_time"),
+		status: varchar("status", { length: 20 }).notNull().default("active"),
+		hire_date: date("hire_date"),
+		leave_date: date("leave_date"),
+		base_salary: numeric("base_salary", { precision: 12, scale: 2 }).default("0"),
+		tenant_id: uuid("tenant_id"),
+		remark: text("remark"),
+		created_at: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+		updated_at: timestamp("updated_at", { withTimezone: true }),
+	},
+	(table) => [
+		index("employees_employee_no_idx").on(table.employee_no),
+		index("employees_user_id_idx").on(table.user_id),
+		index("employees_department_id_idx").on(table.department_id),
+		index("employees_primary_position_id_idx").on(table.primary_position_id),
+		index("employees_tenant_id_idx").on(table.tenant_id),
+		index("employees_status_idx").on(table.status),
+	]
+);
+
+export const employeePositions = pgTable(
+	"employee_positions",
+	{
+		id: uuid("id").primaryKey().defaultRandom(),
+		employee_id: uuid("employee_id").notNull(),
+		position_id: uuid("position_id").notNull(),
+		is_primary: boolean("is_primary").default(false).notNull(),
+		created_at: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+	},
+	(table) => [
+		index("employee_positions_employee_id_idx").on(table.employee_id),
+		index("employee_positions_position_id_idx").on(table.position_id),
+	]
+);
+
+export const roles = pgTable(
+	"roles",
+	{
+		id: uuid("id").primaryKey().defaultRandom(),
+		name: varchar("name", { length: 120 }).notNull(),
+		code: varchar("code", { length: 80 }).notNull(),
+		description: text("description"),
+		status: varchar("status", { length: 20 }).notNull().default("active"),
+		tenant_id: uuid("tenant_id"),
+		created_at: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+		updated_at: timestamp("updated_at", { withTimezone: true }),
+	},
+	(table) => [
+		index("roles_code_idx").on(table.code),
+		index("roles_tenant_id_idx").on(table.tenant_id),
+		index("roles_status_idx").on(table.status),
+	]
+);
+
+export const permissions = pgTable(
+	"permissions",
+	{
+		id: uuid("id").primaryKey().defaultRandom(),
+		name: varchar("name", { length: 120 }).notNull(),
+		code: varchar("code", { length: 100 }).notNull(),
+		module: varchar("module", { length: 80 }).notNull(),
+		permission_type: varchar("permission_type", { length: 40 }).notNull().default("route"),
+		description: text("description"),
+		tenant_id: uuid("tenant_id"),
+		created_at: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+		updated_at: timestamp("updated_at", { withTimezone: true }),
+	},
+	(table) => [
+		index("permissions_code_idx").on(table.code),
+		index("permissions_module_idx").on(table.module),
+		index("permissions_tenant_id_idx").on(table.tenant_id),
+	]
+);
+
+export const rolePermissions = pgTable(
+	"role_permissions",
+	{
+		id: uuid("id").primaryKey().defaultRandom(),
+		role_id: uuid("role_id").notNull(),
+		permission_id: uuid("permission_id").notNull(),
+		created_at: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+	},
+	(table) => [
+		index("role_permissions_role_id_idx").on(table.role_id),
+		index("role_permissions_permission_id_idx").on(table.permission_id),
+	]
+);
+
+export const employeeRoles = pgTable(
+	"employee_roles",
+	{
+		id: uuid("id").primaryKey().defaultRandom(),
+		employee_id: uuid("employee_id").notNull(),
+		role_id: uuid("role_id").notNull(),
+		created_at: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+	},
+	(table) => [
+		index("employee_roles_employee_id_idx").on(table.employee_id),
+		index("employee_roles_role_id_idx").on(table.role_id),
+	]
+);
+
 // ============================================================================
 // 订单与客户
 // ============================================================================
@@ -533,6 +696,8 @@ export const workers = pgTable(
 		gender: varchar("gender", { length: 10 }),
 		craft_type: varchar("craft_type", { length: 50 }),
 		workshop_id: uuid("workshop_id"),
+		can_receive_production_task: boolean("can_receive_production_task").default(true).notNull(),
+		can_calculate_piece_wage: boolean("can_calculate_piece_wage").default(true).notNull(),
 		status: varchar("status", { length: 20 }).notNull().default("active"),
 		skill_tags: jsonb("skill_tags"),
 		hire_date: date("hire_date"),
@@ -692,6 +857,14 @@ export type User = typeof users.$inferSelect;
 export type Tenant = typeof tenants.$inferSelect;
 export type TenantUser = typeof tenantUsers.$inferSelect;
 export type UserPermission = typeof userPermissions.$inferSelect;
+export type Department = typeof departments.$inferSelect;
+export type Position = typeof positions.$inferSelect;
+export type Employee = typeof employees.$inferSelect;
+export type EmployeePosition = typeof employeePositions.$inferSelect;
+export type Role = typeof roles.$inferSelect;
+export type Permission = typeof permissions.$inferSelect;
+export type RolePermission = typeof rolePermissions.$inferSelect;
+export type EmployeeRole = typeof employeeRoles.$inferSelect;
 export type Customer = typeof customers.$inferSelect;
 export type Order = typeof orders.$inferSelect;
 export type OrderSpace = typeof orderSpaces.$inferSelect;

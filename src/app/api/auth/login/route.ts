@@ -1,12 +1,20 @@
 import { NextRequest, NextResponse } from 'next/server';
 import {
   verifyCaptcha,
-  authenticateUser,
+  authenticateUserDetailed,
   createSession,
   buildSessionCookie,
   isProduction,
+  type AuthFailureReason,
 } from '@/lib/auth';
 import { getLandingPath } from '@/lib/role-access';
+
+const AUTH_ERROR_MESSAGES: Record<AuthFailureReason, string> = {
+  account_not_found: '账号不存在',
+  password_incorrect: '密码错误',
+  account_disabled: '账号已停用，请联系管理员',
+  auth_unavailable: '登录服务暂时不可用，请稍后重试',
+};
 
 export async function POST(request: NextRequest) {
   try {
@@ -36,10 +44,18 @@ export async function POST(request: NextRequest) {
     }
 
     // 用户认证（先查内存 store，再查 Supabase）
-    const user = await authenticateUser(account, password);
-    if (!user) {
-      return NextResponse.json({ success: false, error: '账号或密码错误' }, { status: 401 });
+    const authResult = await authenticateUserDetailed(account, password);
+    if (!authResult.success) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: AUTH_ERROR_MESSAGES[authResult.reason],
+          error_code: authResult.reason,
+        },
+        { status: authResult.reason === 'auth_unavailable' ? 503 : 401 }
+      );
     }
+    const { user } = authResult;
 
     // 创建会话（记住我 7 天，否则 1 天）
     const maxAgeMs = rememberMe ? 7 * 24 * 60 * 60 * 1000 : 24 * 60 * 60 * 1000;

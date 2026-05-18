@@ -369,6 +369,12 @@ export async function getUserFromRequest(request: Request): Promise<AuthUser | n
 
 // ===================== 用户认证 =====================
 
+export type AuthFailureReason = 'account_not_found' | 'password_incorrect' | 'account_disabled' | 'auth_unavailable';
+
+export type AuthCheckResult =
+  | { success: true; user: User }
+  | { success: false; reason: AuthFailureReason };
+
 export function authenticateUserFromStore(account: string, password: string): User | null {
   const stored = userStore.get(account);
   if (!stored) return null;
@@ -386,6 +392,23 @@ export function authenticateUserFromStore(account: string, password: string): Us
   }
 
   return stored.user;
+}
+
+export function authenticateUserFromStoreDetailed(account: string, password: string): AuthCheckResult {
+  const stored = userStore.get(account);
+  if (!stored) return { success: false, reason: 'account_not_found' };
+
+  const passwordMatch = isPlaintextPassword(stored.password)
+    ? stored.password === password
+    : verifyPassword(password, stored.password);
+
+  if (!passwordMatch) return { success: false, reason: 'password_incorrect' };
+
+  if (isPlaintextPassword(stored.password)) {
+    stored.password = hashPassword(password);
+  }
+
+  return { success: true, user: stored.user };
 }
 
 /**
@@ -449,6 +472,71 @@ export async function authenticateUserFromDB(account: string, password: string):
   }
 }
 
+export async function authenticateUserFromDBDetailed(account: string, password: string): Promise<AuthCheckResult> {
+  try {
+    const supabase = getSupabaseClient();
+    const isPhone = /^1[3-9]\d{9}$/.test(account);
+    if (!isPhone) return { success: false, reason: 'account_not_found' };
+
+    const { data: dbUser, error } = await supabase
+      .from('users')
+      .select('id, phone, real_name, nickname, avatar_url, password, role, is_active, tenant_id, tenant_type, department')
+      .eq('phone', account)
+      .maybeSingle();
+
+    if (error) return { success: false, reason: 'auth_unavailable' };
+    if (!dbUser) return { success: false, reason: 'account_not_found' };
+    if (!dbUser.is_active) return { success: false, reason: 'account_disabled' };
+    if (typeof dbUser.password !== 'string' || !dbUser.password) {
+      return { success: false, reason: 'password_incorrect' };
+    }
+
+    const passwordMatch = isPlaintextPassword(dbUser.password)
+      ? dbUser.password === password
+      : verifyPassword(password, dbUser.password);
+
+    if (!passwordMatch) return { success: false, reason: 'password_incorrect' };
+
+    if (isPlaintextPassword(dbUser.password)) {
+      await supabase
+        .from('users')
+        .update({ password: hashPassword(password), updated_at: new Date().toISOString() })
+        .eq('id', dbUser.id);
+    }
+
+    let tenantType: string | undefined = dbUser.tenant_type || undefined;
+    if (dbUser.tenant_id) {
+      const { data: tenantData } = await supabase
+        .from('tenants')
+        .select('tenant_type')
+        .eq('id', dbUser.tenant_id)
+        .maybeSingle();
+      tenantType = tenantData?.tenant_type || tenantType;
+    }
+    const permissions = await loadUserPermissions(dbUser.id);
+    const normalizedRole = normalizeAccountRole(dbUser.role || 'employee');
+
+    return {
+      success: true,
+      user: {
+        id: dbUser.id,
+        phone: dbUser.phone || undefined,
+        name: dbUser.real_name || dbUser.nickname || dbUser.phone || '用户',
+        avatar: dbUser.avatar_url || undefined,
+        provider: 'credentials',
+        role: normalizedRole === 'guest' ? 'employee' : normalizedRole,
+        tenant_id: dbUser.tenant_id || undefined,
+        tenant_type: tenantType,
+        department: dbUser.department || undefined,
+        nickname: dbUser.real_name || dbUser.nickname || undefined,
+        permissions,
+      },
+    };
+  } catch {
+    return { success: false, reason: 'auth_unavailable' };
+  }
+}
+
 export async function authenticateUser(account: string, password: string): Promise<User | null> {
   // 1. 先查内存 store（演示用户等）
   const memoryUser = authenticateUserFromStore(account, password);
@@ -456,6 +544,12 @@ export async function authenticateUser(account: string, password: string): Promi
 
   // 2. 再查 Supabase 数据库（正式注册用户）
   return authenticateUserFromDB(account, password);
+}
+
+export async function authenticateUserDetailed(account: string, password: string): Promise<AuthCheckResult> {
+  const memoryResult = authenticateUserFromStoreDetailed(account, password);
+  if (memoryResult.success || memoryResult.reason === 'password_incorrect') return memoryResult;
+  return authenticateUserFromDBDetailed(account, password);
 }
 
 export function findOrCreateOAuthUser(provider: string, providerAccountId: string, profile: { name?: string; email?: string; avatar?: string }): User {

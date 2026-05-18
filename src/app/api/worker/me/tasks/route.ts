@@ -45,6 +45,7 @@ export async function GET(request: Request) {
         wage_record: wageMap.get(String(row.id)) || null,
       };
       delete copy.wage_rule_id;
+      delete copy.estimated_wage_amount;
       delete copy.final_wage_amount;
       return copy;
     });

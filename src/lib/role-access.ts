@@ -102,6 +102,7 @@ const S = {
   workerDesk: '工人工作台',
   factoryPortal: '工厂门户',
   workerPortal: '工人门户',
+  employees: '员工管理',
   finance: '财务',
   shipping: '仓库发货',
   categories: '分类管理',
@@ -124,6 +125,7 @@ const SUPER_PREFIXES = [
   '/factory',
   '/worker',
   '/workers',
+  '/employees',
   '/dealer',
   '/supplier',
   '/settings',
@@ -133,7 +135,7 @@ const SUPER_PREFIXES = [
   '/shipping',
   '/sync',
 ];
-const FACTORY_ADMIN_PREFIXES = ['/factory', '/orders', '/orders/exchanges', '/production/tasks', '/performance/workers', '/progress', '/worker', '/worker/tasks', '/worker/wages', '/workers', '/tasks', '/settings', '/shipping', '/finance', '/dealer'];
+const FACTORY_ADMIN_PREFIXES = ['/factory', '/orders', '/orders/exchanges', '/production/tasks', '/performance/workers', '/performance/orders', '/performance/production', '/progress', '/worker', '/worker/tasks', '/worker/wages', '/workers', '/employees', '/tasks', '/settings', '/shipping', '/finance', '/dealer'];
 const SUPPLIER_ADMIN_PREFIXES = ['/supplier', '/orders', '/orders/exchanges', '/tasks', '/settings'];
 const DEALER_ADMIN_PREFIXES = ['/dealer', '/orders', '/orders/exchanges', '/settings'];
 
@@ -191,8 +193,8 @@ export const ACCOUNT_ROLE_TEMPLATES: AccountRoleTemplate[] = [
 ];
 
 export const PERMISSION_TEMPLATES: PermissionTemplate[] = [
-  { key: 'factory_boss', label: '老板', level: 3, businessType: 'factory', department: '管理', description: '查看全厂订单、生产、工资、成本、利润和绩效。', landingPath: '/board', allowedPrefixes: ['/board', '/orders', '/production/tasks', '/performance/workers', '/workers', '/settings', '/finance', '/shipping', '/factory'] },
-  { key: 'factory_production_manager', label: '生产主管', level: 3, businessType: 'factory', department: '生产管理', description: '拆单、分配生产任务、审核任务和确认计件工资。', landingPath: '/production/tasks', allowedPrefixes: ['/orders', '/production/tasks', '/performance/workers', '/workers', '/worker', '/worker/tasks', '/progress'] },
+  { key: 'factory_boss', label: '老板', level: 3, businessType: 'factory', department: '管理', description: '查看全厂订单、生产、工资、成本、利润和绩效。', landingPath: '/board', allowedPrefixes: ['/board', '/dashboard', '/orders', '/production/tasks', '/performance/workers', '/performance/orders', '/performance/production', '/workers', '/employees', '/settings', '/finance', '/shipping', '/factory'] },
+  { key: 'factory_production_manager', label: '生产主管', level: 3, businessType: 'factory', department: '生产管理', description: '拆单、分配生产任务、审核任务和确认计件工资。', landingPath: '/production/tasks', allowedPrefixes: ['/orders', '/production/tasks', '/performance/workers', '/performance/orders', '/performance/production', '/workers', '/employees', '/worker', '/worker/tasks', '/progress'] },
   { key: 'factory_worker', label: '工人', level: 3, businessType: 'factory', department: '生产', description: '查看本人生产任务、提交完成并查看本人计件工资。', landingPath: '/worker/tasks', allowedPrefixes: ['/worker', '/worker/tasks', '/worker/wages'] },
   { key: 'factory_data_entry', label: '录入员', level: 3, businessType: 'factory', department: '录入', description: '维护订单、空间、产品和生产基础数据，不查看价格、成本、利润和工资。', landingPath: '/orders', allowedPrefixes: ['/orders'] },
   { key: 'factory_profit_view', label: '利润查看', level: 3, businessType: 'factory', department: '财务', description: '允许查看成本和利润字段。', landingPath: '/finance', allowedPrefixes: ['/finance', '/orders', '/performance/workers'] },
@@ -286,6 +288,7 @@ const NAV_ITEMS: NavigationItem[] = [
   { title: S.supplier, href: '/supplier', icon: Building2, group: 'main' },
   { title: S.factory, href: '/factory', icon: Factory, group: 'main' },
   { title: S.workers, href: '/workers', icon: Users, group: 'main' },
+  { title: S.employees, href: '/employees', icon: Users, group: 'admin' },
   { title: S.workerDesk, href: '/worker', icon: HardHat, group: 'portal' },
   { title: S.workerTasks, href: '/worker/tasks', icon: HardHat, group: 'portal' },
   { title: S.workerWages, href: '/worker/wages', icon: Wallet, group: 'portal' },
@@ -422,14 +425,23 @@ function allowedPrefixes(user: AccessUser): string[] {
 export function canAccessPath(user: AccessUser | null | undefined, pathname: string): boolean {
   if (!user) return false;
   const path = normalizePath(pathname);
+  const permissions = getUserPermissionKeys(user);
+  const canManageOrganization = isAdminRole(user) || permissions.includes('factory_boss');
+  const canViewProductionEmployees = permissions.includes('factory_production_manager');
+  if (pathStarts(path, '/employees')) return canManageOrganization || canViewProductionEmployees;
+  if (
+    ['/settings/departments', '/settings/positions', '/settings/roles'].some((prefix) => pathStarts(path, prefix))
+  ) {
+    return canManageOrganization || (canViewProductionEmployees && pathStarts(path, '/settings/positions'));
+  }
   if (pathStarts(path, '/settings/wage-rules') && !isAdminRole(user)) {
-    return getUserPermissionKeys(user).some((key) =>
+    return permissions.some((key) =>
       key === 'factory_boss' || key === 'factory_production_manager'
     );
   }
   if ((path === '/settings' || pathStarts(path, '/settings')) && !isAdminRole(user)) return false;
   if (pathStarts(path, '/orders/exchanges') && !isAdminRole(user)) {
-    return getUserPermissionKeys(user).some((key) =>
+    return permissions.some((key) =>
       getPermissionTemplate(key)?.allowedPrefixes.some(
         (prefix) => prefix === '/orders/exchanges' || prefix.startsWith('/orders/exchanges/')
       )
@@ -459,14 +471,40 @@ export function getAssignablePermissions(user: AccessUser | null | undefined): P
   if (!user) return [];
   const assignablePermissions = PERMISSION_TEMPLATES.filter((template) => template.assignable !== false);
   if (isSuperAdmin(user)) return assignablePermissions;
-  const roleTemplate = getAccountRoleTemplate(rawRoleOf(user));
-  if (!roleTemplate || roleTemplate.level !== 2 || roleTemplate.businessType === 'platform') return [];
-  return assignablePermissions.filter((template) => template.businessType === roleTemplate.businessType);
+  const businessType = getRoleManagementBusinessType(user);
+  if (!businessType) return [];
+  return assignablePermissions.filter((template) => template.businessType === businessType);
 }
 
 export function canAssignPermissionKeys(user: AccessUser | null | undefined, permissionKeys: string[]): boolean {
   const assignable = new Set(getAssignablePermissions(user).map((template) => template.key));
   return permissionKeys.every((key) => assignable.has(key as PermissionKey));
+}
+
+export function getRoleManagementBusinessType(user: AccessUser | null | undefined): Exclude<BusinessType, 'platform'> | null {
+  if (!user || isSuperAdmin(user)) return null;
+
+  const roleTemplate = getAccountRoleTemplate(rawRoleOf(user));
+  if (roleTemplate?.level === 2 && roleTemplate.businessType !== 'platform') {
+    return roleTemplate.businessType;
+  }
+
+  const permissions = getUserPermissionKeys(user);
+  if (permissions.includes('factory_boss')) return 'factory';
+  return null;
+}
+
+export function getAssignablePermissionKeys(user: AccessUser | null | undefined): PermissionKey[] {
+  return getAssignablePermissions(user).map((permission) => permission.key);
+}
+
+export function filterAssignablePermissionKeys(user: AccessUser | null | undefined, permissionKeys: string[]): PermissionKey[] {
+  const assignable = new Set(getAssignablePermissionKeys(user));
+  return Array.from(
+    new Set(
+      permissionKeys.filter((key): key is PermissionKey => assignable.has(key as PermissionKey))
+    )
+  );
 }
 
 export function getDepartmentForPermissions(permissionKeys: string[]): string {

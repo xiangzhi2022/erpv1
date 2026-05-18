@@ -61,7 +61,7 @@ export const WAGE_CALCULATION_METHODS = [
 
 export type WageCalculationMethod = (typeof WAGE_CALCULATION_METHODS)[number];
 
-export const WAGE_RECORD_STATUS_VALUES = ['pending', 'approved', 'rejected', 'paid'] as const;
+export const WAGE_RECORD_STATUS_VALUES = ['pending', 'approved', 'rejected', 'settled', 'paid'] as const;
 export type WageRecordStatus = (typeof WAGE_RECORD_STATUS_VALUES)[number];
 
 export const ORDER_STATUS_LOG_TARGETS = ['order', 'space', 'product', 'production_task', 'wage_record'] as const;
@@ -126,6 +126,10 @@ export function externalDealerStatus(status: string | null | undefined): string 
   if (status === 'completed') return '已完成';
   if (status === 'abnormal' || status === 'quality_failed') return '订单异常';
   return '订单已接收';
+}
+
+export function mapInternalStatusToDealerStatus(status: string | null | undefined): string {
+  return externalDealerStatus(status);
 }
 
 export function hasAnyPermission(user: AccessUser | null | undefined, keys: readonly PermissionKey[]): boolean {

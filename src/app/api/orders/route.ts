@@ -367,6 +367,7 @@ export async function POST(request: Request) {
         order_no: values.order_no.trim(),
         customer_name: values.customer_name.trim(),
         customer_phone: values.customer_phone?.trim() || null,
+        customer_address: values.customer_address?.trim() || null,
         status: 'pending',
         total_amount: totalAmount,
         delivery_date: values.delivery_date || null,

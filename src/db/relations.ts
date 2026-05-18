@@ -3,6 +3,14 @@ import {
   users,
   tenants,
   tenantUsers,
+  departments,
+  positions,
+  employees,
+  employeePositions,
+  roles,
+  permissions,
+  rolePermissions,
+  employeeRoles,
   orders,
   orderSpaces,
   orderProducts,
@@ -34,6 +42,11 @@ export const usersRelations = relations(users, ({ one }) => ({
 
 export const tenantsRelations = relations(tenants, ({ many }) => ({
   users: many(tenantUsers),
+  departments: many(departments),
+  positions: many(positions),
+  employees: many(employees),
+  roles: many(roles),
+  permissions: many(permissions),
   workshops: many(workshops),
   orders: many(orders),
   suppliers: many(suppliers),
@@ -46,6 +59,104 @@ export const tenantUsersRelations = relations(tenantUsers, ({ one }) => ({
   tenant: one(tenants, {
     fields: [tenantUsers.tenant_id],
     references: [tenants.id],
+  }),
+}));
+
+export const departmentsRelations = relations(departments, ({ one, many }) => ({
+  tenant: one(tenants, {
+    fields: [departments.tenant_id],
+    references: [tenants.id],
+  }),
+  parent: one(departments, {
+    fields: [departments.parent_id],
+    references: [departments.id],
+    relationName: 'departmentParent',
+  }),
+  positions: many(positions),
+  employees: many(employees),
+}));
+
+export const positionsRelations = relations(positions, ({ one, many }) => ({
+  tenant: one(tenants, {
+    fields: [positions.tenant_id],
+    references: [tenants.id],
+  }),
+  department: one(departments, {
+    fields: [positions.department_id],
+    references: [departments.id],
+  }),
+  employeePositions: many(employeePositions),
+}));
+
+export const employeesRelations = relations(employees, ({ one, many }) => ({
+  tenant: one(tenants, {
+    fields: [employees.tenant_id],
+    references: [tenants.id],
+  }),
+  user: one(users, {
+    fields: [employees.user_id],
+    references: [users.id],
+  }),
+  department: one(departments, {
+    fields: [employees.department_id],
+    references: [departments.id],
+  }),
+  primaryPosition: one(positions, {
+    fields: [employees.primary_position_id],
+    references: [positions.id],
+    relationName: 'employeePrimaryPosition',
+  }),
+  positions: many(employeePositions),
+  roles: many(employeeRoles),
+}));
+
+export const employeePositionsRelations = relations(employeePositions, ({ one }) => ({
+  employee: one(employees, {
+    fields: [employeePositions.employee_id],
+    references: [employees.id],
+  }),
+  position: one(positions, {
+    fields: [employeePositions.position_id],
+    references: [positions.id],
+  }),
+}));
+
+export const rolesRelations = relations(roles, ({ one, many }) => ({
+  tenant: one(tenants, {
+    fields: [roles.tenant_id],
+    references: [tenants.id],
+  }),
+  permissions: many(rolePermissions),
+  employees: many(employeeRoles),
+}));
+
+export const permissionsRelations = relations(permissions, ({ one, many }) => ({
+  tenant: one(tenants, {
+    fields: [permissions.tenant_id],
+    references: [tenants.id],
+  }),
+  roles: many(rolePermissions),
+}));
+
+export const rolePermissionsRelations = relations(rolePermissions, ({ one }) => ({
+  role: one(roles, {
+    fields: [rolePermissions.role_id],
+    references: [roles.id],
+  }),
+  permission: one(permissions, {
+    fields: [rolePermissions.permission_id],
+    references: [permissions.id],
+  }),
+}));
+
+export const employeeRolesRelations = relations(employeeRoles, ({ one }) => ({
+  employee: one(employees, {
+    fields: [employeeRoles.employee_id],
+    references: [employees.id],
+  }),
+  role: one(roles, {
+    fields: [employeeRoles.role_id],
+    references: [roles.id],
   }),
 }));
 

@@ -11,6 +11,9 @@ import {
   Users,
   KeyRound,
   Settings2,
+  FolderTree,
+  BriefcaseBusiness,
+  Wallet,
 } from 'lucide-react';
 
 const sidebarNavItems = [
@@ -40,9 +43,24 @@ const sidebarNavItems = [
     icon: Users,
   },
   {
+    title: '部门管理',
+    href: '/settings/departments',
+    icon: FolderTree,
+  },
+  {
+    title: '岗位管理',
+    href: '/settings/positions',
+    icon: BriefcaseBusiness,
+  },
+  {
     title: '角色权限',
     href: '/settings/roles',
     icon: KeyRound,
+  },
+  {
+    title: '工资规则',
+    href: '/settings/wage-rules',
+    icon: Wallet,
   },
   {
     title: '系统配置',
