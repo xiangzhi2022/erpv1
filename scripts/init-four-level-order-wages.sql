@@ -157,15 +157,39 @@ CREATE TABLE IF NOT EXISTS wage_rules (
   unit_price NUMERIC(12, 2) NOT NULL DEFAULT 0,
   calculation_method VARCHAR(40) NOT NULL DEFAULT 'by_piece',
   role_scope VARCHAR(80),
+  scope_type VARCHAR(30) NOT NULL DEFAULT 'company',
+  worker_id UUID,
+  position_id UUID,
+  product_type VARCHAR(80),
+  extra_amount NUMERIC(12, 2) NOT NULL DEFAULT 0,
   enabled BOOLEAN NOT NULL DEFAULT TRUE,
   created_by UUID REFERENCES users(id) ON DELETE SET NULL,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ
 );
 
+ALTER TABLE wage_rules ADD COLUMN IF NOT EXISTS scope_type VARCHAR(30) NOT NULL DEFAULT 'company';
+ALTER TABLE wage_rules ADD COLUMN IF NOT EXISTS worker_id UUID;
+ALTER TABLE wage_rules ADD COLUMN IF NOT EXISTS position_id UUID;
+ALTER TABLE wage_rules ADD COLUMN IF NOT EXISTS product_type VARCHAR(80);
+ALTER TABLE wage_rules ADD COLUMN IF NOT EXISTS extra_amount NUMERIC(12, 2) NOT NULL DEFAULT 0;
+
 CREATE INDEX IF NOT EXISTS wage_rules_tenant_id_idx ON wage_rules(tenant_id);
 CREATE INDEX IF NOT EXISTS wage_rules_task_type_idx ON wage_rules(task_type);
 CREATE INDEX IF NOT EXISTS wage_rules_enabled_idx ON wage_rules(enabled);
+CREATE INDEX IF NOT EXISTS wage_rules_scope_type_idx ON wage_rules(scope_type);
+CREATE INDEX IF NOT EXISTS wage_rules_worker_id_idx ON wage_rules(worker_id);
+CREATE INDEX IF NOT EXISTS wage_rules_position_id_idx ON wage_rules(position_id);
+
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'wage_rules_worker_id_fkey') THEN
+    ALTER TABLE wage_rules ADD CONSTRAINT wage_rules_worker_id_fkey FOREIGN KEY (worker_id) REFERENCES workers(id) ON DELETE SET NULL;
+  END IF;
+  IF to_regclass('public.positions') IS NOT NULL AND NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'wage_rules_position_id_fkey') THEN
+    ALTER TABLE wage_rules ADD CONSTRAINT wage_rules_position_id_fkey FOREIGN KEY (position_id) REFERENCES positions(id) ON DELETE SET NULL;
+  END IF;
+END $$;
 
 DO $$
 BEGIN

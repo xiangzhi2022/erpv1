@@ -32,6 +32,12 @@ interface LoginResponse {
   redirectTo?: string;
 }
 
+interface CaptchaResponse {
+  captchaId?: string;
+  svg?: string;
+  skipCaptcha?: boolean;
+}
+
 function WechatIcon() {
   return (
     <svg viewBox="0 0 24 24" className="h-5 w-5" fill="currentColor" aria-hidden="true">
@@ -68,6 +74,7 @@ export default function LoginPage() {
   const [captchaCode, setCaptchaCode] = useState('');
   const [captchaId, setCaptchaId] = useState('');
   const [captchaSvg, setCaptchaSvg] = useState('');
+  const [captchaRequired, setCaptchaRequired] = useState(true);
   const [rememberMe, setRememberMe] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -104,7 +111,15 @@ export default function LoginPage() {
   const fetchCaptcha = useCallback(async () => {
     try {
       const res = await fetch('/api/auth/captcha');
-      const data = await res.json();
+      const data = await res.json() as CaptchaResponse;
+      const nextRequired = data.skipCaptcha !== true;
+      setCaptchaRequired(nextRequired);
+      if (!nextRequired) {
+        setCaptchaId('');
+        setCaptchaSvg('');
+        setCaptchaCode('');
+        return;
+      }
       setCaptchaId(data.captchaId || '');
       setCaptchaSvg(data.svg || '');
     } catch {
@@ -130,7 +145,7 @@ export default function LoginPage() {
     if (!/^1/.test(account) && !account.includes('@')) return '请输入有效的手机号或邮箱';
     if (!password) return '请输入密码';
     if (password.length < 6) return '密码长度不能少于 6 位';
-    if (!captchaCode.trim()) return '请输入验证码';
+    if (captchaRequired && !captchaCode.trim()) return '请输入验证码';
     return null;
   };
 
@@ -164,7 +179,7 @@ export default function LoginPage() {
         setLoginError(message);
         toast.error(message);
         setCaptchaCode('');
-        fetchCaptcha();
+        if (captchaRequired) fetchCaptcha();
         return;
       }
 
@@ -182,7 +197,7 @@ export default function LoginPage() {
       setLoginError(message);
       toast.error(message);
       setCaptchaCode('');
-      fetchCaptcha();
+      if (captchaRequired) fetchCaptcha();
     } finally {
       setLoading(false);
     }
@@ -232,7 +247,7 @@ export default function LoginPage() {
       setPassword('');
       setCaptchaCode('');
       switchMode('login');
-      fetchCaptcha();
+      if (captchaRequired) fetchCaptcha();
     } catch {
       toast.error('网络错误，请稍后重试');
     } finally {
@@ -383,31 +398,37 @@ export default function LoginPage() {
                     </div>
                   </div>
 
-                  <div className="space-y-2">
-                    <Label htmlFor="captcha">验证码</Label>
-                    <div className="flex gap-3">
-                      <Input
-                        id="captcha"
-                        value={captchaCode}
-                        onChange={(event) => {
-                          setCaptchaCode(event.target.value);
-                          setLoginError('');
-                        }}
-                        placeholder="请输入验证码"
-                        maxLength={4}
-                        autoComplete="off"
-                        className="h-11 rounded-xl"
-                      />
-                      <button
-                        type="button"
-                        onClick={fetchCaptcha}
-                        className="flex h-11 min-w-[118px] items-center justify-center overflow-hidden rounded-xl border bg-slate-50 transition hover:bg-slate-100"
-                        title="点击刷新验证码"
-                      >
-                        {captchaSvg ? <span dangerouslySetInnerHTML={{ __html: captchaSvg }} /> : <RefreshCw className="h-4 w-4 text-slate-400" />}
-                      </button>
+                  {captchaRequired ? (
+                    <div className="space-y-2">
+                      <Label htmlFor="captcha">验证码</Label>
+                      <div className="flex gap-3">
+                        <Input
+                          id="captcha"
+                          value={captchaCode}
+                          onChange={(event) => {
+                            setCaptchaCode(event.target.value);
+                            setLoginError('');
+                          }}
+                          placeholder="请输入验证码"
+                          maxLength={4}
+                          autoComplete="off"
+                          className="h-11 rounded-xl"
+                        />
+                        <button
+                          type="button"
+                          onClick={fetchCaptcha}
+                          className="flex h-11 min-w-[118px] items-center justify-center overflow-hidden rounded-xl border bg-slate-50 transition hover:bg-slate-100"
+                          title="点击刷新验证码"
+                        >
+                          {captchaSvg ? <span dangerouslySetInnerHTML={{ __html: captchaSvg }} /> : <RefreshCw className="h-4 w-4 text-slate-400" />}
+                        </button>
+                      </div>
                     </div>
-                  </div>
+                  ) : (
+                    <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700">
+                      开发环境已跳过验证码，可直接登录。
+                    </div>
+                  )}
 
                   <div className="flex items-center gap-2">
                     <Checkbox id="remember" checked={rememberMe} onCheckedChange={(checked) => setRememberMe(checked === true)} />

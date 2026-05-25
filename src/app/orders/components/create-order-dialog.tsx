@@ -51,17 +51,15 @@ import { cn } from '@/lib/utils';
 import type { OrderMode } from '@/lib/order-flow';
 import {
   CONSTRUCTION_SURFACE_OPTIONS,
-  FORMING_CRAFT_OPTIONS,
   ORDER_MODULE_PRESETS,
   ORDER_UNITS,
-  PAINTING_CRAFT_OPTIONS,
   PRODUCTION_TASK_TYPES,
-  WOODWORKING_CRAFT_OPTIONS,
   orderFormSchema,
   type Order,
   type OrderAttachmentFormValues,
   type OrderFormValues,
   type OrderItemFormValues,
+  type OrderPageContext,
   type OrderModuleFormValues,
   type ProductionTaskDraftFormValues,
   type TenantOption,
@@ -72,6 +70,7 @@ interface CreateOrderDialogProps {
   mode: OrderMode;
   partnerLabel: string;
   parentOrders: Order[];
+  currentUser?: OrderPageContext['currentUser'];
   onOpenChange: (open: boolean) => void;
   onSuccess: () => void;
 }
@@ -94,14 +93,14 @@ const STEPS: Array<{ id: StepId; label: string; description: string }> = [
   { id: 'spaces', label: '空间/房间', description: '主卧、厨房、客厅等二级结构' },
   { id: 'products', label: '产品/柜体', description: '衣柜、门板、柜体和基础规格' },
   { id: 'tasks', label: '拆单任务', description: '板件、五金、工序、安装、包装' },
-  { id: 'attachments', label: '附件备注', description: '产品图片、图纸和补充文件' },
+  { id: 'attachments', label: '附件检查', description: '图纸和说明汇总' },
   { id: 'confirm', label: '确认提交', description: '核对结构和金额后提交' },
 ];
 
 const COMPACT_STEPS: Array<{ id: CompactStepId; label: string; description: string }> = [
   { id: 'basic', label: '基础信息', description: '订单和客户' },
   { id: 'structure', label: '结构录入', description: '空间/产品/拆单任务' },
-  { id: 'attachments', label: '附件备注', description: '图纸和说明' },
+  { id: 'attachments', label: '附件检查', description: '图纸和说明汇总' },
   { id: 'confirm', label: '确认提交', description: '核对结构' },
 ];
 
@@ -151,17 +150,6 @@ const MATERIAL_OPTIONS = [
   '岩板',
 ] as const;
 
-const SPECIFICATION_OPTIONS = [
-  '全屋定制柜体',
-  '平开门衣柜',
-  '移门衣柜',
-  '橱柜地柜',
-  '橱柜吊柜',
-  '门板',
-  '柜体板件',
-  '五金套件',
-] as const;
-
 const COLOR_OPTIONS = [
   '暖白',
   '哑光白',
@@ -184,20 +172,6 @@ const HARDWARE_OPTIONS = [
   '连接件',
   '拆装五金',
   '铁件',
-] as const;
-
-const PROCESS_OPTIONS = [
-  '开料',
-  '封边',
-  '打孔',
-  '冷压',
-  '贴皮',
-  '打磨',
-  '喷漆',
-  '组装',
-  '安装',
-  '包装',
-  '发货',
 ] as const;
 
 const TASK_NAME_OPTIONS = [
@@ -246,6 +220,12 @@ function hasPositiveNumber(value: unknown): boolean {
   return Number.isFinite(numberValue) && numberValue > 0;
 }
 
+function optionalNumberValue(value: unknown): number | undefined {
+  if (value === '' || value === null || value === undefined) return undefined;
+  const numberValue = Number(value);
+  return Number.isFinite(numberValue) ? numberValue : undefined;
+}
+
 function confirmIncompleteStep(title: string, messages: string[]): boolean {
   const uniqueMessages = Array.from(new Set(messages)).slice(0, 8);
   toast.warning(title);
@@ -259,12 +239,8 @@ function productIncompleteMessages(modules: OrderModuleFormValues[]): string[] {
       const label = `${module.module_name || `空间 #${moduleIndex + 1}`} / ${item.product_name || `产品 #${itemIndex + 1}`}`;
       const missing: string[] = [];
       if (isBlank(item.product_type)) missing.push('产品类型');
-      if (isBlank(item.material)) missing.push('材质');
-      if (isBlank(item.specification)) missing.push('规格/型号');
-      if (!hasPositiveNumber(item.length_mm) || !hasPositiveNumber(item.width_mm) || !hasPositiveNumber(item.thickness_mm)) {
-        missing.push('长宽厚尺寸');
-      }
-      if (isBlank(item.color)) missing.push('颜色');
+      if (!hasPositiveNumber(item.quantity)) missing.push('数量');
+      if (isBlank(item.unit)) missing.push('单位');
       if (missing.length > 0) messages.push(`${label}：${missing.join('、')}未完整`);
     });
   });
@@ -284,7 +260,6 @@ function taskIncompleteMessages(modules: OrderModuleFormValues[]): string[] {
         const label = `${productLabel} / ${task.task_name || `拆单任务 #${taskIndex + 1}`}`;
         const missing: string[] = [];
         if (isBlank(task.unit)) missing.push('单位');
-        if (task.task_type !== 'hardware' && isBlank(task.process_name)) missing.push('工序');
         if ((task.task_type === 'board' || task.task_type === 'door') && (
           !hasPositiveNumber(task.length_mm)
           || !hasPositiveNumber(task.width_mm)
@@ -465,12 +440,8 @@ function missingForProduct(item: OrderItemFormValues | undefined): string[] {
   const missing: string[] = [];
   if (!item || isBlank(item.product_name)) missing.push('产品名称');
   if (!item || isBlank(item.product_type)) missing.push('产品类型');
-  if (!item || isBlank(item.material)) missing.push('材质');
-  if (!item || isBlank(item.specification)) missing.push('规格/型号');
-  if (!item || !hasPositiveNumber(item.length_mm) || !hasPositiveNumber(item.width_mm) || !hasPositiveNumber(item.thickness_mm)) missing.push('长宽厚');
   if (!item || !hasPositiveNumber(item.quantity)) missing.push('数量');
   if (!item || isBlank(item.unit)) missing.push('单位');
-  if (!item || isBlank(item.color)) missing.push('颜色');
   return missing;
 }
 
@@ -479,7 +450,6 @@ function missingForTask(task: ProductionTaskDraftFormValues | undefined): string
   if (!task || isBlank(task.task_name)) missing.push('拆单任务名称');
   if (!task || !hasPositiveNumber(task.quantity)) missing.push('数量');
   if (!task || isBlank(task.unit)) missing.push('单位');
-  if (!task || isBlank(task.process_name)) missing.push('工序');
   return missing;
 }
 
@@ -589,6 +559,7 @@ export function CreateOrderDialog({
   mode,
   partnerLabel,
   parentOrders,
+  currentUser,
   onOpenChange,
   onSuccess,
 }: CreateOrderDialogProps) {
@@ -809,14 +780,6 @@ export function CreateOrderDialog({
       current[moduleIndex]?.items[itemIndex]?.tasks.splice(taskIndex + 1, 0, defaultTask());
       return current;
     }, { type: 'task', moduleIndex, itemIndex, taskIndex: taskIndex + 1 });
-  };
-
-  const addCabinetTasks = (moduleIndex: number, itemIndex: number) => {
-    const startIndex = watchedModules[moduleIndex]?.items[itemIndex]?.tasks.length || 0;
-    updateModules((current) => {
-      current[moduleIndex]?.items[itemIndex]?.tasks.push(...cabinetTasks());
-      return current;
-    }, { type: 'task', moduleIndex, itemIndex, taskIndex: startIndex });
   };
 
   const copyTask = (moduleIndex: number, itemIndex: number, taskIndex: number) => {
@@ -1048,7 +1011,6 @@ export function CreateOrderDialog({
                 onRemoveProduct={removeProduct}
                 onAddTask={(moduleIndex, itemIndex) => addTask(moduleIndex, itemIndex)}
                 onAddTaskAfter={addTaskAfter}
-                onAddCabinetTasks={addCabinetTasks}
                 onRemoveTask={removeTask}
               />
             </ScrollArea>
@@ -1082,6 +1044,7 @@ export function CreateOrderDialog({
                     partnerSearch={partnerSearch}
                     generatingOrderNo={generatingOrderNo}
                     selectedPartnerName={selectedPartnerName}
+                    currentUser={currentUser}
                     selectedNode={normalizedSelectedNode}
                     modules={watchedModules}
                     onPartnerOpenChange={setPartnerOpen}
@@ -1099,7 +1062,6 @@ export function CreateOrderDialog({
                     onCopyProduct={copyProduct}
                     onRemoveProduct={removeProduct}
                     onAddTask={(moduleIndex, itemIndex) => addTask(moduleIndex, itemIndex)}
-                    onAddCabinetTasks={addCabinetTasks}
                     onCopyTask={copyTask}
                     onRemoveTask={removeTask}
                   />
@@ -1157,6 +1119,7 @@ function BasicStep({
   partnerSearch,
   generatingOrderNo,
   selectedPartnerName,
+  currentUser,
   onPartnerOpenChange,
   onPartnerSearchChange,
   onSelectPartner,
@@ -1171,6 +1134,7 @@ function BasicStep({
   partnerSearch: string;
   generatingOrderNo: boolean;
   selectedPartnerName: string;
+  currentUser?: OrderPageContext['currentUser'];
   onPartnerOpenChange: (open: boolean) => void;
   onPartnerSearchChange: (value: string) => void;
   onSelectPartner: (partner: TenantOption) => void;
@@ -1234,6 +1198,14 @@ function BasicStep({
               </Command>
             </PopoverContent>
           </Popover>
+        </Field>
+
+        <Field label="录入账号 ID">
+          <Input readOnly value={currentUser?.id || ''} placeholder="登录账号 ID" className="bg-muted font-mono text-xs" />
+        </Field>
+
+        <Field label="录入账号中文 ID">
+          <Input readOnly value={currentUser?.name || currentUser?.phone || ''} placeholder="登录账号名称" className="bg-muted" />
         </Field>
 
         {mode === 'factory_material' ? (
@@ -1436,32 +1408,6 @@ function ProductFields({
             placeholder="衣柜 / 柜体 / 自定义"
           />
         </Field>
-        <Field className="md:col-span-3" label="材质">
-          <DatalistInput
-            listId={`product-material-${moduleIndex}-${itemIndex}`}
-            values={MATERIAL_OPTIONS}
-            {...form.register(`${baseName}.material`)}
-            placeholder="多层板 / 实木 / 木皮"
-          />
-        </Field>
-        <Field className="md:col-span-3" label="规格/型号">
-          <DatalistInput
-            listId={`product-spec-${moduleIndex}-${itemIndex}`}
-            values={SPECIFICATION_OPTIONS}
-            {...form.register(`${baseName}.specification`)}
-            placeholder="补充规格，也可自定义"
-          />
-        </Field>
-
-        <Field className="md:col-span-2" label="长度 mm">
-          <Input type="number" min={0} step="0.1" {...form.register(`${baseName}.length_mm`)} />
-        </Field>
-        <Field className="md:col-span-2" label="宽度 mm">
-          <Input type="number" min={0} step="0.1" {...form.register(`${baseName}.width_mm`)} />
-        </Field>
-        <Field className="md:col-span-2" label="厚度 mm">
-          <Input type="number" min={0} step="0.1" {...form.register(`${baseName}.thickness_mm`)} />
-        </Field>
         <Field className="md:col-span-2" label="数量 *" error={errors?.quantity?.message}>
           <Input type="number" min={1} step="1" {...form.register(`${baseName}.quantity`)} />
         </Field>
@@ -1477,42 +1423,12 @@ function ProductFields({
           <Input type="number" min={0} step="0.01" {...form.register(`${baseName}.unit_price`)} />
         </Field>
 
-        <Field className="md:col-span-3" label="颜色">
-          <DatalistInput
-            listId={`product-color-${moduleIndex}-${itemIndex}`}
-            values={COLOR_OPTIONS}
-            {...form.register(`${baseName}.color`)}
-            placeholder="暖白 / 原木色"
-          />
-        </Field>
-        <Field className="md:col-span-3" label="木工工艺">
-          <DatalistInput listId={`wood-${moduleIndex}-${itemIndex}`} values={WOODWORKING_CRAFT_OPTIONS} {...form.register(`${baseName}.woodworking_craft`)} placeholder="免拉手" />
-        </Field>
-        <Field className="md:col-span-3" label="成型工艺">
-          <DatalistInput listId={`forming-${moduleIndex}-${itemIndex}`} values={FORMING_CRAFT_OPTIONS} {...form.register(`${baseName}.forming_craft`)} placeholder="冷压制" />
-        </Field>
-        <Field className="md:col-span-3" label="烤漆工艺">
-          <DatalistInput listId={`painting-${moduleIndex}-${itemIndex}`} values={PAINTING_CRAFT_OPTIONS} {...form.register(`${baseName}.painting_craft`)} placeholder="混油 / 贴皮" />
-        </Field>
-
-        <Field className="md:col-span-3" label="五金">
-          <DatalistInput
-            listId={`product-hardware-${moduleIndex}-${itemIndex}`}
-            values={HARDWARE_OPTIONS}
-            {...form.register(`${baseName}.hardware`)}
-            placeholder="铰链 / 拉手 / 滑轨"
-          />
-        </Field>
-        <Field className="md:col-span-2" label="五金数量">
-          <Input type="number" min={0} step="1" {...form.register(`${baseName}.hardware_quantity`)} />
-        </Field>
-        <Field className="md:col-span-3" label="施工面">
-          <DatalistInput listId={`surface-${moduleIndex}-${itemIndex}`} values={CONSTRUCTION_SURFACE_OPTIONS} {...form.register(`${baseName}.construction_surface`)} placeholder="一面四边" />
-        </Field>
-        <Field className="md:col-span-4" label="产品备注">
-          <Input {...form.register(`${baseName}.remark`)} placeholder="补充说明" />
+        <Field className="md:col-span-12" label="产品说明">
+          <Textarea {...form.register(`${baseName}.remark`)} placeholder="填写产品说明、客户要求、图纸备注或现场注意事项" />
         </Field>
       </div>
+
+      <AttachmentControl form={form} moduleIndex={moduleIndex} itemIndex={itemIndex} />
     </div>
   );
 }
@@ -1538,9 +1454,6 @@ function TasksStep({
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="text-sm text-muted-foreground">当前产品：{itemName || `产品 #${itemIndex + 1}`}</div>
         <div className="flex flex-wrap gap-2">
-          <Button type="button" variant="secondary" onClick={() => cabinetTasks().forEach((task) => tasks.append(task))}>
-            <Sparkles className="mr-1 h-4 w-4" />生成柜子拆单任务
-          </Button>
           <Button type="button" variant="outline" onClick={() => tasks.append(defaultTask())}>
             <Plus className="mr-1 h-4 w-4" />新增拆单任务
           </Button>
@@ -1560,7 +1473,7 @@ function TasksStep({
         ))}
         {tasks.fields.length === 0 ? (
           <div className="rounded-md border border-dashed p-8 text-center text-sm text-muted-foreground">
-            尚未录入拆单任务。可以手动新增，也可以一键生成柜子拆单任务后再调整。
+            尚未录入拆单任务。可以手动新增后再调整。
           </div>
         ) : null}
       </div>
@@ -1583,6 +1496,27 @@ function TaskFields({
 }) {
   const baseName = `modules.${moduleIndex}.items.${itemIndex}.tasks.${taskIndex}` as const;
   const errors = form.formState.errors.modules?.[moduleIndex]?.items?.[itemIndex]?.tasks?.[taskIndex];
+  const lengthMm = form.watch(`${baseName}.length_mm`);
+  const widthMm = form.watch(`${baseName}.width_mm`);
+
+  useEffect(() => {
+    const areaName = `${baseName}.area` as const;
+    const lengthValue = optionalNumberValue(lengthMm);
+    const widthValue = optionalNumberValue(widthMm);
+    const currentArea = optionalNumberValue(form.getValues(areaName));
+
+    if (lengthValue === undefined || widthValue === undefined) {
+      if (currentArea !== undefined) {
+        form.setValue(areaName, undefined, { shouldDirty: true, shouldValidate: true });
+      }
+      return;
+    }
+
+    const nextArea = Number(((lengthValue * widthValue) / 1_000_000).toFixed(4));
+    if (currentArea === undefined || Math.abs(currentArea - nextArea) > 0.0001) {
+      form.setValue(areaName, nextArea, { shouldDirty: true, shouldValidate: true });
+    }
+  }, [baseName, form, lengthMm, widthMm]);
 
   return (
     <div className="space-y-5 rounded-lg border bg-background p-5 shadow-sm">
@@ -1617,15 +1551,6 @@ function TaskFields({
             placeholder="块 / 项 / 套"
           />
         </Field>
-        <Field className="md:col-span-2" label="工序">
-          <DatalistInput
-            listId={`task-process-${moduleIndex}-${itemIndex}-${taskIndex}`}
-            values={PROCESS_OPTIONS}
-            {...form.register(`${baseName}.process_name`)}
-            placeholder="开料 / 封边"
-          />
-        </Field>
-
         <Field className="md:col-span-2" label="长度 mm">
           <Input type="number" min={0} step="0.1" {...form.register(`${baseName}.length_mm`)} />
         </Field>
@@ -1635,8 +1560,15 @@ function TaskFields({
         <Field className="md:col-span-2" label="厚度 mm">
           <Input type="number" min={0} step="0.1" {...form.register(`${baseName}.thickness_mm`)} />
         </Field>
-        <Field className="md:col-span-2" label="面积">
-          <Input type="number" min={0} step="0.01" {...form.register(`${baseName}.area`)} />
+        <Field className="md:col-span-2" label="面积 (平方米)">
+          <Input
+            type="number"
+            min={0}
+            step="0.0001"
+            readOnly
+            className="bg-muted"
+            {...form.register(`${baseName}.area`)}
+          />
         </Field>
         <Field className="md:col-span-2" label="材质">
           <DatalistInput
@@ -1678,7 +1610,6 @@ function TaskFields({
 }
 
 function AttachmentsStep({
-  form,
   modules,
 }: {
   form: UseFormReturn<OrderFormValues, unknown, OrderFormValues>;
@@ -1686,19 +1617,32 @@ function AttachmentsStep({
 }) {
   return (
     <section className="space-y-5">
-      <StepTitle icon={<Paperclip className="h-5 w-5" />} title="附件备注" description="上传图纸、现场照片或说明文件，附件归属到产品明细。" />
+      <StepTitle icon={<Paperclip className="h-5 w-5" />} title="附件检查" description="图纸、附件和产品说明已合并到产品基础信息中，这里只做汇总核对。" />
       <div className="space-y-4">
         {modules.map((module, moduleIndex) => (
           <div key={`${module.module_name}-${moduleIndex}`} className="rounded-lg border bg-background p-5 shadow-sm">
             <div className="mb-3 font-medium">{module.module_name || `空间 #${moduleIndex + 1}`}</div>
             <div className="space-y-3">
               {module.items.map((item, itemIndex) => (
-                <AttachmentControl
-                  key={`${item.product_name}-${itemIndex}`}
-                  form={form}
-                  moduleIndex={moduleIndex}
-                  itemIndex={itemIndex}
-                />
+                <div key={`${item.product_name}-${itemIndex}`} className="rounded-lg bg-muted/30 p-4">
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <div className="text-sm font-medium">{item.product_name || `产品 #${itemIndex + 1}`}</div>
+                      <div className="text-xs text-muted-foreground">{item.remark || '暂无产品说明'}</div>
+                    </div>
+                    <Badge variant="secondary">{item.attachments.length} 个附件</Badge>
+                  </div>
+                  {item.attachments.length > 0 ? (
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      {item.attachments.map((attachment, attachmentIndex) => (
+                        <Badge key={`${attachment.file_path}-${attachmentIndex}`} variant="outline" className="gap-1">
+                          <Paperclip className="h-3.5 w-3.5" />
+                          {attachment.file_name}
+                        </Badge>
+                      ))}
+                    </div>
+                  ) : null}
+                </div>
               ))}
             </div>
           </div>
@@ -1896,7 +1840,6 @@ function OrderStructureSidebar({
   onRemoveProduct,
   onAddTask,
   onAddTaskAfter,
-  onAddCabinetTasks,
   onRemoveTask,
 }: {
   values: OrderFormValues;
@@ -1913,7 +1856,6 @@ function OrderStructureSidebar({
   onRemoveProduct: (moduleIndex: number, itemIndex: number) => void;
   onAddTask: (moduleIndex: number, itemIndex: number) => void;
   onAddTaskAfter: (moduleIndex: number, itemIndex: number, taskIndex: number) => void;
-  onAddCabinetTasks: (moduleIndex: number, itemIndex: number) => void;
   onRemoveTask: (moduleIndex: number, itemIndex: number, taskIndex: number) => void;
 }) {
   const missingByKey = new Map<string, string[]>();
@@ -2111,17 +2053,14 @@ function OrderStructureSidebar({
                             </div>
                           );
                         })}
-                        <div className="flex gap-1">
-                          <button
-                            type="button"
-                            onClick={() => onAddTask(moduleIndex, itemIndex)}
-                            className="flex flex-1 items-center gap-2 rounded-md border border-dashed px-2 py-2 text-left text-xs text-muted-foreground transition hover:border-primary hover:bg-primary/5 hover:text-primary"
-                          >
-                            <Plus className="h-3.5 w-3.5" />
-                            新增拆单任务
-                          </button>
-                          <TreeIconButton label="生成柜子拆单任务" onClick={() => onAddCabinetTasks(moduleIndex, itemIndex)} icon={<Sparkles className="h-3.5 w-3.5" />} />
-                        </div>
+                        <button
+                          type="button"
+                          onClick={() => onAddTask(moduleIndex, itemIndex)}
+                          className="flex w-full items-center gap-2 rounded-md border border-dashed px-2 py-2 text-left text-xs text-muted-foreground transition hover:border-primary hover:bg-primary/5 hover:text-primary"
+                        >
+                          <Plus className="h-3.5 w-3.5" />
+                          新增拆单任务
+                        </button>
                       </div> : null}
                     </div>
                   );
@@ -2248,6 +2187,7 @@ function NodeEditorPanel({
   partnerSearch,
   generatingOrderNo,
   selectedPartnerName,
+  currentUser,
   selectedNode,
   modules,
   onPartnerOpenChange,
@@ -2262,7 +2202,6 @@ function NodeEditorPanel({
   onCopyProduct,
   onRemoveProduct,
   onAddTask,
-  onAddCabinetTasks,
   onCopyTask,
   onRemoveTask,
 }: {
@@ -2275,6 +2214,7 @@ function NodeEditorPanel({
   partnerSearch: string;
   generatingOrderNo: boolean;
   selectedPartnerName: string;
+  currentUser?: OrderPageContext['currentUser'];
   selectedNode: SelectedNode;
   modules: OrderModuleFormValues[];
   onPartnerOpenChange: (open: boolean) => void;
@@ -2289,7 +2229,6 @@ function NodeEditorPanel({
   onCopyProduct: (moduleIndex: number, itemIndex: number) => void;
   onRemoveProduct: (moduleIndex: number, itemIndex: number) => void;
   onAddTask: (moduleIndex: number, itemIndex: number) => void;
-  onAddCabinetTasks: (moduleIndex: number, itemIndex: number) => void;
   onCopyTask: (moduleIndex: number, itemIndex: number, taskIndex: number) => void;
   onRemoveTask: (moduleIndex: number, itemIndex: number, taskIndex: number) => void;
 }) {
@@ -2305,6 +2244,7 @@ function NodeEditorPanel({
         partnerSearch={partnerSearch}
         generatingOrderNo={generatingOrderNo}
         selectedPartnerName={selectedPartnerName}
+        currentUser={currentUser}
         onPartnerOpenChange={onPartnerOpenChange}
         onPartnerSearchChange={onPartnerSearchChange}
         onSelectPartner={onSelectPartner}
@@ -2336,7 +2276,6 @@ function NodeEditorPanel({
         itemIndex={selectedNode.itemIndex}
         canRemove={items.length > 1}
         onAddTask={() => onAddTask(selectedNode.moduleIndex, selectedNode.itemIndex)}
-        onAddCabinetTasks={() => onAddCabinetTasks(selectedNode.moduleIndex, selectedNode.itemIndex)}
         onCopy={() => onCopyProduct(selectedNode.moduleIndex, selectedNode.itemIndex)}
         onRemove={() => onRemoveProduct(selectedNode.moduleIndex, selectedNode.itemIndex)}
         onSelectNode={onSelectNode}
@@ -2418,7 +2357,6 @@ function ProductNodePanel({
   itemIndex,
   canRemove,
   onAddTask,
-  onAddCabinetTasks,
   onCopy,
   onRemove,
   onSelectNode,
@@ -2428,7 +2366,6 @@ function ProductNodePanel({
   itemIndex: number;
   canRemove: boolean;
   onAddTask: () => void;
-  onAddCabinetTasks: () => void;
   onCopy: () => void;
   onRemove: () => void;
   onSelectNode: (node: SelectedNode) => void;
@@ -2441,9 +2378,6 @@ function ProductNodePanel({
       <div className="flex flex-wrap gap-2">
         <Button type="button" variant="outline" onClick={onAddTask}>
           <Plus className="mr-1 h-4 w-4" />新增拆单任务
-        </Button>
-        <Button type="button" variant="secondary" onClick={onAddCabinetTasks}>
-          <Sparkles className="mr-1 h-4 w-4" />生成柜子拆单任务
         </Button>
         <Button type="button" variant="outline" onClick={onCopy}>
           <Copy className="mr-1 h-4 w-4" />复制产品

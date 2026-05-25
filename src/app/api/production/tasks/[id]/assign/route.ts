@@ -40,14 +40,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
       status: 'assigned',
     };
     const wageRule = await resolveWageRuleForTask(supabase, assignedTask);
-    const estimatedWage = wageRule
-      ? calculateTaskWage({
-          quantity: taskRow.quantity as number | string | null | undefined,
-          area: taskRow.area as number | string | null | undefined,
-          length: taskRow.length as number | string | null | undefined,
-          meter_count: taskRow.meter_count as number | string | null | undefined,
-        }, wageRule)
-      : null;
+    const estimatedWage = wageRule ? calculateTaskWage(assignedTask, wageRule) : null;
     const updateData: Record<string, unknown> = {
       assigned_worker_id: body.assigned_worker_id,
       worker_id: body.assigned_worker_id,

@@ -1,11 +1,14 @@
 import { ProtectedAppShell } from '@/components/protected-app-shell';
+import { getCurrentAuthUser } from '@/lib/auth';
 import { SettingsSidebarNav } from './components/sidebar-nav';
 
-export default function SettingsLayout({
+export default async function SettingsLayout({
   children,
 }: {
   children: React.ReactNode;
 }) {
+  const user = await getCurrentAuthUser();
+
   return (
     <ProtectedAppShell title="系统设置" path="/settings">
       <div className="max-w-5xl mx-auto space-y-6">
@@ -16,7 +19,7 @@ export default function SettingsLayout({
         <div className="flex flex-col md:flex-row gap-8">
           <aside className="w-full md:w-56 shrink-0">
             <div className="sticky top-8 rounded-lg border bg-card p-4">
-              <SettingsSidebarNav />
+              <SettingsSidebarNav user={user} />
             </div>
           </aside>
           <section className="flex-1 min-w-0">{children}</section>

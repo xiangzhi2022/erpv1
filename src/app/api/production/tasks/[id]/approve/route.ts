@@ -41,10 +41,10 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
       let wageRecord = existingWage.data as Record<string, unknown> | null;
       if (!wageRecord) {
         const wageRule = await resolveWageRuleForTask(supabase, task as Record<string, unknown>);
-        if (!wageRule) return jsonError('该任务还没有匹配的工资规则，请先配置工资规则后再审核', 409);
+        if (!wageRule) return jsonError('该拆单任务还没有匹配的工资管理规则，请先配置后再审核', 409);
         wageRecord = await createOrUpdatePendingWageRecord(supabase, task as Record<string, unknown>, wageRule, user.id);
       }
-      if (!wageRecord) return jsonError('工资记录生成失败，请检查工人和工资规则配置', 409);
+      if (!wageRecord) return jsonError('工资记录生成失败，请检查工人和工资管理规则配置', 409);
       const parsedWage = Number(wageRecord.wage_amount || 0);
       finalWageAmount = Number.isFinite(parsedWage) ? parsedWage : 0;
     }

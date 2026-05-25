@@ -90,8 +90,8 @@ const S = {
   orderExchanges: '订单流转',
   productionTasks: '生产任务',
   workerTasks: '我的任务',
-  workerWages: '我的工资',
-  wageRules: '工资规则',
+  workerWages: '工资管理',
+  wageRules: '工资管理',
   workerPerformance: '工人绩效',
   progress: '生产进度',
   tasks: '任务管理',
@@ -434,10 +434,8 @@ export function canAccessPath(user: AccessUser | null | undefined, pathname: str
   ) {
     return canManageOrganization || (canViewProductionEmployees && pathStarts(path, '/settings/positions'));
   }
-  if (pathStarts(path, '/settings/wage-rules') && !isAdminRole(user)) {
-    return permissions.some((key) =>
-      key === 'factory_boss' || key === 'factory_production_manager'
-    );
+  if (pathStarts(path, '/settings/wage-rules')) {
+    return isSuperAdmin(user) || normalizeAccountRole(rawRoleOf(user)) === 'factory_admin' || permissions.includes('factory_boss');
   }
   if ((path === '/settings' || pathStarts(path, '/settings')) && !isAdminRole(user)) return false;
   if (pathStarts(path, '/orders/exchanges') && !isAdminRole(user)) {
@@ -490,8 +488,12 @@ export function getRoleManagementBusinessType(user: AccessUser | null | undefine
   }
 
   const permissions = getUserPermissionKeys(user);
-  if (permissions.includes('factory_boss')) return 'factory';
-  return null;
+  const permissionBusinessTypes = unique(
+    permissions
+      .map((key) => getPermissionTemplate(key)?.businessType)
+      .filter((value): value is Exclude<BusinessType, 'platform'> => value === 'factory' || value === 'supplier' || value === 'dealer')
+  );
+  return permissionBusinessTypes.length === 1 ? permissionBusinessTypes[0] : null;
 }
 
 export function getAssignablePermissionKeys(user: AccessUser | null | undefined): PermissionKey[] {

@@ -295,6 +295,14 @@ export async function GET(request: Request) {
         description: config.description,
         createLabel: config.createLabel,
         partnerLabel: config.partnerLabel,
+        currentUser: {
+          id: user.id,
+          name: user.nickname || user.name || user.phone || user.id,
+          phone: user.phone || null,
+          role: user.role,
+          tenant_id: user.tenant_id || null,
+          tenant_type: user.tenant_type || null,
+        },
       },
     });
   } catch (error) {

@@ -38,7 +38,7 @@ export default function WorkerWagesPage() {
   return (
       <div className="space-y-6">
       <div>
-        <h1 className="text-2xl font-bold tracking-tight">我的工资</h1>
+        <h1 className="text-2xl font-bold tracking-tight">工资管理</h1>
         <p className="text-sm text-muted-foreground">显示当前工人的计件工资明细和待审核、已确认、已发放状态。</p>
       </div>
       <div className="grid gap-4 md:grid-cols-6">
@@ -56,7 +56,7 @@ export default function WorkerWagesPage() {
             <TableHeader>
               <TableRow>
                 <TableHead>日期</TableHead>
-                <TableHead>任务</TableHead>
+                <TableHead>拆单任务</TableHead>
                 <TableHead>工序</TableHead>
                 <TableHead>数量</TableHead>
                 <TableHead>状态</TableHead>

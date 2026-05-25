@@ -39,7 +39,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
       success: true,
       data,
       wage_record: wageRecord,
-      warning: wageRecord ? null : '工资规则待配置，主管配置后再审核工资',
+      warning: wageRecord ? null : '工资管理规则待配置，配置后再审核工资',
     });
   } catch (error) {
     console.error('submit task failed:', error);
