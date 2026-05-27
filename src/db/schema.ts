@@ -573,6 +573,11 @@ export const wageRules = pgTable(
 		unit_price: numeric("unit_price", { precision: 12, scale: 2 }).notNull().default("0"),
 		calculation_method: varchar("calculation_method", { length: 40 }).notNull().default("by_piece"),
 		role_scope: varchar("role_scope", { length: 80 }),
+		scope_type: varchar("scope_type", { length: 30 }).notNull().default("company"),
+		worker_id: uuid("worker_id"),
+		position_id: uuid("position_id"),
+		product_type: varchar("product_type", { length: 80 }),
+		extra_amount: numeric("extra_amount", { precision: 12, scale: 2 }).notNull().default("0"),
 		enabled: boolean("enabled").default(true).notNull(),
 		created_by: uuid("created_by"),
 		created_at: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
@@ -582,6 +587,9 @@ export const wageRules = pgTable(
 		index("wage_rules_tenant_id_idx").on(table.tenant_id),
 		index("wage_rules_task_type_idx").on(table.task_type),
 		index("wage_rules_enabled_idx").on(table.enabled),
+		index("wage_rules_scope_type_idx").on(table.scope_type),
+		index("wage_rules_worker_id_idx").on(table.worker_id),
+		index("wage_rules_position_id_idx").on(table.position_id),
 	]
 );
 

@@ -254,6 +254,14 @@ export interface OrderPageContext {
   description: string;
   createLabel: string | null;
   partnerLabel: string | null;
+  currentUser?: {
+    id: string;
+    name: string;
+    phone?: string | null;
+    role?: string | null;
+    tenant_id?: string | null;
+    tenant_type?: string | null;
+  } | null;
 }
 
 export function formatAmount(amount: number | string | null | undefined): string {

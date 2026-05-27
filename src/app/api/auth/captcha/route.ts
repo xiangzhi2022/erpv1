@@ -59,6 +59,14 @@ function generateCaptchaSVG(text: string): string {
 }
 
 export async function GET() {
+  if (process.env.SKIP_CAPTCHA === '1') {
+    return NextResponse.json({
+      captchaId: '',
+      svg: '',
+      skipCaptcha: true,
+    });
+  }
+
   const code = randomCaptchaText(4);
   const captchaId = generateCaptchaId(code);
   const svg = generateCaptchaSVG(code);
@@ -66,5 +74,6 @@ export async function GET() {
   return NextResponse.json({
     captchaId,
     svg,
+    skipCaptcha: false,
   });
 }

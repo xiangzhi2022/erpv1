@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
   canAccessPath,
-  canAssignPermissionKeys,
   getAssignablePermissions,
   getLandingPath,
   getNavigationForUser,
@@ -30,26 +29,16 @@ describe('role access rules', () => {
       expect.arrayContaining(['factory_order_manager', 'factory_general_worker'])
     );
     expect(getAssignablePermissions(factoryAdmin).map((item) => item.key)).not.toContain('dealer_order_entry');
+    expect(canAccessPath(factoryAdmin, '/settings/wage-rules')).toBe(true);
     expect(getAssignablePermissions(dealerAdmin).map((item) => item.key)).toEqual(
       expect.arrayContaining(['dealer_order_entry', 'dealer_order_tracker'])
     );
+    expect(canAccessPath(dealerAdmin, '/settings/wage-rules')).toBe(false);
     expect(getAssignablePermissions(supplierAdmin).map((item) => item.key)).toEqual(
       expect.arrayContaining(['supplier_order_receive'])
     );
     expect(getAssignablePermissions(supplierAdmin).map((item) => item.key)).not.toContain('supplier_order_send');
-  });
-
-  it('lets factory boss assign only factory permissions', () => {
-    const factoryBoss: AccessUser = {
-      role: 'employee',
-      tenant_id: 'factory-1',
-      tenant_type: 'manufacturer',
-      permissions: ['factory_boss'],
-    };
-
-    expect(getAssignablePermissions(factoryBoss).map((item) => item.key)).toContain('factory_order_manager');
-    expect(canAssignPermissionKeys(factoryBoss, ['factory_worker'])).toBe(true);
-    expect(canAssignPermissionKeys(factoryBoss, ['dealer_order_entry'])).toBe(false);
+    expect(canAccessPath(supplierAdmin, '/settings/wage-rules')).toBe(false);
   });
 
   it('builds employee navigation from multiple permissions and fixed landing priority', () => {

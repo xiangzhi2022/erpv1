@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { cn } from '@/lib/utils';
+import { canAccessPath, type AccessUser } from '@/lib/role-access';
 import {
   User,
   Palette,
@@ -58,7 +59,7 @@ const sidebarNavItems = [
     icon: KeyRound,
   },
   {
-    title: '工资规则',
+    title: '工资管理',
     href: '/settings/wage-rules',
     icon: Wallet,
   },
@@ -69,12 +70,12 @@ const sidebarNavItems = [
   },
 ];
 
-export function SettingsSidebarNav() {
+export function SettingsSidebarNav({ user }: { user?: AccessUser | null }) {
   const pathname = usePathname();
 
   return (
     <nav className="flex flex-col gap-1 px-2">
-      {sidebarNavItems.map((item) => {
+      {sidebarNavItems.filter((item) => !user || canAccessPath(user, item.href)).map((item) => {
         const isActive =
           pathname === item.href ||
           (item.href !== '/settings' && pathname.startsWith(item.href));

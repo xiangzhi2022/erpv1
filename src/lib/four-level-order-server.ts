@@ -13,7 +13,11 @@ import {
   externalDealerStatus,
   isDealerSide,
   isWorkerOnly,
+  selectBestWageRuleForTask,
   type OrderStatusLogTarget,
+  type WageRuleInput,
+  type WageTaskInput,
+  type WageWorkerMatchInput,
 } from '@/lib/four-level-order';
 
 export type DbRow = Record<string, unknown>;
@@ -721,34 +725,78 @@ export async function createOrUpdatePendingWageRecord(
   return (data as DbRow | null) || null;
 }
 
-export async function resolveWageRuleForTask(supabase: SupabaseClient, task: DbRow): Promise<DbRow | null> {
-  const wageRuleId = valueString(task.wage_rule_id);
-  if (wageRuleId) {
-    const { data } = await supabase.from('wage_rules').select('*').eq('id', wageRuleId).maybeSingle();
-    if (data) return data as DbRow;
+async function loadWageWorkerContext(
+  supabase: SupabaseClient,
+  workerId: string | null,
+  tenantId: string | null
+): Promise<WageWorkerMatchInput | null> {
+  if (!workerId) return null;
+
+  let workerQuery = supabase.from('workers').select('id,user_id,craft_type,tenant_id').eq('id', workerId);
+  if (tenantId) workerQuery = workerQuery.eq('tenant_id', tenantId);
+  const { data: worker } = await workerQuery.maybeSingle();
+  if (!worker) return { id: workerId, position_ids: [] };
+
+  const positionIds = new Set<string>();
+  const userId = valueString((worker as DbRow).user_id);
+  if (userId) {
+    let employeeQuery = supabase.from('employees').select('id,primary_position_id,tenant_id').eq('user_id', userId);
+    if (tenantId) employeeQuery = employeeQuery.eq('tenant_id', tenantId);
+    const { data: employee } = await employeeQuery.maybeSingle();
+    if (employee) {
+      const primaryPositionId = valueString((employee as DbRow).primary_position_id);
+      if (primaryPositionId) positionIds.add(primaryPositionId);
+      const employeeId = valueString((employee as DbRow).id);
+      if (employeeId) {
+        const { data: employeePositions } = await supabase.from('employee_positions').select('position_id').eq('employee_id', employeeId);
+        for (const row of ((employeePositions || []) as DbRow[])) {
+          const positionId = valueString(row.position_id);
+          if (positionId) positionIds.add(positionId);
+        }
+      }
+    }
   }
 
-  const buildQuery = () => {
-    let query = supabase
-      .from('wage_rules')
-      .select('*')
-      .eq('enabled', true)
-      .eq('task_type', valueString(task.task_type) || 'process')
-      .order('created_at', { ascending: false })
-      .limit(1);
-    const tenantId = valueString(task.tenant_id);
-    if (tenantId) query = query.eq('tenant_id', tenantId);
-    return query;
+  return {
+    id: valueString((worker as DbRow).id) || workerId,
+    craft_type: valueString((worker as DbRow).craft_type),
+    position_ids: Array.from(positionIds),
   };
+}
 
-  const processName = valueString(task.process_name);
-  if (processName) {
-    const exact = await buildQuery().eq('process_name', processName);
-    if ((exact.data || []).length > 0) return ((exact.data || []) as DbRow[])[0] || null;
+export async function resolveWageRuleForTask(supabase: SupabaseClient, task: DbRow): Promise<DbRow | null> {
+  const tenantId = valueString(task.tenant_id);
+  const taskType = valueString(task.task_type) || 'process';
+  const workerId = valueString(task.assigned_worker_id) || valueString(task.worker_id);
+  const worker = await loadWageWorkerContext(supabase, workerId, tenantId);
+  const taskForMatch: DbRow = { ...task };
+  if (!valueString(taskForMatch.product_type)) {
+    const productId = valueString(task.product_id);
+    if (productId) {
+      const { data: product } = await supabase.from('order_products').select('product_type').eq('id', productId).maybeSingle();
+      if (product && valueString((product as DbRow).product_type)) taskForMatch.product_type = valueString((product as DbRow).product_type);
+    }
   }
 
-  const { data } = await buildQuery();
-  return ((data || []) as DbRow[])[0] || null;
+  let query = supabase
+    .from('wage_rules')
+    .select('*')
+    .eq('enabled', true)
+    .eq('task_type', taskType)
+    .order('created_at', { ascending: false });
+  if (tenantId) query = query.eq('tenant_id', tenantId);
+  else query = query.is('tenant_id', null);
+
+  const { data } = await query;
+  const bestRule = selectBestWageRuleForTask((data || []) as unknown as WageRuleInput[], taskForMatch as WageTaskInput, worker);
+  if (bestRule) return bestRule as DbRow;
+
+  const wageRuleId = valueString(task.wage_rule_id);
+  if (!wageRuleId) return null;
+  let explicitQuery = supabase.from('wage_rules').select('*').eq('id', wageRuleId).eq('enabled', true);
+  if (tenantId) explicitQuery = explicitQuery.eq('tenant_id', tenantId);
+  const { data: explicitRule } = await explicitQuery.maybeSingle();
+  return (explicitRule as DbRow | null) || null;
 }
 
 export function canAccessProductionTask(user: AuthUser, task: DbRow, worker: DbRow | null): boolean {

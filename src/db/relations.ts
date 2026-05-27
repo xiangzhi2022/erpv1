@@ -303,6 +303,14 @@ export const wageRulesRelations = relations(wageRules, ({ one, many }) => ({
     fields: [wageRules.tenant_id],
     references: [tenants.id],
   }),
+  worker: one(workers, {
+    fields: [wageRules.worker_id],
+    references: [workers.id],
+  }),
+  position: one(positions, {
+    fields: [wageRules.position_id],
+    references: [positions.id],
+  }),
   tasks: many(productionTasks),
   records: many(workerWageRecords),
 }));

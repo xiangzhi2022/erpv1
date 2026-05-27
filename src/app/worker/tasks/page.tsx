@@ -66,7 +66,7 @@ export default function WorkerTasksPage() {
           <h1 className="text-2xl font-bold tracking-tight">我的任务</h1>
           <p className="text-sm text-muted-foreground">只显示分配给当前工人的生产任务。</p>
         </div>
-        <Button asChild variant="outline"><Link href="/worker/wages">我的工资</Link></Button>
+        <Button asChild variant="outline"><Link href="/worker/wages">工资管理</Link></Button>
       </div>
 
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">

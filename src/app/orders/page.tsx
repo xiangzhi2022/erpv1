@@ -37,6 +37,7 @@ const defaultContext: OrderPageContext = {
   description: ORDER_MODE_CONFIG.dealer.description,
   createLabel: ORDER_MODE_CONFIG.dealer.createLabel,
   partnerLabel: ORDER_MODE_CONFIG.dealer.partnerLabel,
+  currentUser: null,
 };
 
 function modeLabel(mode: OrderMode): string {
@@ -267,6 +268,7 @@ export default function OrdersPage() {
         mode={context.mode}
         partnerLabel={context.partnerLabel || '接收企业'}
         parentOrders={parentOrders}
+        currentUser={context.currentUser}
         onOpenChange={setCreateOpen}
         onSuccess={fetchOrders}
       />

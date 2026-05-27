@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseClient } from '@/db/client';
+import { UPLOADS_BUCKET, ensureUploadsBucket } from '@/lib/storage';
 import { authFailed, requireSettingsUser } from '../_utils';
 
 const MAX_FILE_SIZE = 2 * 1024 * 1024;
@@ -21,17 +22,22 @@ export async function POST(request: NextRequest) {
     }
 
     const supabase = getSupabaseClient();
+    const bucketError = await ensureUploadsBucket(supabase);
+    if (bucketError) {
+      return NextResponse.json({ success: false, error: `初始化上传空间失败：${bucketError}` }, { status: 500 });
+    }
+
     const ext = file.name.split('.').pop() || 'jpg';
     const fileName = `avatars/${auth.user.id}/${Date.now()}.${ext}`;
     const arrayBuffer = await file.arrayBuffer();
-    const { error: uploadError } = await supabase.storage.from('uploads').upload(fileName, arrayBuffer, {
+    const { error: uploadError } = await supabase.storage.from(UPLOADS_BUCKET).upload(fileName, arrayBuffer, {
       contentType: file.type,
       upsert: true,
     });
 
     if (uploadError) return NextResponse.json({ success: false, error: '??????' }, { status: 500 });
 
-    const { data: urlData } = supabase.storage.from('uploads').getPublicUrl(fileName);
+    const { data: urlData } = supabase.storage.from(UPLOADS_BUCKET).getPublicUrl(fileName);
     return NextResponse.json({ success: true, avatarUrl: urlData?.publicUrl || '' });
   } catch (error) {
     console.error('upload avatar failed:', error);
