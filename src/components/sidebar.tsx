@@ -2,7 +2,8 @@
 
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
-import { ChevronLeft, ChevronRight, LogOut } from 'lucide-react';
+import { Building2, ChevronLeft, ChevronRight, LogOut } from 'lucide-react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   Sidebar as BaseSidebar,
   SidebarContent,
@@ -18,6 +19,7 @@ import {
   useSidebar,
 } from '@/components/ui/sidebar';
 import { Button } from '@/components/ui/button';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import {
   getAccountRoleLabel,
   getNavigationForUser,
@@ -53,9 +55,20 @@ interface AppSidebarProps {
   user?: AccessUser | null;
 }
 
+interface OrganizationOption {
+  tenant_id: string;
+  tenant_name: string;
+  tenant_type?: string;
+  role?: string;
+  department?: string;
+}
+
 export function AppSidebar({ user }: AppSidebarProps) {
   const pathname = usePathname();
   const router = useRouter();
+  const [organizations, setOrganizations] = useState<OrganizationOption[]>([]);
+  const [activeTenantId, setActiveTenantId] = useState(user?.tenant_id || '');
+  const [switchingTenant, setSwitchingTenant] = useState(false);
   const navigation = getNavigationForUser(user);
   const groupedItems = navigation.reduce<Record<string, typeof navigation>>((groups, item) => {
     const key = item.group;
@@ -76,6 +89,45 @@ export function AppSidebar({ user }: AppSidebarProps) {
     .map(getPermissionLabel)
     .join('、');
 
+  useEffect(() => {
+    let mounted = true;
+    fetch('/api/organizations')
+      .then((res) => res.json())
+      .then((json) => {
+        if (!mounted || !json.success) return;
+        setOrganizations(json.organizations || []);
+        setActiveTenantId(json.active_tenant_id || user?.tenant_id || '');
+      })
+      .catch(() => null);
+    return () => {
+      mounted = false;
+    };
+  }, [user?.tenant_id]);
+
+  const activeOrganizationName = useMemo(() => {
+    const active = organizations.find((item) => item.tenant_id === activeTenantId);
+    return active?.tenant_name || user?.tenant_name || '未选择组织';
+  }, [activeTenantId, organizations, user?.tenant_name]);
+
+  const switchOrganization = async (tenantId: string) => {
+    if (!tenantId || tenantId === activeTenantId) return;
+    setSwitchingTenant(true);
+    try {
+      const res = await fetch('/api/organizations', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tenant_id: tenantId }),
+      });
+      const json = await res.json();
+      if (!json.success) return;
+      setActiveTenantId(tenantId);
+      router.replace(json.redirectTo || '/profile');
+      router.refresh();
+    } finally {
+      setSwitchingTenant(false);
+    }
+  };
+
   const handleLogout = async () => {
     await fetch('/api/auth/logout', { method: 'POST' }).catch(() => null);
     router.replace('/login');
@@ -92,16 +144,18 @@ export function AppSidebar({ user }: AppSidebarProps) {
           <span className="text-sm font-semibold group-data-[collapsible=icon]:hidden">ERP 管理平台</span>
         </div>
         <div className="mt-4 rounded-xl bg-sidebar-accent p-2">
-          <Link
-            href="/profile"
-            className="flex items-center gap-3 rounded-lg px-1 py-1.5 transition-colors hover:bg-background/70 group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:px-0"
-            title="个人资料"
-          >
-            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-primary text-sm font-semibold text-primary-foreground">
+          <div className="flex items-center gap-3 rounded-lg px-1 py-1.5 group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:px-0">
+            <Link
+              href="/profile"
+              className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-primary text-sm font-semibold text-primary-foreground transition-opacity hover:opacity-90"
+              title="个人资料"
+            >
               {getInitial(user)}
-            </div>
-            <div className="min-w-0 group-data-[collapsible=icon]:hidden">
-              <div className="truncate text-sm font-medium">{getDisplayName(user)}</div>
+            </Link>
+            <div className="min-w-0 flex-1 group-data-[collapsible=icon]:hidden">
+              <Link href="/profile" className="block truncate text-sm font-medium hover:underline">
+                {getDisplayName(user)}
+              </Link>
               <div className="truncate text-xs text-muted-foreground">
                 {user?.phone || '已登录'}
               </div>
@@ -110,7 +164,32 @@ export function AppSidebar({ user }: AppSidebarProps) {
                 {permissionText ? ` · ${permissionText}` : ''}
               </div>
             </div>
-          </Link>
+          </div>
+          <div className="mt-2 group-data-[collapsible=icon]:hidden">
+            {organizations.length > 1 ? (
+              <Select value={activeTenantId} onValueChange={switchOrganization} disabled={switchingTenant}>
+                <SelectTrigger className="h-auto min-h-9 w-full gap-2 bg-background/70 px-2 py-2 text-left">
+                  <Building2 className="size-4 shrink-0 text-muted-foreground" />
+                  <SelectValue placeholder="选择组织" />
+                </SelectTrigger>
+                <SelectContent>
+                  {organizations.map((organization) => (
+                    <SelectItem key={organization.tenant_id} value={organization.tenant_id}>
+                      <span className="flex flex-col">
+                        <span>{organization.tenant_name}</span>
+                        <span className="text-xs text-muted-foreground">{getAccountRoleLabel(organization.role)}</span>
+                      </span>
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            ) : (
+              <div className="flex items-center gap-2 rounded-md bg-background/60 px-2 py-2 text-xs text-muted-foreground">
+                <Building2 className="size-4" />
+                <span className="truncate">{activeOrganizationName}</span>
+              </div>
+            )}
+          </div>
           <Button
             type="button"
             variant="ghost"

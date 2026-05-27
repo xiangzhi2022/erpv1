@@ -180,6 +180,7 @@ export function verifyOAuthState(state: string): { provider: string; redirectUrl
 // ===================== 会话管理 =====================
 
 export const SESSION_COOKIE_NAME = 'auth_session';
+export const ACTIVE_TENANT_COOKIE_NAME = 'active_tenant';
 const SESSION_DURATION = 7 * 24 * 60 * 60 * 1000; // 7 天
 const SESSION_DEFAULT_MAX_AGE = 7 * 24 * 60 * 60; // 7 天（秒）
 
@@ -232,6 +233,7 @@ export function deleteSession(sessionId: string): void {
 export interface AuthUser extends User {
   role: string;
   tenant_id?: string;
+  tenant_name?: string;
   nickname?: string;
   tenant_type?: string;
   department?: string;
@@ -246,6 +248,7 @@ export interface AuthUser extends User {
 type UserMeta = {
   role: string;
   tenant_id?: string;
+  tenant_name?: string;
   nickname?: string;
   tenant_type?: string;
   department?: string;
@@ -254,13 +257,20 @@ type UserMeta = {
 
 const userMetaCache = new Map<string, UserMeta>();
 
-async function loadUserPermissions(userId: string): Promise<PermissionKey[]> {
+function parseCookieValue(cookieHeader: string, name: string): string | undefined {
+  const match = cookieHeader.match(new RegExp(`${name}=([^;]+)`));
+  return match?.[1] ? decodeURIComponent(match[1]) : undefined;
+}
+
+async function loadUserPermissions(userId: string, tenantId?: string): Promise<PermissionKey[]> {
   try {
     const supabase = getSupabaseClient();
-    const { data, error } = await supabase
+    let query = supabase
       .from('user_permissions')
       .select('permission_key')
       .eq('user_id', userId);
+    if (tenantId) query = query.or(`tenant_id.is.null,tenant_id.eq.${tenantId}`);
+    const { data, error } = await query;
 
     if (error || !data) return [];
     return Array.from(
@@ -275,8 +285,53 @@ async function loadUserPermissions(userId: string): Promise<PermissionKey[]> {
   }
 }
 
-async function resolveUserMeta(user: User): Promise<UserMeta> {
-  const cached = userMetaCache.get(user.id);
+async function loadDefaultTenantContext(userId: string): Promise<{
+  tenant_id?: string;
+  tenant_type?: string;
+  role?: string;
+  department?: string;
+  name?: string;
+} | null> {
+  try {
+    const { data } = await getSupabaseClient()
+      .from('tenant_users')
+      .select('tenant_id, role, department, name, tenant:tenants(id,name,company_name,tenant_type)')
+      .eq('user_id', userId)
+      .eq('status', 'active')
+      .order('created_at', { ascending: true })
+      .limit(1)
+      .maybeSingle();
+    if (!data?.tenant_id) return null;
+    const tenant = Array.isArray(data.tenant) ? data.tenant[0] : data.tenant;
+    return {
+      tenant_id: data.tenant_id,
+      tenant_type: tenant?.tenant_type || undefined,
+      role: data.role || 'employee',
+      department: data.department || undefined,
+      name: data.name || tenant?.company_name || tenant?.name || undefined,
+    };
+  } catch {
+    return null;
+  }
+}
+
+interface MembershipRow {
+  tenant_id: string;
+  role?: string | null;
+  department?: string | null;
+  name?: string | null;
+  status?: string | null;
+  tenant?: {
+    id?: string;
+    name?: string | null;
+    company_name?: string | null;
+    tenant_type?: string | null;
+  } | null;
+}
+
+async function resolveUserMeta(user: User, activeTenantId?: string): Promise<UserMeta> {
+  const cacheKey = `${user.id}:${activeTenantId || user.tenant_id || 'default'}`;
+  const cached = userMetaCache.get(cacheKey);
   if (cached) return cached;
 
   try {
@@ -288,28 +343,58 @@ async function resolveUserMeta(user: User): Promise<UserMeta> {
       .maybeSingle();
 
     if (data) {
-      let tenantType: string | undefined = data.tenant_type || undefined;
-      if (data.tenant_id) {
+      const baseRole = normalizeAccountRole(data.role || user.role || 'employee') === 'guest'
+        ? 'employee'
+        : normalizeAccountRole(data.role || user.role || 'employee');
+      const defaultContext = !data.tenant_id ? await loadDefaultTenantContext(user.id) : null;
+      let tenantId: string | undefined = data.tenant_id || defaultContext?.tenant_id || undefined;
+      let tenantName: string | undefined;
+      let tenantType: string | undefined = data.tenant_type || defaultContext?.tenant_type || undefined;
+      let role = defaultContext?.role
+        ? (normalizeAccountRole(defaultContext.role) === 'guest' ? 'employee' : normalizeAccountRole(defaultContext.role))
+        : baseRole;
+      let department = data.department || defaultContext?.department || undefined;
+      let membership: MembershipRow | null = null;
+
+      if (activeTenantId) {
+        const { data: membershipData } = await supabase
+          .from('tenant_users')
+          .select('tenant_id, role, department, name, status, tenant:tenants(id,name,company_name,tenant_type)')
+          .eq('user_id', user.id)
+          .eq('tenant_id', activeTenantId)
+          .eq('status', 'active')
+          .maybeSingle();
+        membership = membershipData as MembershipRow | null;
+      }
+
+      if (membership?.tenant_id) {
+        tenantId = membership.tenant_id;
+        const membershipRole = normalizeAccountRole(membership.role || 'employee');
+        role = membershipRole === 'guest' ? 'employee' : membershipRole;
+        department = membership.department || department;
+        tenantType = membership.tenant?.tenant_type || tenantType;
+        tenantName = membership.tenant?.company_name || membership.tenant?.name || undefined;
+      } else if (tenantId) {
         const { data: tenantData } = await supabase
           .from('tenants')
-          .select('tenant_type')
-          .eq('id', data.tenant_id)
+          .select('name, company_name, tenant_type')
+          .eq('id', tenantId)
           .maybeSingle();
         tenantType = tenantData?.tenant_type || tenantType;
+        tenantName = tenantData?.company_name || tenantData?.name || defaultContext?.name || undefined;
       }
-      const permissions = await loadUserPermissions(user.id);
+      const permissions = await loadUserPermissions(user.id, tenantId);
 
       const meta = {
-        role: normalizeAccountRole(data.role || user.role || 'employee') === 'guest'
-          ? 'employee'
-          : normalizeAccountRole(data.role || user.role || 'employee'),
-        tenant_id: data.tenant_id || undefined,
+        role,
+        tenant_id: tenantId,
+        tenant_name: tenantName,
         nickname: data.real_name || data.nickname || undefined,
         tenant_type: tenantType,
-        department: data.department || undefined,
+        department,
         permissions,
       };
-      userMetaCache.set(user.id, meta);
+      userMetaCache.set(cacheKey, meta);
       return meta;
     }
   } catch {
@@ -341,6 +426,7 @@ async function resolveSessionUser(sessionId: string | undefined): Promise<AuthUs
     ...session.user,
     role: meta.role,
     tenant_id: meta.tenant_id,
+    tenant_name: meta.tenant_name,
     nickname: meta.nickname || session.user.name,
     tenant_type: meta.tenant_type,
     department: meta.department,
@@ -351,7 +437,25 @@ async function resolveSessionUser(sessionId: string | undefined): Promise<AuthUs
 export async function getCurrentAuthUser(): Promise<AuthUser | null> {
   try {
     const cookieStore = await cookies();
-    return resolveSessionUser(cookieStore.get(SESSION_COOKIE_NAME)?.value);
+    const sessionId = cookieStore.get(SESSION_COOKIE_NAME)?.value;
+    const activeTenantId = cookieStore.get(ACTIVE_TENANT_COOKIE_NAME)?.value;
+    if (!sessionId) return null;
+    const session = sessionStore.get(sessionId);
+    if (!session || Date.now() > session.expiresAt) {
+      sessionStore.delete(sessionId);
+      return null;
+    }
+    const meta = await resolveUserMeta(session.user, activeTenantId);
+    return {
+      ...session.user,
+      role: meta.role,
+      tenant_id: meta.tenant_id,
+      tenant_name: meta.tenant_name,
+      nickname: meta.nickname || session.user.name,
+      tenant_type: meta.tenant_type,
+      department: meta.department,
+      permissions: meta.permissions,
+    };
   } catch {
     return null;
   }
@@ -360,8 +464,25 @@ export async function getCurrentAuthUser(): Promise<AuthUser | null> {
 export async function getUserFromRequest(request: Request): Promise<AuthUser | null> {
   try {
     const cookieHeader = request.headers.get('cookie') || '';
-    const sessionMatch = cookieHeader.match(new RegExp(`${SESSION_COOKIE_NAME}=([^;]+)`));
-    return resolveSessionUser(sessionMatch?.[1]);
+    const sessionId = parseCookieValue(cookieHeader, SESSION_COOKIE_NAME);
+    const activeTenantId = parseCookieValue(cookieHeader, ACTIVE_TENANT_COOKIE_NAME);
+    if (!sessionId) return null;
+    const session = sessionStore.get(sessionId);
+    if (!session || Date.now() > session.expiresAt) {
+      sessionStore.delete(sessionId);
+      return null;
+    }
+    const meta = await resolveUserMeta(session.user, activeTenantId);
+    return {
+      ...session.user,
+      role: meta.role,
+      tenant_id: meta.tenant_id,
+      tenant_name: meta.tenant_name,
+      nickname: meta.nickname || session.user.name,
+      tenant_type: meta.tenant_type,
+      department: meta.department,
+      permissions: meta.permissions,
+    };
   } catch {
     return null;
   }

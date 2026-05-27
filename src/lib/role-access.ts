@@ -49,6 +49,7 @@ export type PermissionKey =
 export type AccessUser = Partial<AuthUser & User> & {
   role?: string;
   tenant_type?: string;
+  tenant_name?: string;
   department?: string;
   permissions?: string[];
 };
