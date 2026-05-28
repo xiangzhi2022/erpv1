@@ -58,6 +58,35 @@ export const tenantUsers = pgTable("tenant_users", {
 	updated_at: timestamp("updated_at", { withTimezone: true }),
 });
 
+export const tenantJoinRequests = pgTable(
+	"tenant_join_requests",
+	{
+		id: uuid("id").primaryKey().defaultRandom(),
+		tenant_id: uuid("tenant_id").notNull(),
+		user_id: uuid("user_id"),
+		phone: varchar("phone", { length: 20 }).notNull(),
+		name: varchar("name", { length: 100 }),
+		request_type: varchar("request_type", { length: 30 }).notNull(),
+		status: varchar("status", { length: 20 }).notNull().default("pending"),
+		role: varchar("role", { length: 50 }).notNull().default("employee"),
+		department: varchar("department", { length: 100 }),
+		employee_no: varchar("employee_no", { length: 40 }),
+		message: text("message"),
+		requested_by: uuid("requested_by"),
+		handled_by: uuid("handled_by"),
+		handled_at: timestamp("handled_at", { withTimezone: true }),
+		created_at: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+		updated_at: timestamp("updated_at", { withTimezone: true }),
+	},
+	(table) => [
+		index("tenant_join_requests_tenant_id_idx").on(table.tenant_id),
+		index("tenant_join_requests_user_id_idx").on(table.user_id),
+		index("tenant_join_requests_phone_idx").on(table.phone),
+		index("tenant_join_requests_status_idx").on(table.status),
+		index("tenant_join_requests_type_idx").on(table.request_type),
+	]
+);
+
 export const userPermissions = pgTable(
 	"user_permissions",
 	{
@@ -864,6 +893,7 @@ export const userSettings = pgTable("user_settings", {
 export type User = typeof users.$inferSelect;
 export type Tenant = typeof tenants.$inferSelect;
 export type TenantUser = typeof tenantUsers.$inferSelect;
+export type TenantJoinRequest = typeof tenantJoinRequests.$inferSelect;
 export type UserPermission = typeof userPermissions.$inferSelect;
 export type Department = typeof departments.$inferSelect;
 export type Position = typeof positions.$inferSelect;

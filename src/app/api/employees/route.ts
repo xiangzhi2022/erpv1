@@ -33,7 +33,7 @@ export async function GET(request: Request) {
     const positionId = searchParams.get('position_id');
     let query = supabase
       .from('employees')
-      .select('*, department:departments(id,name,code), primary_position:positions(id,name,code,position_type,can_receive_production_task,can_calculate_piece_wage,can_review_task,can_assign_task), user:users(id,phone,real_name,is_active)')
+      .select('*, department:departments(id,name,code), primary_position:positions(id,name,code,position_type,can_receive_production_task,can_calculate_piece_wage,can_review_task,can_assign_task)')
       .order('created_at', { ascending: false });
     if (user.tenant_id) query = query.or(`tenant_id.is.null,tenant_id.eq.${user.tenant_id}`);
     if (status && status !== 'all') query = query.eq('status', status);

@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { toast } from 'sonner';
-import { Edit, MoreHorizontal, Plus, RefreshCw, Search, ShieldCheck, Trash2, UserCheck, UserX } from 'lucide-react';
+import { Check, Edit, MoreHorizontal, Plus, RefreshCw, Search, Send, ShieldCheck, Trash2, UserCheck, UserPlus, UserX, X } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -97,6 +97,21 @@ interface EmployeeForm {
   create_account: boolean;
 }
 
+interface OrgRequestRow {
+  id: string;
+  phone: string;
+  name?: string | null;
+  request_type: 'employee_apply' | 'org_invite';
+  status: string;
+  role?: string | null;
+  department?: string | null;
+  employee_no?: string | null;
+  message?: string | null;
+  tenant?: { company_name?: string | null; name?: string | null; tenant_type?: string | null } | null;
+  user?: { phone?: string | null; real_name?: string | null; nickname?: string | null } | null;
+  created_at?: string | null;
+}
+
 const EMPTY_FORM: EmployeeForm = {
   user_id: '',
   employee_no: '',
@@ -173,6 +188,8 @@ export default function EmployeesPage() {
   const [form, setForm] = useState<EmployeeForm>(EMPTY_FORM);
   const [roleIds, setRoleIds] = useState<Set<string>>(new Set());
   const [deleteTarget, setDeleteTarget] = useState<EmployeeRow | null>(null);
+  const [orgRequests, setOrgRequests] = useState<OrgRequestRow[]>([]);
+  const [inviteForm, setInviteForm] = useState({ phone: '', name: '', employee_no: '', role: 'employee', department: '', message: '' });
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -182,23 +199,26 @@ export default function EmployeesPage() {
       if (status !== 'all') params.set('status', status);
       if (departmentId !== 'all') params.set('department_id', departmentId);
       if (positionId !== 'all') params.set('position_id', positionId);
-      const [employeeRes, departmentRes, positionRes, roleRes] = await Promise.all([
+      const [employeeRes, departmentRes, positionRes, roleRes, requestRes] = await Promise.all([
         fetch(`/api/employees?${params}`),
         fetch('/api/departments'),
         fetch('/api/positions'),
         fetch('/api/roles'),
+        fetch('/api/organization-requests?status=pending'),
       ]);
-      const [employeeJson, departmentJson, positionJson, roleJson] = await Promise.all([
+      const [employeeJson, departmentJson, positionJson, roleJson, requestJson] = await Promise.all([
         employeeRes.json(),
         departmentRes.json(),
         positionRes.json(),
         roleRes.json(),
+        requestRes.json(),
       ]);
       if (employeeJson.success) setEmployees(employeeJson.data || []);
       else toast.error(employeeJson.error || '获取员工失败');
       if (departmentJson.success) setDepartments(departmentJson.data || []);
       if (positionJson.success) setPositions(positionJson.data || []);
       if (roleJson.success) setRoles(roleJson.data || []);
+      if (requestJson.success) setOrgRequests(requestJson.data || []);
     } finally {
       setLoading(false);
     }
@@ -300,6 +320,51 @@ export default function EmployeesPage() {
     }
   };
 
+  const inviteEmployee = async () => {
+    if (!/^1[3-9]\d{9}$/.test(inviteForm.phone)) {
+      toast.error('请输入正确的员工手机号');
+      return;
+    }
+    setSaving(true);
+    try {
+      const res = await fetch('/api/organization-requests', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ request_type: 'org_invite', ...inviteForm }),
+      });
+      const json = await res.json();
+      if (!json.success) {
+        toast.error(json.error || '邀请发送失败');
+        return;
+      }
+      toast.success('邀请已发送');
+      setInviteForm({ phone: '', name: '', employee_no: '', role: 'employee', department: '', message: '' });
+      await load();
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleOrgRequest = async (requestId: string, action: 'approve' | 'reject') => {
+    setSaving(true);
+    try {
+      const res = await fetch(`/api/organization-requests/${requestId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action }),
+      });
+      const json = await res.json();
+      if (!json.success) {
+        toast.error(json.error || '处理申请失败');
+        return;
+      }
+      toast.success(action === 'approve' ? '已通过，员工已加入当前组织' : '已拒绝申请');
+      await load();
+    } finally {
+      setSaving(false);
+    }
+  };
+
   return (
     <div className="space-y-6">
       <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
@@ -388,6 +453,81 @@ export default function EmployeesPage() {
             </SelectContent>
           </Select>
           <Button variant="outline" onClick={() => load()} disabled={loading}>查询</Button>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2 text-base">
+            <UserPlus className="size-4" />
+            组织加入申请
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="grid gap-3 lg:grid-cols-[160px_160px_140px_150px_1fr_auto]">
+            <Input value={inviteForm.phone} onChange={(event) => setInviteForm({ ...inviteForm, phone: event.target.value })} placeholder="员工手机号" />
+            <Input value={inviteForm.name} onChange={(event) => setInviteForm({ ...inviteForm, name: event.target.value })} placeholder="姓名" />
+            <Input value={inviteForm.employee_no} onChange={(event) => setInviteForm({ ...inviteForm, employee_no: event.target.value })} placeholder="工号" />
+            <Select value={inviteForm.role} onValueChange={(value) => setInviteForm({ ...inviteForm, role: value })}>
+              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="employee">员工</SelectItem>
+                <SelectItem value="factory_admin">工厂管理员</SelectItem>
+                <SelectItem value="dealer_admin">经销商管理员</SelectItem>
+                <SelectItem value="supplier_admin">供应商管理员</SelectItem>
+              </SelectContent>
+            </Select>
+            <Input value={inviteForm.message} onChange={(event) => setInviteForm({ ...inviteForm, message: event.target.value })} placeholder="邀请说明" />
+            <Button onClick={inviteEmployee} disabled={saving}>
+              <Send className="size-4" />
+              发起邀请
+            </Button>
+          </div>
+
+          <div className="rounded-md border">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>申请人</TableHead>
+                  <TableHead>来源</TableHead>
+                  <TableHead>角色</TableHead>
+                  <TableHead>说明</TableHead>
+                  <TableHead className="text-right">审批</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {orgRequests.map((request) => (
+                  <TableRow key={request.id}>
+                    <TableCell>
+                      <div className="font-medium">{request.name || request.user?.real_name || request.user?.nickname || request.phone}</div>
+                      <div className="text-xs text-muted-foreground">{request.phone}</div>
+                    </TableCell>
+                    <TableCell>
+                      <Badge variant="outline">{request.request_type === 'employee_apply' ? '员工申请' : '企业邀请'}</Badge>
+                    </TableCell>
+                    <TableCell>
+                      <div>{request.role || 'employee'}</div>
+                      <div className="text-xs text-muted-foreground">{request.employee_no || '未填工号'}</div>
+                    </TableCell>
+                    <TableCell className="max-w-[320px] truncate">{request.message || '-'}</TableCell>
+                    <TableCell className="text-right">
+                      <div className="flex justify-end gap-2">
+                        <Button size="sm" variant="outline" onClick={() => handleOrgRequest(request.id, 'reject')} disabled={saving}>
+                          <X className="size-4" />
+                          拒绝
+                        </Button>
+                        <Button size="sm" onClick={() => handleOrgRequest(request.id, 'approve')} disabled={saving}>
+                          <Check className="size-4" />
+                          通过
+                        </Button>
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+            {orgRequests.length === 0 ? <div className="py-8 text-center text-sm text-muted-foreground">暂无待处理申请</div> : null}
+          </div>
         </CardContent>
       </Card>
 

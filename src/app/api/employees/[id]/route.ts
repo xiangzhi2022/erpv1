@@ -28,7 +28,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
     const supabase = getSupabaseClient();
     let query = supabase
       .from('employees')
-      .select('*, department:departments(*), primary_position:positions(*), user:users(id,phone,real_name,is_active)')
+      .select('*, department:departments(*), primary_position:positions(*)')
       .eq('id', id);
     if (user.tenant_id) query = query.or(`tenant_id.is.null,tenant_id.eq.${user.tenant_id}`);
     const employeeRes = await query.maybeSingle();

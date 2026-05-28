@@ -148,7 +148,9 @@ export async function syncEmployeeUserPermissions(
   if (!userId) return;
   const supabase = getSupabaseClient();
   const permissionKeys = await permissionKeysForRoles(roles);
-  await supabase.from('user_permissions').delete().eq('user_id', userId);
+  let deleteQuery = supabase.from('user_permissions').delete().eq('user_id', userId);
+  deleteQuery = tenantId ? deleteQuery.eq('tenant_id', tenantId) : deleteQuery.is('tenant_id', null);
+  await deleteQuery;
   if (permissionKeys.length === 0) return;
 
   const { error } = await supabase.from('user_permissions').insert(
@@ -162,6 +164,50 @@ export async function syncEmployeeUserPermissions(
   if (error) throw error;
 }
 
+export async function ensureTenantMembership(input: {
+  tenantId: string | null | undefined;
+  userId: string | null | undefined;
+  phone: string | null | undefined;
+  name?: string | null;
+  role?: string | null;
+  department?: string | null;
+  passwordHash?: string | null;
+}) {
+  if (!input.tenantId || !input.userId || !input.phone) return;
+  const supabase = getSupabaseClient();
+  const now = new Date().toISOString();
+  const { data: existing, error: findError } = await supabase
+    .from('tenant_users')
+    .select('id')
+    .eq('tenant_id', input.tenantId)
+    .eq('user_id', input.userId)
+    .maybeSingle();
+  if (findError) throw findError;
+
+  const row = {
+    phone: input.phone,
+    name: input.name || input.phone,
+    role: input.role || 'employee',
+    department: input.department || null,
+    status: 'active',
+    updated_at: now,
+  };
+
+  if (existing?.id) {
+    const { error } = await supabase.from('tenant_users').update(row).eq('id', existing.id);
+    if (error) throw error;
+    return;
+  }
+
+  const { error } = await supabase.from('tenant_users').insert({
+    tenant_id: input.tenantId,
+    user_id: input.userId,
+    password: input.passwordHash || '',
+    ...row,
+  });
+  if (error) throw error;
+}
+
 export async function createOrReuseEmployeeLoginUser(body: Record<string, unknown>, user: AuthUser): Promise<string | null> {
   const shouldCreate = body.create_account === true || Boolean(text(body.password));
   const phone = text(body.phone);
@@ -169,18 +215,31 @@ export async function createOrReuseEmployeeLoginUser(body: Record<string, unknow
   if (!phone) throw new Error('创建登录账号需要填写手机号');
 
   const supabase = getSupabaseClient();
-  const { data: existing, error: findError } = await supabase.from('users').select('id').eq('phone', phone).maybeSingle();
+  const { data: existing, error: findError } = await supabase.from('users').select('id,password').eq('phone', phone).maybeSingle();
   if (findError) throw findError;
-  if (existing?.id) return existing.id;
+  if (existing?.id) {
+    await ensureTenantMembership({
+      tenantId: user.tenant_id,
+      userId: existing.id,
+      phone,
+      name: text(body.name),
+      role: 'employee',
+      department: text(body.department_name),
+      passwordHash: existing.password,
+    });
+    return existing.id;
+  }
 
   const password = text(body.password) || phone.slice(-6).padStart(6, '0');
   if (password.length < 6) throw new Error('登录密码至少 6 位');
+
+  const passwordHash = hashPassword(password);
 
   const { data, error } = await supabase
     .from('users')
     .insert({
       phone,
-      password: hashPassword(password),
+      password: passwordHash,
       real_name: text(body.name) || phone,
       nickname: text(body.name) || phone,
       role: 'employee',
@@ -193,5 +252,14 @@ export async function createOrReuseEmployeeLoginUser(body: Record<string, unknow
     .select('id')
     .single();
   if (error) throw error;
+  await ensureTenantMembership({
+    tenantId: user.tenant_id,
+    userId: data.id,
+    phone,
+    name: text(body.name),
+    role: 'employee',
+    department: text(body.department_name),
+    passwordHash,
+  });
   return data.id;
 }
