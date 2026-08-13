@@ -33,6 +33,10 @@ interface UserRow {
   password: string;
   real_name?: string | null;
   nickname?: string | null;
+  role?: string | null;
+  tenant_id?: string | null;
+  tenant_type?: string | null;
+  department?: string | null;
 }
 
 interface TenantRow {
@@ -41,6 +45,27 @@ interface TenantRow {
   company_name?: string | null;
   name?: string | null;
 }
+
+interface ExistingEmployeeProfile {
+  id: string;
+  user_id?: string | null;
+}
+
+interface EmployeeProfileWriteInput {
+  existingByUserId: ExistingEmployeeProfile | null;
+  existingByPhone: ExistingEmployeeProfile | null;
+  memberUserId: string;
+  tenantId: string;
+  phone: string;
+  name: string;
+  employeeNo: string;
+  requestType: TenantJoinRequestType;
+}
+
+export type EmployeeProfileWrite =
+  | { action: 'none'; id: string }
+  | { action: 'update'; id: string; values: Record<string, string | null> }
+  | { action: 'insert'; values: Record<string, string | null> };
 
 export function canManageTenantMembers(user: AuthUser): boolean {
   return isAdminRole(user) || getUserPermissionKeys(user).includes('factory_boss');
@@ -61,10 +86,52 @@ export function makeEmployeeNo(phone: string): string {
   return `E${today}${phone.slice(-4)}`;
 }
 
+export function buildExistingUserTenantPatch(input: {
+  existingTenantId?: string | null;
+  existingTenantType?: string | null;
+  tenantId: string;
+  tenantType?: string | null;
+  role?: string | null;
+  department?: string | null;
+}): Record<string, string | null> {
+  if (input.existingTenantId) return {};
+  return {
+    tenant_id: input.tenantId,
+    tenant_type: input.tenantType || input.existingTenantType || null,
+    role: normalizeMemberRole(input.role),
+    department: input.department || null,
+  };
+}
+
+export function chooseEmployeeProfileWrite(input: EmployeeProfileWriteInput): EmployeeProfileWrite {
+  if (input.existingByUserId?.id) return { action: 'none', id: input.existingByUserId.id };
+
+  const values = {
+    user_id: input.memberUserId,
+    employee_no: input.employeeNo,
+    name: input.name,
+    phone: input.phone,
+    department_id: null,
+    primary_position_id: null,
+    employee_type: 'full_time',
+    status: 'active',
+    tenant_id: input.tenantId,
+    remark: input.requestType === 'employee_apply'
+      ? 'Created after employee join request approval'
+      : 'Created after organization invitation approval',
+    updated_at: new Date().toISOString(),
+  };
+
+  if (input.existingByPhone?.id) {
+    return { action: 'update', id: input.existingByPhone.id, values };
+  }
+  return { action: 'insert', values };
+}
+
 async function findUserByPhone(phone: string): Promise<UserRow | null> {
   const { data, error } = await getSupabaseClient()
     .from('users')
-    .select('id,phone,password,real_name,nickname')
+    .select('id,phone,password,real_name,nickname,role,tenant_id,tenant_type,department')
     .eq('phone', phone)
     .maybeSingle();
   if (error) throw error;
@@ -87,36 +154,64 @@ async function createUserForInvitation(request: TenantJoinRequestRow, tenant: Te
       is_active: true,
       updated_at: new Date().toISOString(),
     })
-    .select('id,phone,password,real_name,nickname')
+    .select('id,phone,password,real_name,nickname,role,tenant_id,tenant_type,department')
     .single();
   if (error) throw error;
   return data as UserRow;
 }
 
-async function ensureEmployeeProfile(request: TenantJoinRequestRow, member: UserRow) {
+async function backfillExistingUserTenantContext(member: UserRow, request: TenantJoinRequestRow, tenant: TenantRow) {
+  const patch = buildExistingUserTenantPatch({
+    existingTenantId: member.tenant_id,
+    existingTenantType: member.tenant_type,
+    tenantId: request.tenant_id,
+    tenantType: tenant.tenant_type,
+    role: request.role || member.role || 'employee',
+    department: request.department || member.department || null,
+  });
+  if (Object.keys(patch).length === 0) return;
+
+  const { error } = await getSupabaseClient()
+    .from('users')
+    .update({ ...patch, updated_at: new Date().toISOString() })
+    .eq('id', member.id);
+  if (error) throw error;
+}
+
+async function ensureEmployeeProfileForMembership(request: TenantJoinRequestRow, member: UserRow) {
   const supabase = getSupabaseClient();
-  const { data: existing, error: findError } = await supabase
+  const { data: existingByUserId, error: findByUserError } = await supabase
     .from('employees')
-    .select('id')
+    .select('id,user_id')
     .eq('tenant_id', request.tenant_id)
     .eq('user_id', member.id)
     .maybeSingle();
-  if (findError) throw findError;
-  if (existing?.id) return;
+  if (findByUserError) throw findByUserError;
 
-  const { error } = await supabase.from('employees').insert({
-    user_id: member.id,
-    employee_no: request.employee_no || makeEmployeeNo(request.phone),
-    name: request.name || member.real_name || member.nickname || request.phone,
+  const { data: existingByPhone, error: findByPhoneError } = await supabase
+    .from('employees')
+    .select('id,user_id')
+    .eq('tenant_id', request.tenant_id)
+    .eq('phone', request.phone)
+    .maybeSingle();
+  if (findByPhoneError) throw findByPhoneError;
+
+  const write = chooseEmployeeProfileWrite({
+    existingByUserId: existingByUserId as ExistingEmployeeProfile | null,
+    existingByPhone: existingByPhone as ExistingEmployeeProfile | null,
+    memberUserId: member.id,
+    tenantId: request.tenant_id,
     phone: request.phone,
-    department_id: null,
-    primary_position_id: null,
-    employee_type: 'full_time',
-    status: 'active',
-    tenant_id: request.tenant_id,
-    remark: request.request_type === 'employee_apply' ? '员工申请加入后自动创建' : '企业邀请通过后自动创建',
-    updated_at: new Date().toISOString(),
+    name: request.name || member.real_name || member.nickname || request.phone,
+    employeeNo: request.employee_no || makeEmployeeNo(request.phone),
+    requestType: request.request_type,
   });
+
+  if (write.action === 'none') return;
+  const mutation = write.action === 'update'
+    ? supabase.from('employees').update(write.values).eq('id', write.id)
+    : supabase.from('employees').insert(write.values);
+  const { error } = await mutation;
   if (error) throw error;
 }
 
@@ -130,9 +225,10 @@ export async function approveJoinRequest(request: TenantJoinRequestRow, actor: A
   if (tenantError) throw tenantError;
 
   let member = request.user_id
-    ? ((await supabase.from('users').select('id,phone,password,real_name,nickname').eq('id', request.user_id).single()).data as UserRow | null)
+    ? ((await supabase.from('users').select('id,phone,password,real_name,nickname,role,tenant_id,tenant_type,department').eq('id', request.user_id).single()).data as UserRow | null)
     : await findUserByPhone(request.phone);
   if (!member) member = await createUserForInvitation(request, tenant as TenantRow);
+  else await backfillExistingUserTenantContext(member, request, tenant as TenantRow);
 
   await ensureTenantMembership({
     tenantId: request.tenant_id,
@@ -143,7 +239,7 @@ export async function approveJoinRequest(request: TenantJoinRequestRow, actor: A
     department: request.department || null,
     passwordHash: member.password,
   });
-  await ensureEmployeeProfile(request, member);
+  await ensureEmployeeProfileForMembership(request, member);
 
   const { error } = await supabase
     .from('tenant_join_requests')

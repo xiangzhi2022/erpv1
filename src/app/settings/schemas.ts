@@ -73,3 +73,75 @@ export const companySchema = z.object({
 });
 
 export type CompanyFormValues = z.infer<typeof companySchema>;
+
+export const unitPriceRuleCategorySchema = z.enum([
+  'material_thickness',
+  'process',
+  'finish',
+  'veneer',
+  'handleless',
+  'forming',
+]);
+
+export const unitPriceRuleUnitSchema = z.enum(['sqm', 'm', 'piece', 'set']);
+export const finishTypeSchema = z.enum(['mixed_oil', 'veneer']);
+export const formingMethodSchema = z.enum(['pressing', 'direct_cut']);
+
+export const unitPriceRuleSchema = z
+  .object({
+    id: z.string().min(1),
+    category: unitPriceRuleCategorySchema,
+    name: z.string().min(1, '单价名称不能为空').max(80, '单价名称不能超过80个字符'),
+    thicknessMm: z.coerce.number().positive('材料厚度必须大于0').optional(),
+    veneerThicknessMm: z.coerce.number().positive('木皮厚度必须大于0').optional(),
+    finishType: finishTypeSchema.optional(),
+    formingMethod: formingMethodSchema.optional(),
+    unit: unitPriceRuleUnitSchema,
+    unitPrice: z.coerce.number().min(0, '单价不能为负数'),
+    note: z.string().max(200, '备注不能超过200个字符').optional(),
+    enabled: z.boolean(),
+  })
+  .superRefine((rule, ctx) => {
+    if (rule.category === 'material_thickness' && rule.thicknessMm === undefined) {
+      ctx.addIssue({
+        code: 'custom',
+        message: '材料厚度单价必须填写厚度',
+        path: ['thicknessMm'],
+      });
+    }
+
+    if (rule.category === 'veneer' && rule.veneerThicknessMm === undefined) {
+      ctx.addIssue({
+        code: 'custom',
+        message: '贴皮单价必须填写木皮厚度',
+        path: ['veneerThicknessMm'],
+      });
+    }
+
+    if ((rule.category === 'finish' || rule.category === 'veneer') && rule.finishType === undefined) {
+      ctx.addIssue({
+        code: 'custom',
+        message: '表面工艺必须选择混油或贴皮',
+        path: ['finishType'],
+      });
+    }
+
+    if (rule.category === 'forming' && rule.formingMethod === undefined) {
+      ctx.addIssue({
+        code: 'custom',
+        message: '成型工艺必须选择压制或直裁',
+        path: ['formingMethod'],
+      });
+    }
+  });
+
+export const unitPriceSettingsSchema = z.object({
+  rules: z.array(unitPriceRuleSchema).max(200, '单价规则不能超过200条'),
+});
+
+export type UnitPriceRuleCategory = z.infer<typeof unitPriceRuleCategorySchema>;
+export type UnitPriceRuleUnit = z.infer<typeof unitPriceRuleUnitSchema>;
+export type FinishType = z.infer<typeof finishTypeSchema>;
+export type FormingMethod = z.infer<typeof formingMethodSchema>;
+export type UnitPriceRule = z.infer<typeof unitPriceRuleSchema>;
+export type UnitPriceSettings = z.infer<typeof unitPriceSettingsSchema>;

@@ -400,6 +400,8 @@ export function isFactoryUser(user: AccessUser | null | undefined): boolean {
 
 export function getLandingPath(user: AccessUser | null | undefined): string {
   if (!user) return '/login';
+  if (canAccessPath(user, '/orders')) return '/orders';
+
   const roleTemplate = getAccountRoleTemplate(rawRoleOf(user));
   if (roleTemplate && roleTemplate.level <= 2) return roleTemplate.landingPath;
 

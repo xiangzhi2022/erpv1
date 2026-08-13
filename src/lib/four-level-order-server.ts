@@ -561,7 +561,6 @@ export function sanitizeOrderTreeForUser(user: AuthUser, tree: OrderTree): Order
   }
 
   if (dealer) {
-    sanitized.spaces = [];
     sanitized.status_logs = sanitized.status_logs.filter((log) => log.target_type === 'order');
   }
 

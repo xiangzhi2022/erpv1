@@ -9,6 +9,7 @@ import {
   appearanceSchema,
   companySchema,
   passwordSchema,
+  unitPriceSettingsSchema,
   profileSchema,
 } from '@/app/settings/schemas';
 
@@ -128,5 +129,84 @@ describe('settings schemas', () => {
     expect(companySchema.safeParse({ ...validCompany, prefix: 'erp' }).success).toBe(false);
     expect(companySchema.safeParse({ ...validCompany, prefix: 'ERP1' }).success).toBe(false);
     expect(companySchema.safeParse({ ...validCompany, prefix: 'ABCDEFGHIJK' }).success).toBe(false);
+  });
+
+  it('should validate unit price rules for material, process, veneer and forming settings', () => {
+    const validSettings = {
+      rules: [
+        {
+          id: 'material-18',
+          category: 'material_thickness',
+          name: '18mm base board',
+          thicknessMm: 18,
+          unit: 'sqm',
+          unitPrice: 168,
+          enabled: true,
+        },
+        {
+          id: 'process-mixed-oil',
+          category: 'finish',
+          name: 'mixed oil',
+          finishType: 'mixed_oil',
+          unit: 'sqm',
+          unitPrice: 95,
+          enabled: true,
+        },
+        {
+          id: 'veneer-06',
+          category: 'veneer',
+          name: '0.6mm veneer',
+          finishType: 'veneer',
+          veneerThicknessMm: 0.6,
+          unit: 'sqm',
+          unitPrice: 120,
+          enabled: true,
+        },
+        {
+          id: 'forming-pressing',
+          category: 'forming',
+          name: 'anti-deformation pressing',
+          formingMethod: 'pressing',
+          unit: 'sqm',
+          unitPrice: 210,
+          enabled: true,
+        },
+      ],
+    };
+
+    expect(unitPriceSettingsSchema.safeParse(validSettings).success).toBe(true);
+  });
+
+  it('should reject invalid unit price rule amounts and category-specific thickness', () => {
+    expect(
+      unitPriceSettingsSchema.safeParse({
+        rules: [
+          {
+            id: 'bad-price',
+            category: 'process',
+            name: 'edge detail',
+            unit: 'm',
+            unitPrice: -1,
+            enabled: true,
+          },
+        ],
+      }).success
+    ).toBe(false);
+
+    expect(
+      unitPriceSettingsSchema.safeParse({
+        rules: [
+          {
+            id: 'bad-veneer',
+            category: 'veneer',
+            name: 'veneer without thickness',
+            finishType: 'veneer',
+            unit: 'sqm',
+            unitPrice: 80,
+            enabled: true,
+          },
+        ],
+      }).success
+    ).toBe(false);
   });
 });

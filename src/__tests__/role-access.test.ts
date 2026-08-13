@@ -53,7 +53,7 @@ describe('role access rules', () => {
     expect(hrefs).toContain('/worker');
     expect(hrefs).toContain('/progress');
     expect(hrefs).toContain('/orders/exchanges');
-    expect(getLandingPath(user)).toBe('/orders/exchanges');
+    expect(getLandingPath(user)).toBe('/orders');
   });
 
   it('rejects settings and exchange paths without matching permission', () => {

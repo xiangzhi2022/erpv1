@@ -9,6 +9,7 @@ import {
   Palette,
   Shield,
   Building2,
+  CircleDollarSign,
   Users,
   KeyRound,
   Settings2,
@@ -37,6 +38,11 @@ const sidebarNavItems = [
     title: '公司信息',
     href: '/settings/company',
     icon: Building2,
+  },
+  {
+    title: '单价设置',
+    href: '/settings/unit-prices',
+    icon: CircleDollarSign,
   },
   {
     title: '用户管理',

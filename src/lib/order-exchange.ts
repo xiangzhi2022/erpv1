@@ -7,10 +7,10 @@ export type OrderExchangeStatus =
   | 'accepted'
   | 'change_requested'
   | 'rejected'
-  | 'cancelled'
+  | 'withdrawn'
   | 'completed';
 
-export type OrderExchangeAction = 'send' | 'accept' | 'request_change' | 'reject' | 'cancel';
+export type OrderExchangeAction = 'send' | 'accept' | 'request_change' | 'reject' | 'withdraw';
 
 export interface OrderExchangeAccessRow {
   from_tenant_id: string;
@@ -24,7 +24,7 @@ export const ORDER_EXCHANGE_STATUSES: OrderExchangeStatus[] = [
   'accepted',
   'change_requested',
   'rejected',
-  'cancelled',
+  'withdrawn',
   'completed',
 ];
 
@@ -34,7 +34,7 @@ export const ORDER_EXCHANGE_STATUS_LABELS: Record<OrderExchangeStatus, string> =
   accepted: '已接受',
   change_requested: '请求修改',
   rejected: '已拒绝',
-  cancelled: '已取消',
+  withdrawn: '已撤回',
   completed: '已完成',
 };
 
@@ -43,7 +43,7 @@ const TRANSITIONS: Record<OrderExchangeAction, { from: OrderExchangeStatus[]; to
   accept: { from: ['sent', 'change_requested'], to: 'accepted' },
   request_change: { from: ['sent'], to: 'change_requested' },
   reject: { from: ['sent', 'change_requested'], to: 'rejected' },
-  cancel: { from: ['draft', 'sent', 'change_requested'], to: 'cancelled' },
+  withdraw: { from: ['draft', 'sent', 'change_requested', 'accepted'], to: 'withdrawn' },
 };
 
 export function isValidOrderExchangeStatus(status: string): status is OrderExchangeStatus {
@@ -59,7 +59,7 @@ export function canSeeExchange(user: Pick<AuthUser, 'role' | 'tenant_id'>, excha
 export function canActOnExchange(user: Pick<AuthUser, 'role' | 'tenant_id'>, exchange: OrderExchangeAccessRow, action: OrderExchangeAction): boolean {
   if (isSuperAdmin(user)) return true;
   if (!user.tenant_id) return false;
-  if (action === 'cancel') return exchange.from_tenant_id === user.tenant_id;
+  if (action === 'withdraw') return exchange.from_tenant_id === user.tenant_id;
   return exchange.to_tenant_id === user.tenant_id;
 }
 
@@ -67,4 +67,8 @@ export function nextExchangeStatus(currentStatus: OrderExchangeStatus, action: O
   const transition = TRANSITIONS[action];
   if (!transition.from.includes(currentStatus)) return null;
   return transition.to;
+}
+
+export function shouldSyncOrderOnExchangeAction(action: OrderExchangeAction): boolean {
+  return action === 'accept';
 }

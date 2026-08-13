@@ -1,6 +1,7 @@
 import { getSupabaseClient } from '@/db/client';
 import { getUserFromRequest } from '@/lib/auth';
 import { ORDER_STATUS_VALUES, canEditFinancialFields, canEditOrderContent } from '@/lib/four-level-order';
+import { isSuperAdmin } from '@/lib/role-access';
 import {
   canMutateOrderContent,
   canSeeOrder,
@@ -69,6 +70,31 @@ export async function PATCH(
     const tree = await loadOrderTree(supabase, id);
     if (!tree) return jsonError('订单不存在', 404);
     if (!canMutateOrderContent(user, tree)) return jsonError('无权操作该订单', 403);
+
+    if (body.action === 'withdraw_exchange' || body.status === 'withdrawn') {
+      let withdrawQuery = supabase
+        .from('order_exchanges')
+        .update({
+          status: 'withdrawn',
+          handled_by: user.id,
+          handled_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        })
+        .eq('order_id', id)
+        .in('status', ['draft', 'sent', 'change_requested', 'accepted'])
+        .select('id');
+
+      if (!isSuperAdmin(user)) {
+        withdrawQuery = withdrawQuery.eq('from_tenant_id', user.tenant_id || '');
+      }
+
+      const { data: withdrawnExchanges, error: withdrawError } = await withdrawQuery;
+      if (withdrawError) return jsonError(withdrawError.message, 500);
+      if (!withdrawnExchanges || withdrawnExchanges.length === 0) return jsonError('没有可撤回的订单流转', 400);
+
+      const refreshed = await loadOrderTree(supabase, id);
+      return Response.json({ success: true, data: refreshed ? sanitizeOrderTreeForUser(user, refreshed) : tree });
+    }
 
     const updateData: Record<string, unknown> = { updated_at: new Date().toISOString() };
 

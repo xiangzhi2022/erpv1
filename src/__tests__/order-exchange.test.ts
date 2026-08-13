@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import {
+  ORDER_EXCHANGE_STATUS_LABELS,
   canActOnExchange,
   canSeeExchange,
+  shouldSyncOrderOnExchangeAction,
   nextExchangeStatus,
   type OrderExchangeAccessRow,
 } from '@/lib/order-exchange';
@@ -19,19 +21,30 @@ describe('order exchange rules', () => {
     expect(canSeeExchange({ role: 'supplier_admin', tenant_id: 'supplier-1' }, exchange)).toBe(false);
   });
 
-  it('allows receiver handling and sender cancellation only', () => {
+  it('allows receiver handling and sender withdrawal only', () => {
     expect(canActOnExchange({ role: 'factory_admin', tenant_id: 'factory-1' }, exchange, 'accept')).toBe(true);
     expect(canActOnExchange({ role: 'factory_admin', tenant_id: 'factory-1' }, exchange, 'reject')).toBe(true);
     expect(canActOnExchange({ role: 'factory_admin', tenant_id: 'factory-1' }, exchange, 'request_change')).toBe(true);
     expect(canActOnExchange({ role: 'dealer_admin', tenant_id: 'dealer-1' }, exchange, 'accept')).toBe(false);
-    expect(canActOnExchange({ role: 'dealer_admin', tenant_id: 'dealer-1' }, exchange, 'cancel')).toBe(true);
+    expect(canActOnExchange({ role: 'dealer_admin', tenant_id: 'dealer-1' }, exchange, 'withdraw')).toBe(true);
   });
 
   it('validates status transitions', () => {
     expect(nextExchangeStatus('sent', 'accept')).toBe('accepted');
     expect(nextExchangeStatus('sent', 'request_change')).toBe('change_requested');
     expect(nextExchangeStatus('change_requested', 'reject')).toBe('rejected');
+    expect(nextExchangeStatus('sent', 'withdraw')).toBe('withdrawn');
+    expect(nextExchangeStatus('accepted', 'withdraw')).toBe('withdrawn');
     expect(nextExchangeStatus('accepted', 'reject')).toBeNull();
+  });
+
+  it('labels withdrawn exchanges as withdrawn', () => {
+    expect(ORDER_EXCHANGE_STATUS_LABELS.withdrawn).toBe('已撤回');
+  });
+
+  it('does not sync the order status when an exchange is withdrawn', () => {
+    expect(shouldSyncOrderOnExchangeAction('accept')).toBe(true);
+    expect(shouldSyncOrderOnExchangeAction('withdraw')).toBe(false);
   });
 
   it('lets super admin see and handle any exchange', () => {

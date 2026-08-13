@@ -24,6 +24,11 @@ export function text(value: unknown): string | null {
   return typeof value === 'string' && value.trim() ? value.trim() : null;
 }
 
+export function normalizeEmployeeAccountPhone(value: unknown): string | null {
+  const phone = text(value)?.replace(/\D/g, '') || null;
+  return phone && /^1[3-9]\d{9}$/.test(phone) ? phone : null;
+}
+
 export function stringArray(value: unknown): string[] {
   return Array.isArray(value)
     ? Array.from(new Set(value.filter((item): item is string => typeof item === 'string' && item.trim().length > 0)))
@@ -210,7 +215,7 @@ export async function ensureTenantMembership(input: {
 
 export async function createOrReuseEmployeeLoginUser(body: Record<string, unknown>, user: AuthUser): Promise<string | null> {
   const shouldCreate = body.create_account === true || Boolean(text(body.password));
-  const phone = text(body.phone);
+  const phone = normalizeEmployeeAccountPhone(body.phone);
   if (!shouldCreate) return text(body.user_id);
   if (!phone) throw new Error('创建登录账号需要填写手机号');
 

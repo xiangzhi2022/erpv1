@@ -14,7 +14,6 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Textarea } from '@/components/ui/textarea';
@@ -61,7 +60,7 @@ const STATUS_LABELS: Record<string, string> = {
   accepted: '已接受',
   change_requested: '请求修改',
   rejected: '已拒绝',
-  cancelled: '已取消',
+  withdrawn: '已撤回',
   completed: '已完成',
 };
 
@@ -70,7 +69,7 @@ const STATUS_VARIANTS: Record<string, 'default' | 'secondary' | 'destructive' | 
   accepted: 'default',
   change_requested: 'secondary',
   rejected: 'destructive',
-  cancelled: 'outline',
+  withdrawn: 'outline',
   completed: 'secondary',
 };
 
@@ -168,8 +167,14 @@ export default function OrderExchangesPage() {
     }
   };
 
-  const act = async (exchange: Exchange, action: 'accept' | 'request_change' | 'reject' | 'cancel') => {
-    const message = action === 'request_change' ? window.prompt('请输入修改要求') : action === 'reject' ? window.prompt('请输入拒绝原因（可选）') : '';
+  const act = async (exchange: Exchange, action: 'accept' | 'request_change' | 'reject' | 'withdraw') => {
+    const message = action === 'request_change'
+      ? window.prompt('请输入修改要求')
+      : action === 'reject'
+        ? window.prompt('请输入拒绝原因（可选）')
+        : action === 'withdraw'
+          ? window.prompt('请输入撤回原因（可选），订单内容会保留，可继续修改或重新流转')
+          : '';
     if (message === null) return;
 
     try {
@@ -180,7 +185,7 @@ export default function OrderExchangesPage() {
       });
       const data = await response.json();
       if (data.success) {
-        toast.success('订单流转已更新');
+        toast.success(action === 'withdraw' ? '订单流转已撤回，订单内容已保留' : '订单流转已更新');
         fetchExchanges();
       } else {
         toast.error(data.error || '操作失败');
@@ -195,7 +200,7 @@ export default function OrderExchangesPage() {
       <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
         <div>
           <h1 className="text-2xl font-bold tracking-tight">订单流转</h1>
-          <p className="mt-1 text-sm text-muted-foreground">处理企业之间的订单发起、接收、修改请求和拒绝。</p>
+          <p className="mt-1 text-sm text-muted-foreground">处理企业之间的订单发起、接收、修改请求、拒绝和撤回。</p>
         </div>
         <div className="flex gap-2">
           <Button variant="outline" onClick={fetchExchanges} disabled={loading}>
@@ -256,7 +261,7 @@ export default function OrderExchangesPage() {
                       {exchange.order?.order_no || exchange.order_id}
                     </CardTitle>
                     <CardDescription className="mt-1">
-                      {exchange.order?.customer_name || '未知客户'} · {tenantName(exchange.from_tenant)} → {tenantName(exchange.to_tenant)}
+                      {exchange.order?.customer_name || '未知订单'} · {tenantName(exchange.from_tenant)} → {tenantName(exchange.to_tenant)}
                     </CardDescription>
                   </div>
                   <Badge variant={STATUS_VARIANTS[exchange.status] || 'outline'}>
@@ -294,8 +299,8 @@ export default function OrderExchangesPage() {
                     <XCircle className="mr-1 h-4 w-4" />
                     拒绝
                   </Button>
-                  <Button size="sm" variant="outline" onClick={() => act(exchange, 'cancel')} disabled={!['draft', 'sent', 'change_requested'].includes(exchange.status)}>
-                    取消
+                  <Button size="sm" variant="outline" onClick={() => act(exchange, 'withdraw')} disabled={!['draft', 'sent', 'change_requested', 'accepted'].includes(exchange.status)}>
+                    撤回
                   </Button>
                 </div>
               </CardContent>

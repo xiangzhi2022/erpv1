@@ -104,6 +104,22 @@ function jsonError(error: string, status: number) {
   return NextResponse.json({ success: false, error }, { status });
 }
 
+async function deleteOrderChildren(supabase: ReturnType<typeof getSupabaseClient>, orderId: string) {
+  const tables = [
+    'order_item_attachments',
+    'production_tasks',
+    'order_products',
+    'order_spaces',
+    'order_items',
+    'order_modules',
+  ];
+
+  for (const table of tables) {
+    const { error } = await supabase.from(table).delete().eq('order_id', orderId);
+    if (error) throw new Error(error.message);
+  }
+}
+
 function emptyStats(): OrderStats {
   return {
     total: 0,
@@ -326,19 +342,7 @@ export async function POST(request: Request) {
     const mode: OrderMode = values.order_flow === 'dealer_to_factory' ? 'dealer' : 'factory_material';
     if (!canCreateOrderInMode(user, mode)) return jsonError('无权限创建该类型订单', 403);
 
-    const expectedTenantType = values.order_flow === 'dealer_to_factory' ? 'manufacturer' : 'material_supplier';
     const supabase = getSupabaseClient();
-
-    const { data: toTenant, error: tenantError } = await supabase
-      .from('tenants')
-      .select('id, name, company_name, tenant_type, contact_phone, status')
-      .eq('id', values.to_tenant_id)
-      .eq('tenant_type', expectedTenantType)
-      .eq('status', 'active')
-      .maybeSingle();
-
-    if (tenantError) return jsonError(tenantError.message, 500);
-    if (!toTenant) return jsonError('接收企业不存在或类型不正确', 400);
 
     if (values.parent_order_id) {
       const { data: parentOrder, error: parentError } = await supabase
@@ -354,11 +358,12 @@ export async function POST(request: Request) {
       }
     }
 
-    const { data: existing } = await supabase
+    let existingOrderNoQuery = supabase
       .from('orders')
       .select('id')
-      .eq('order_no', values.order_no.trim())
-      .maybeSingle();
+      .eq('order_no', values.order_no.trim());
+    if (values.existing_order_id) existingOrderNoQuery = existingOrderNoQuery.neq('id', values.existing_order_id);
+    const { data: existing } = await existingOrderNoQuery.maybeSingle();
     if (existing) return jsonError('订单号已存在，请重新生成', 409);
 
     let totalAmount = 0;
@@ -368,32 +373,61 @@ export async function POST(request: Request) {
       });
     });
 
-    const receiverName = toTenant.company_name || toTenant.name || values.customer_name;
-    const { data: order, error: orderError } = await supabase
-      .from('orders')
-      .insert({
-        order_no: values.order_no.trim(),
-        customer_name: values.customer_name.trim(),
-        customer_phone: values.customer_phone?.trim() || null,
-        customer_address: values.customer_address?.trim() || null,
-        status: 'pending',
-        total_amount: totalAmount,
-        delivery_date: values.delivery_date || null,
-        remark: nullableText(values.remark),
-        tenant_id: user.tenant_id,
-        target_factory_id: values.to_tenant_id,
-        dealer_id: values.order_flow === 'dealer_to_factory' ? user.tenant_id : null,
-        order_flow: values.order_flow,
-        from_tenant_id: user.tenant_id,
-        to_tenant_id: values.to_tenant_id,
-        parent_order_id: values.parent_order_id || null,
-        created_by: user.id,
-        updated_at: new Date().toISOString(),
-      })
-      .select()
-      .single();
+    const orderPayload = {
+      order_no: values.order_no.trim(),
+      customer_name: values.customer_name.trim(),
+      customer_phone: values.customer_phone?.trim() || null,
+      customer_address: values.customer_address?.trim() || null,
+      status: 'pending',
+      total_amount: totalAmount,
+      delivery_date: values.delivery_date || null,
+      remark: nullableText(values.remark),
+      tenant_id: user.tenant_id,
+      target_factory_id: values.to_tenant_id || null,
+      dealer_id: values.order_flow === 'dealer_to_factory' ? user.tenant_id : null,
+      order_flow: values.order_flow,
+      from_tenant_id: user.tenant_id,
+      to_tenant_id: values.to_tenant_id || null,
+      parent_order_id: values.parent_order_id || null,
+      updated_at: new Date().toISOString(),
+    };
 
-    if (orderError || !order) return jsonError(orderError?.message || '创建订单失败', 500);
+    let order: OrderRow;
+    const updatingExistingOrder = Boolean(values.existing_order_id);
+    if (updatingExistingOrder) {
+      const { data: existingOrder, error: existingOrderError } = await supabase
+        .from('orders')
+        .select('id, tenant_id, from_tenant_id')
+        .eq('id', values.existing_order_id)
+        .maybeSingle();
+      if (existingOrderError) return jsonError(existingOrderError.message, 500);
+      if (!existingOrder) return jsonError('订单不存在', 404);
+      if (!isSuperAdmin(user) && existingOrder.tenant_id !== user.tenant_id && existingOrder.from_tenant_id !== user.tenant_id) {
+        return jsonError('只能提交本企业订单', 403);
+      }
+
+      const { data: updatedOrder, error: updateOrderError } = await supabase
+        .from('orders')
+        .update(orderPayload)
+        .eq('id', values.existing_order_id)
+        .select()
+        .single();
+      if (updateOrderError || !updatedOrder) return jsonError(updateOrderError?.message || '更新订单失败', 500);
+      order = updatedOrder as OrderRow;
+      await deleteOrderChildren(supabase, order.id);
+    } else {
+      const { data: insertedOrder, error: orderError } = await supabase
+        .from('orders')
+        .insert({
+          ...orderPayload,
+          created_by: user.id,
+        })
+        .select()
+        .single();
+
+      if (orderError || !insertedOrder) return jsonError(orderError?.message || '创建订单失败', 500);
+      order = insertedOrder as OrderRow;
+    }
 
     try {
       const moduleInserts = values.modules.map((module, moduleIndex) => ({
@@ -533,8 +567,13 @@ export async function POST(request: Request) {
           return item.tasks.map((task, taskIndex) => {
             const taskNotes = [
               nullableText(task.construction_surface) ? `施工面：${task.construction_surface.trim()}` : null,
+              nullableText(task.handleless) && task.handleless !== '无' ? `免拉手：${task.handleless.trim()}` : null,
+              nullableText(task.craft) ? `工艺：${task.craft.trim()}` : null,
+              task.unit_price !== undefined && task.unit_price !== null ? `单价：${task.unit_price}` : null,
+              task.subtotal !== undefined && task.subtotal !== null ? `小计：${task.subtotal}` : null,
               nullableText(task.hardware) ? `五金：${task.hardware.trim()}` : null,
               task.hardware_quantity !== undefined && task.hardware_quantity !== null ? `五金数量：${task.hardware_quantity}` : null,
+              task.attachments.length > 0 ? `附件：${task.attachments.map((attachment) => attachment.file_name).join('、')}` : null,
               nullableText(task.remark),
             ].filter(Boolean).join('\n');
 
@@ -542,7 +581,7 @@ export async function POST(request: Request) {
               order_id: order.id,
               space_id: insertedSpace.id,
               product_id: insertedProduct.id,
-              tenant_id: values.to_tenant_id,
+              tenant_id: values.to_tenant_id || null,
               task_no: `${productNo}-T${String(taskIndex + 1).padStart(2, '0')}`,
               task_type: task.task_type,
               task_name: task.task_name.trim(),
@@ -582,7 +621,7 @@ export async function POST(request: Request) {
           const insertedItem = itemByNo.get(itemNo);
           if (!insertedItem) return [];
 
-          return item.attachments.map((attachment) => ({
+          const itemAttachments = item.attachments.map((attachment) => ({
             order_id: order.id,
             module_id: insertedModule.id,
             order_item_id: insertedItem.id,
@@ -594,6 +633,23 @@ export async function POST(request: Request) {
             file_size: attachment.file_size || null,
             uploaded_by: user.id,
           }));
+          const taskAttachments = item.tasks.flatMap((task, taskIndex) => {
+            const taskNo = `${values.order_no.trim()}-${moduleIndex + 1}-${taskIndex + 1}`;
+            return task.attachments.map((attachment) => ({
+              order_id: order.id,
+              module_id: insertedModule.id,
+              order_item_id: insertedItem.id,
+              tenant_id: user.tenant_id,
+              file_name: `${taskNo} ${attachment.file_name}`,
+              file_path: attachment.file_path,
+              file_url: attachment.file_url,
+              file_type: attachment.file_type || null,
+              file_size: attachment.file_size || null,
+              uploaded_by: user.id,
+            }));
+          });
+
+          return [...itemAttachments, ...taskAttachments];
         });
       });
 
@@ -603,16 +659,6 @@ export async function POST(request: Request) {
           .insert(attachmentInserts);
         if (attachmentError) throw new Error(attachmentError.message);
       }
-
-      await supabase.from('order_exchanges').insert({
-        order_id: order.id,
-        from_tenant_id: user.tenant_id,
-        to_tenant_id: values.to_tenant_id,
-        from_user_id: user.id,
-        status: 'sent',
-        message: nullableText(values.remark),
-        updated_at: new Date().toISOString(),
-      });
 
       const { data: fullOrder, error: fullError } = await supabase
         .from('orders')
@@ -624,7 +670,8 @@ export async function POST(request: Request) {
       const hydrated = await hydrateOrders(supabase, [fullOrder as OrderRow]);
       return NextResponse.json({ success: true, data: hydrated[0] || fullOrder });
     } catch (nestedError) {
-      await supabase.from('orders').delete().eq('id', order.id);
+      if (updatingExistingOrder) await deleteOrderChildren(supabase, order.id);
+      else await supabase.from('orders').delete().eq('id', order.id);
       throw nestedError;
     }
   } catch (error) {

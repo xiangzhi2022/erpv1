@@ -6,6 +6,7 @@ import {
   canSeeExchange,
   isValidOrderExchangeStatus,
   nextExchangeStatus,
+  shouldSyncOrderOnExchangeAction,
   type OrderExchangeAction,
   type OrderExchangeStatus,
 } from '@/lib/order-exchange';
@@ -16,6 +17,7 @@ interface ExchangeRow {
   from_tenant_id: string;
   to_tenant_id: string;
   status: OrderExchangeStatus;
+  message: string | null;
 }
 
 function jsonError(error: string, status: number) {
@@ -23,7 +25,7 @@ function jsonError(error: string, status: number) {
 }
 
 function isAction(value: unknown): value is OrderExchangeAction {
-  return value === 'send' || value === 'accept' || value === 'request_change' || value === 'reject' || value === 'cancel';
+  return value === 'send' || value === 'accept' || value === 'request_change' || value === 'reject' || value === 'withdraw';
 }
 
 export async function PATCH(
@@ -41,7 +43,7 @@ export async function PATCH(
     const supabase = getSupabaseClient();
     const { data: exchange, error: fetchError } = await supabase
       .from('order_exchanges')
-      .select('id, order_id, from_tenant_id, to_tenant_id, status')
+      .select('id, order_id, from_tenant_id, to_tenant_id, status, message')
       .eq('id', id)
       .maybeSingle();
 
@@ -63,9 +65,15 @@ export async function PATCH(
       updated_at: new Date().toISOString(),
     };
 
-    if (message) updateData.message = message;
+    if (message) {
+      updateData.message = body.action === 'withdraw' && row.message
+        ? `${row.message}\n撤回原因：${message}`
+        : body.action === 'withdraw'
+          ? `撤回原因：${message}`
+          : message;
+    }
     if (body.action === 'request_change' && proposedChanges) updateData.proposed_changes = proposedChanges;
-    if (body.action === 'accept' || body.action === 'request_change' || body.action === 'reject') {
+    if (body.action === 'accept' || body.action === 'request_change' || body.action === 'reject' || body.action === 'withdraw') {
       updateData.handled_by = user.id;
       updateData.handled_at = new Date().toISOString();
     }
@@ -79,16 +87,26 @@ export async function PATCH(
 
     if (error) return jsonError(error.message, 500);
 
-    if (body.action === 'accept') {
+    if (shouldSyncOrderOnExchangeAction(body.action)) {
       await supabase
         .from('orders')
         .update({
           status: 'confirmed',
           target_factory_id: row.to_tenant_id,
+          to_tenant_id: row.to_tenant_id,
           updated_at: new Date().toISOString(),
         })
         .eq('id', row.order_id)
         .in('status', ['pending', 'returned']);
+
+      await supabase
+        .from('production_tasks')
+        .update({
+          tenant_id: row.to_tenant_id,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('order_id', row.order_id)
+        .is('tenant_id', null);
     }
 
     return NextResponse.json({ success: true, exchange: data });

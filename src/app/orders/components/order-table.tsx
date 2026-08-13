@@ -58,9 +58,9 @@ interface OrderTableProps {
 
 function counterparty(order: Order, mode: OrderMode): string {
   if (mode === 'dealer' || mode === 'factory_material') {
-    return order.to_tenant?.company_name || order.to_tenant?.name || order.customer_name || '-';
+    return order.to_tenant?.company_name || order.to_tenant?.name || '待流转';
   }
-  return order.from_tenant?.company_name || order.from_tenant?.name || order.customer_name || '-';
+  return order.from_tenant?.company_name || order.from_tenant?.name || '-';
 }
 
 function flowLabel(order: Order): string {
@@ -221,8 +221,8 @@ export function OrderTable({
                         </DropdownMenuItem>
                       ) : null}
                       {canCancelOutgoing && (order.status === 'pending' || order.status === 'confirmed') ? (
-                        <DropdownMenuItem onClick={() => onStatusChange(order.id, 'cancelled')} className="text-destructive">
-                          <XCircle className="mr-2 h-4 w-4" /> 取消订单
+                        <DropdownMenuItem onClick={() => onStatusChange(order.id, 'withdrawn')} className="text-destructive">
+                          <XCircle className="mr-2 h-4 w-4" /> 撤回流转
                         </DropdownMenuItem>
                       ) : null}
                     </DropdownMenuContent>

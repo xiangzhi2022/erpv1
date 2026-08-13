@@ -13,15 +13,15 @@ import {
 import type { OrderStatus } from '@/app/orders/schemas';
 
 describe('Order status transitions', () => {
-  it('allows pending orders to be received, returned, or cancelled', () => {
-    expect(STATUS_TRANSITIONS.pending).toEqual(new Set(['confirmed', 'returned', 'cancelled']));
+  it('allows pending orders to be received or returned without cancelling the order content', () => {
+    expect(STATUS_TRANSITIONS.pending).toEqual(new Set(['confirmed', 'returned']));
   });
 
-  it('keeps returned orders recoverable only to pending or cancelled', () => {
-    expect(STATUS_TRANSITIONS.returned).toEqual(new Set(['pending', 'cancelled']));
+  it('keeps returned orders recoverable to pending', () => {
+    expect(STATUS_TRANSITIONS.returned).toEqual(new Set(['pending']));
   });
 
-  it('keeps completed and cancelled as terminal states', () => {
+  it('keeps completed and legacy cancelled as terminal states', () => {
     expect(STATUS_TRANSITIONS.completed.size).toBe(0);
     expect(STATUS_TRANSITIONS.cancelled.size).toBe(0);
   });
@@ -188,7 +188,7 @@ describe('orderFormSchema', () => {
     to_tenant_id: '11111111-1000-4000-8000-000000000001',
     target_factory_id: '11111111-1000-4000-8000-000000000001',
     parent_order_id: '',
-    customer_name: '演示工厂一厂有限公司',
+    customer_name: '阳光花园 3 栋 1201',
     customer_phone: '',
     delivery_date: '2026-05-31',
     remark: '加急',
@@ -229,15 +229,19 @@ describe('orderFormSchema', () => {
       ...validForm,
       order_flow: 'factory_to_supplier',
       parent_order_id: '11111111-aaaa-4000-8000-000000000001',
-      customer_name: '演示供应商木材有限公司',
+      customer_name: '阳光花园 3 栋 1201 材料单',
       to_tenant_id: '11111111-3000-4000-8000-000000000001',
       target_factory_id: '11111111-3000-4000-8000-000000000001',
     }).success).toBe(true);
   });
 
-  it('rejects empty order number and receiver', () => {
+  it('allows creating an order before choosing a receiver', () => {
+    expect(orderFormSchema.safeParse({ ...validForm, to_tenant_id: '', target_factory_id: '' }).success).toBe(true);
+  });
+
+  it('rejects empty order number and order name', () => {
     expect(orderFormSchema.safeParse({ ...validForm, order_no: '' }).success).toBe(false);
-    expect(orderFormSchema.safeParse({ ...validForm, to_tenant_id: '' }).success).toBe(false);
+    expect(orderFormSchema.safeParse({ ...validForm, customer_name: '' }).success).toBe(false);
   });
 
   it('rejects empty modules', () => {

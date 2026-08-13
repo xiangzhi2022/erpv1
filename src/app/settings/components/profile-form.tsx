@@ -37,6 +37,7 @@ export function ProfileForm() {
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [avatarUrl, setAvatarUrl] = useState('');
+  const [accountId, setAccountId] = useState('');
   const [isUploadingAvatar, setIsUploadingAvatar] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
@@ -81,6 +82,7 @@ export function ProfileForm() {
         };
         form.reset(formValues);
         setInitialValues(formValues);
+        setAccountId(profile.id || '');
         setAvatarUrl(profile.avatarUrl || '');
       }
     } catch (error) {
@@ -338,6 +340,16 @@ export function ProfileForm() {
         {/* 资料表单 */}
         <Form {...form}>
           <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6">
+            <div className="grid gap-4 md:grid-cols-2">
+              <FormItem>
+                <FormLabel>账号 ID</FormLabel>
+                <FormControl>
+                  <Input readOnly value={accountId} className="bg-muted font-mono text-xs" />
+                </FormControl>
+                <FormDescription>系统生成的账号唯一标识</FormDescription>
+              </FormItem>
+            </div>
+
             <div className="grid gap-4 md:grid-cols-2">
               <FormField
                 control={form.control}

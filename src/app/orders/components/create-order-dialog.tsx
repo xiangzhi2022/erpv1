@@ -1,11 +1,12 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { ChangeEvent, ComponentProps, ReactNode, Ref } from 'react';
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import type { ChangeEvent, ClipboardEvent, ComponentProps, ReactNode, Ref } from 'react';
 import { useFieldArray, useForm, type Resolver, type SubmitHandler, type UseFormReturn } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import {
   Check,
+  Camera,
   ChevronRight,
   ChevronsUpDown,
   CircleAlert,
@@ -17,7 +18,7 @@ import {
   Package,
   Paperclip,
   Plus,
-  Sparkles,
+  RefreshCw,
   Trash2,
   Upload,
   Workflow,
@@ -36,7 +37,6 @@ import {
 import {
   Dialog,
   DialogContent,
-  DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle,
@@ -44,7 +44,6 @@ import {
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Popover, PopoverAnchor, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
-import { Progress } from '@/components/ui/progress';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Textarea } from '@/components/ui/textarea';
 import { cn } from '@/lib/utils';
@@ -62,7 +61,6 @@ import {
   type OrderPageContext,
   type OrderModuleFormValues,
   type ProductionTaskDraftFormValues,
-  type TenantOption,
 } from '../schemas';
 
 interface CreateOrderDialogProps {
@@ -89,7 +87,7 @@ interface IncompleteNode {
 }
 
 const STEPS: Array<{ id: StepId; label: string; description: string }> = [
-  { id: 'basic', label: '基础信息', description: '订单编号、工厂企业和交付要求' },
+  { id: 'basic', label: '基础信息', description: '订单编号、订单名称和交付要求' },
   { id: 'spaces', label: '空间/房间', description: '主卧、厨房、客厅等二级结构' },
   { id: 'products', label: '产品/柜体', description: '衣柜、门板、柜体和基础规格' },
   { id: 'tasks', label: '拆单任务', description: '板件、五金、工序、安装、包装' },
@@ -174,14 +172,16 @@ const HARDWARE_OPTIONS = [
   '铁件',
 ] as const;
 
+const HANDLELESS_OPTIONS = ['无', '有'] as const;
+const TASK_CRAFT_OPTIONS = ['混油', '薄木皮', '厚木皮'] as const;
+
 const TASK_NAME_OPTIONS = [
   '侧板 A',
   '背板 B',
-  '门板 C',
+  '柜门',
   '顶板',
   '底板',
   '层板',
-  '铰链 / 拉手',
   '开料拆单任务',
   '封边拆单任务',
   '打孔拆单任务',
@@ -200,8 +200,42 @@ const TASK_TYPE_LABELS: Record<(typeof PRODUCTION_TASK_TYPES)[number], string> =
   delivery: '发货',
 };
 
-function tenantName(tenant: TenantOption): string {
-  return tenant.company_name || tenant.name || tenant.id;
+const SPINNERLESS_NUMBER_INPUT_CLASS = '[appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none';
+
+const CABINET_DOOR_HINGE_RULES: Array<{ maxHeightMm: number; hingeCount: number }> = [
+  { maxHeightMm: 700, hingeCount: 2 },
+  { maxHeightMm: 900, hingeCount: 3 },
+  { maxHeightMm: 1700, hingeCount: 4 },
+  { maxHeightMm: 2200, hingeCount: 5 },
+  { maxHeightMm: Number.POSITIVE_INFINITY, hingeCount: 6 },
+];
+
+function isCabinetDoorTask(taskName: unknown, taskType: (typeof PRODUCTION_TASK_TYPES)[number] | undefined): boolean {
+  if (taskType === 'door') return true;
+  if (isBlank(taskName)) return false;
+  return /柜门|门板|房门|移门|趟门/.test(String(taskName));
+}
+
+function shouldAutoFillHingeHardware(hardware: unknown): boolean {
+  if (isBlank(hardware)) return true;
+  return /铰链|合页/.test(String(hardware));
+}
+
+function hingeCountForDoorHeight(heightMm: number): number | undefined {
+  return CABINET_DOOR_HINGE_RULES.find((rule) => heightMm <= rule.maxHeightMm)?.hingeCount;
+}
+
+function inferTaskTypeFromTaskName(value: unknown): (typeof PRODUCTION_TASK_TYPES)[number] | undefined {
+  if (isBlank(value)) return undefined;
+  const name = String(value).trim();
+  if (/发货|送货|配送/.test(name)) return 'delivery';
+  if (/包装|打包|包裹/.test(name)) return 'package';
+  if (/安装|上门|现场/.test(name)) return 'install';
+  if (/铰链|拉手|滑轨|合页|螺丝|拉篮|灯带|五金/.test(name)) return 'hardware';
+  if (/封边|开料|打孔|组装|工序|油漆|喷漆|加工|拆单/.test(name)) return 'process';
+  if (/门板|房门|柜门|移门|趟门/.test(name)) return 'door';
+  if (/侧板|背板|层板|顶板|底板|隔板|见光板|封板|板件|柜体/.test(name)) return 'board';
+  return 'process';
 }
 
 function orderFlowForMode(mode: OrderMode): OrderFormValues['order_flow'] {
@@ -291,29 +325,19 @@ function defaultTask(overrides: Partial<ProductionTaskDraftFormValues> = {}): Pr
     thickness_mm: undefined,
     area: undefined,
     material: '',
+    handleless: '无',
+    craft: '',
     color: '',
     process_name: '',
     construction_surface: '',
+    unit_price: undefined,
+    subtotal: undefined,
     hardware: '',
     hardware_quantity: undefined,
     remark: '',
     attachments: [],
     ...overrides,
   };
-}
-
-function cabinetTasks(): ProductionTaskDraftFormValues[] {
-  return [
-    defaultTask({ task_type: 'board', task_name: '侧板 A', quantity: 2, unit: '块', process_name: '开料' }),
-    defaultTask({ task_type: 'board', task_name: '背板 B', quantity: 1, unit: '块', process_name: '开料' }),
-    defaultTask({ task_type: 'door', task_name: '门板 C', quantity: 2, unit: '扇', process_name: '门板加工' }),
-    defaultTask({ task_type: 'hardware', task_name: '铰链 / 拉手', quantity: 1, unit: '套', hardware: '铰链、拉手' }),
-    defaultTask({ task_type: 'process', task_name: '开料拆单任务', quantity: 1, unit: '项', process_name: '开料' }),
-    defaultTask({ task_type: 'process', task_name: '封边拆单任务', quantity: 1, unit: '项', process_name: '封边' }),
-    defaultTask({ task_type: 'process', task_name: '打孔拆单任务', quantity: 1, unit: '项', process_name: '打孔' }),
-    defaultTask({ task_type: 'process', task_name: '组装拆单任务', quantity: 1, unit: '项', process_name: '组装' }),
-    defaultTask({ task_type: 'package', task_name: '包装拆单任务', quantity: 1, unit: '项', process_name: '包装' }),
-  ];
 }
 
 function defaultItem(): OrderItemFormValues {
@@ -349,22 +373,6 @@ function defaultModule(name = '主卧室'): OrderModuleFormValues {
   };
 }
 
-function cabinetModule(): OrderModuleFormValues {
-  return {
-    module_name: '主卧',
-    remark: '',
-    items: [{
-      ...defaultItem(),
-      product_name: '衣柜',
-      product_type: '衣柜',
-      specification: '全屋定制柜体',
-      material: '多层板',
-      unit: '套',
-      tasks: cabinetTasks(),
-    }],
-  };
-}
-
 function emptyForm(mode: OrderMode): OrderFormValues {
   return {
     order_no: '',
@@ -372,6 +380,7 @@ function emptyForm(mode: OrderMode): OrderFormValues {
     to_tenant_id: '',
     target_factory_id: '',
     parent_order_id: '',
+    existing_order_id: '',
     customer_name: '',
     customer_phone: '',
     customer_address: '',
@@ -391,6 +400,48 @@ function countTasks(modules: OrderModuleFormValues[]): number {
   ), 0);
 }
 
+function hasProductEntry(item: OrderItemFormValues): boolean {
+  const hasTextValue = [
+    item.product_name,
+    item.specification,
+    item.material,
+    item.woodworking_craft,
+    item.forming_craft,
+    item.painting_craft,
+    item.color,
+    item.hardware,
+    item.construction_surface,
+    item.remark,
+  ].some((value) => !isBlank(value));
+  const hasSizeValue = [item.length_mm, item.width_mm, item.thickness_mm, item.hardware_quantity].some((value) => hasPositiveNumber(value));
+  return hasTextValue || hasSizeValue || item.attachments.length > 0;
+}
+
+function hasTaskEntry(task: ProductionTaskDraftFormValues): boolean {
+  const hasTextValue = [
+    task.task_name,
+    task.task_code,
+    task.material,
+    task.color,
+    task.process_name,
+    task.construction_surface,
+    task.hardware,
+    task.remark,
+  ].some((value) => !isBlank(value));
+  const hasSizeValue = [task.length_mm, task.width_mm, task.thickness_mm, task.area, task.hardware_quantity].some((value) => hasPositiveNumber(value));
+  return hasTextValue || hasSizeValue || task.attachments.length > 0;
+}
+
+function countConstructionEntries(modules: OrderModuleFormValues[]): number {
+  return modules.reduce((sum, module) => (
+    sum + module.items.reduce((itemSum, item) => {
+      const taskCount = item.tasks.filter(hasTaskEntry).length;
+      if (taskCount > 0) return itemSum + taskCount;
+      return itemSum + (hasProductEntry(item) ? 1 : 0);
+    }, 0)
+  ), 0);
+}
+
 function countAttachments(modules: OrderModuleFormValues[]): number {
   return modules.reduce((sum, module) => (
     sum + module.items.reduce((itemSum, item) => itemSum + item.attachments.length, 0)
@@ -404,18 +455,6 @@ function selectedNodeKey(node: SelectedNode): string {
   return `task:${node.moduleIndex}:${node.itemIndex}:${node.taskIndex}`;
 }
 
-function selectedNodeLabel(node: SelectedNode, values: OrderFormValues): string {
-  if (node.type === 'order') return '订单基础信息';
-  const orderModule = values.modules[node.moduleIndex];
-  const spaceLabel = orderModule?.module_name || `空间 #${node.moduleIndex + 1}`;
-  if (node.type === 'space') return spaceLabel;
-  const item = orderModule?.items[node.itemIndex];
-  const productLabel = item?.product_name || `产品 #${node.itemIndex + 1}`;
-  if (node.type === 'product') return `${spaceLabel} / ${productLabel}`;
-  const task = item?.tasks[node.taskIndex];
-  return `${spaceLabel} / ${productLabel} / ${task?.task_name || `拆单任务 #${node.taskIndex + 1}`}`;
-}
-
 function compactStepForStep(step: StepId): CompactStepId {
   if (step === 'attachments' || step === 'confirm') return step;
   if (step === 'basic') return 'basic';
@@ -425,8 +464,7 @@ function compactStepForStep(step: StepId): CompactStepId {
 function missingForOrder(values: OrderFormValues): string[] {
   const missing: string[] = [];
   if (isBlank(values.order_no)) missing.push('订单编号');
-  if (isBlank(values.to_tenant_id)) missing.push('工厂企业');
-  if (isBlank(values.customer_name)) missing.push('客户名称');
+  if (isBlank(values.customer_name)) missing.push('订单名称');
   return missing;
 }
 
@@ -557,19 +595,15 @@ function cloneModules(modules: OrderModuleFormValues[]): OrderModuleFormValues[]
 export function CreateOrderDialog({
   open,
   mode,
-  partnerLabel,
   parentOrders,
   currentUser,
   onOpenChange,
   onSuccess,
 }: CreateOrderDialogProps) {
-  const [partners, setPartners] = useState<TenantOption[]>([]);
-  const [partnerOpen, setPartnerOpen] = useState(false);
-  const [partnerSearch, setPartnerSearch] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [generatingOrderNo, setGeneratingOrderNo] = useState(false);
-  const [selectedPartnerName, setSelectedPartnerName] = useState('');
-  const [showIncompleteDetails, setShowIncompleteDetails] = useState(false);
+  const [savingBasicOrder, setSavingBasicOrder] = useState(false);
+  const [savedOrderId, setSavedOrderId] = useState('');
   const [activeStep, setActiveStep] = useState<StepId>('basic');
   const [selectedNode, setSelectedNode] = useState<SelectedNode>({ type: 'order' });
   const [selectedModuleIndex, setSelectedModuleIndex] = useState(0);
@@ -593,6 +627,7 @@ export function CreateOrderDialog({
   const selectedItem = selectedModule?.items[safeItemIndex];
   const activeStepIndex = STEPS.findIndex((step) => step.id === activeStep);
   const compactStep = compactStepForStep(activeStep);
+  const recorderName = currentUser?.name || currentUser?.phone || '';
   const normalizedSelectedNode = normalizeSelectedNode(selectedNode, watchedModules);
   const incompleteNodes = mergeIncompleteNodes(collectIncompleteNodes(watchedValues));
   const incompleteCount = incompleteNodes.length;
@@ -604,12 +639,6 @@ export function CreateOrderDialog({
       }, 0);
     }, 0);
   }, [watchedModules]);
-
-  const progressValue = Math.round(((activeStepIndex + 1) / STEPS.length) * 100);
-
-  useEffect(() => {
-    if (incompleteCount === 0) setShowIncompleteDetails(false);
-  }, [incompleteCount]);
 
   const selectStructureNode = useCallback((node: SelectedNode) => {
     setSelectedNode(node);
@@ -647,15 +676,6 @@ export function CreateOrderDialog({
     if (nextNode) selectStructureNode(normalizeSelectedNode(nextNode, nextModules));
   }, [form, selectStructureNode]);
 
-  const fetchPartners = useCallback(async (search?: string) => {
-    const params = new URLSearchParams({ mode });
-    if (search) params.set('search', search);
-    const response = await fetch(`/api/order-partners?${params.toString()}`);
-    const data = await response.json();
-    if (data.success) setPartners(data.partners || []);
-    else toast.error(data.error || '获取协作企业失败');
-  }, [mode]);
-
   const generateOrderNo = useCallback(async () => {
     setGeneratingOrderNo(true);
     try {
@@ -679,14 +699,13 @@ export function CreateOrderDialog({
   useEffect(() => {
     if (!open) return;
     form.reset(emptyForm(mode));
-    setSelectedPartnerName('');
+    setSavedOrderId('');
     setActiveStep('basic');
     setSelectedNode({ type: 'order' });
     setSelectedModuleIndex(0);
     setSelectedItemIndex(0);
-    fetchPartners();
     generateOrderNo();
-  }, [fetchPartners, form, generateOrderNo, mode, open]);
+  }, [form, generateOrderNo, mode, open]);
 
   useEffect(() => {
     const normalized = normalizeSelectedNode(selectedNode, watchedModules);
@@ -694,23 +713,6 @@ export function CreateOrderDialog({
       selectStructureNode(normalized);
     }
   }, [selectStructureNode, selectedNode, watchedModules]);
-
-  const selectPartner = (partner: TenantOption) => {
-    form.setValue('to_tenant_id', partner.id, { shouldValidate: true });
-    form.setValue('target_factory_id', partner.id);
-    setSelectedPartnerName(tenantName(partner));
-    setPartnerOpen(false);
-    setPartnerSearch('');
-  };
-
-  const applyCabinetTemplate = () => {
-    form.setValue('modules', [cabinetModule()], { shouldDirty: true, shouldValidate: true });
-    setSelectedModuleIndex(0);
-    setSelectedItemIndex(0);
-    setSelectedNode({ type: 'task', moduleIndex: 0, itemIndex: 0, taskIndex: 0 });
-    setActiveStep('tasks');
-    toast.success('已生成柜子订单拆单模板，可继续编辑');
-  };
 
   const addSpace = () => {
     const nextIndex = (form.getValues('modules') || []).length;
@@ -775,6 +777,16 @@ export function CreateOrderDialog({
     }, { type: 'task', moduleIndex, itemIndex, taskIndex });
   };
 
+  const addTaskInline = (moduleIndex: number) => {
+    updateModules((current) => {
+      const orderModule = current[moduleIndex];
+      if (!orderModule) return current;
+      if (orderModule.items.length === 0) orderModule.items.push(defaultItem());
+      orderModule.items[0]?.tasks.push(defaultTask());
+      return current;
+    }, { type: 'space', moduleIndex });
+  };
+
   const addTaskAfter = (moduleIndex: number, itemIndex: number, taskIndex: number) => {
     updateModules((current) => {
       current[moduleIndex]?.items[itemIndex]?.tasks.splice(taskIndex + 1, 0, defaultTask());
@@ -800,42 +812,58 @@ export function CreateOrderDialog({
     }, { type: 'product', moduleIndex, itemIndex });
   };
 
-  const saveDraft = () => {
-    window.localStorage.setItem(`erp-create-order-draft:${mode}`, JSON.stringify(form.getValues()));
-    toast.success('草稿已保存在当前浏览器');
+  const removeTaskInline = (moduleIndex: number, itemIndex: number, taskIndex: number) => {
+    updateModules((current) => {
+      current[moduleIndex]?.items[itemIndex]?.tasks.splice(taskIndex, 1);
+      return current;
+    }, { type: 'space', moduleIndex });
   };
 
-  const jumpToFirstIncomplete = () => {
-    const currentValues = form.getValues();
-    const first = mergeIncompleteNodes(collectIncompleteNodes(currentValues))[0];
-    if (!first) {
-      setShowIncompleteDetails(false);
-      toast.success('当前订单结构已完整');
+  const saveBasicOrder = async () => {
+    const valid = await form.trigger(['order_no', 'customer_name']);
+    if (!valid) {
+      toast.error('请先填写订单编号和订单名称');
       return;
     }
-    setShowIncompleteDetails(true);
-    selectStructureNode(first.node);
-    toast.warning(`${selectedNodeLabel(first.node, currentValues)} 缺少：${first.missing.join('、')}`);
-  };
 
-  const reviewBeforeSubmit = async () => {
-    const currentValues = form.getValues();
-    const currentIncompleteNodes = mergeIncompleteNodes(collectIncompleteNodes(currentValues));
-    if (currentIncompleteNodes.length > 0) {
-      const first = currentIncompleteNodes[0];
-      setShowIncompleteDetails(true);
-      selectStructureNode(first.node);
-      toast.warning(`还有 ${currentIncompleteNodes.length} 处未完整，请先补齐缺项`);
-      return;
+    setSavingBasicOrder(true);
+    try {
+      const values = form.getValues();
+      const response = await fetch('/api/orders/basic', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          existing_order_id: savedOrderId || undefined,
+          order_no: values.order_no,
+          order_flow: values.order_flow,
+          parent_order_id: values.parent_order_id,
+          customer_name: values.customer_name,
+          customer_phone: values.customer_phone,
+          customer_address: values.customer_address,
+          delivery_date: values.delivery_date,
+          remark: values.remark,
+        }),
+      });
+      const data = await response.json();
+      if (data.success) {
+        setSavedOrderId(data.data?.id || '');
+        onSuccess();
+        toast.success('订单已保存，可继续录入结构');
+        await goToStep('spaces');
+      } else {
+        toast.error(data.error || '保存订单失败');
+      }
+    } catch {
+      toast.error('保存订单失败，请重试');
+    } finally {
+      setSavingBasicOrder(false);
     }
-    setShowIncompleteDetails(false);
-    await goToStep('confirm');
   };
 
   const validateStep = async (step: StepId): Promise<boolean> => {
     if (step === 'basic') {
-      const valid = await form.trigger(['order_no', 'to_tenant_id', 'customer_name']);
-      if (!valid) toast.error('请先填写订单编号、接收企业和客户信息');
+      const valid = await form.trigger(['order_no', 'customer_name']);
+      if (!valid) toast.error('请先填写订单编号和订单名称');
       return valid;
     }
     if (step === 'spaces') {
@@ -949,7 +977,7 @@ export function CreateOrderDialog({
       const response = await fetch('/api/orders', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(values),
+        body: JSON.stringify({ ...values, existing_order_id: savedOrderId || undefined }),
       });
       const data = await response.json();
       if (data.success) {
@@ -971,53 +999,78 @@ export function CreateOrderDialog({
       <DialogContent className="left-3 right-3 top-3 bottom-3 h-auto max-h-none w-auto max-w-none translate-x-0 translate-y-0 grid-rows-[auto_minmax(0,1fr)] gap-0 overflow-hidden rounded-xl p-0 shadow-2xl sm:max-w-none">
         <DialogHeader className="border-b bg-background px-8 py-5">
           <div className="flex flex-col gap-4">
-            <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+            <div className="flex flex-col gap-3 pr-8 md:flex-row md:items-start md:justify-between">
               <div>
-                <DialogTitle className="text-xl">
-                  {mode === 'factory_material' ? '创建材料订单' : '创建经销商订单'}
+                <DialogTitle className="flex flex-wrap items-center gap-2 text-xl">
+                  <span>{mode === 'factory_material' ? '创建材料订单' : '创建经销商订单'}</span>
+                  {activeStep === 'spaces' ? (
+                    <>
+                      <span className="text-muted-foreground">-</span>
+                      <span className="inline-flex items-center gap-1.5">
+                        <Layers3 className="h-5 w-5" />
+                        结构录入
+                      </span>
+                    </>
+                  ) : null}
                 </DialogTitle>
-                <DialogDescription className="mt-1">
-                  左侧按订单树定位对象，右侧编辑当前选中的订单、空间、产品或拆单任务。
-                </DialogDescription>
               </div>
-              <Button type="button" variant="outline" className="gap-2" onClick={applyCabinetTemplate}>
-                <Sparkles className="h-4 w-4" />
-                柜子订单模板
-              </Button>
+              {recorderName ? (
+                <span className="text-xl font-semibold leading-none md:text-right">
+                  {recorderName}
+                </span>
+              ) : null}
             </div>
             <CompactOrderProgress
               activeStep={compactStep}
-              progressValue={progressValue}
               onSelect={goToCompactStep}
             />
+            {activeStep === 'spaces' ? (
+              <StructureOrderHeader
+                form={form}
+                modules={watchedModules}
+                onAddSpace={addSpace}
+              />
+            ) : null}
           </div>
         </DialogHeader>
 
-        <form onSubmit={form.handleSubmit(onSubmit)} className="grid min-h-0 bg-muted/10 lg:grid-cols-[360px_minmax(0,1fr)] 2xl:grid-cols-[420px_minmax(0,1fr)]">
-          <aside className="min-h-0 border-r bg-muted/30">
-            <ScrollArea className="h-[calc(100vh-216px)]">
-              <OrderStructureSidebar
-                values={watchedValues}
-                selectedNode={normalizedSelectedNode}
-                incompleteNodes={incompleteNodes}
-                receiverName={selectedPartnerName}
-                totalAmount={totalAmount}
-                onSelectNode={selectStructureNode}
-                onAddSpace={addSpace}
-                onAddSpaceAfter={addSpaceAfter}
-                onApplyCabinetTemplate={applyCabinetTemplate}
-                onRemoveSpace={removeSpace}
-                onAddProduct={addProduct}
-                onRemoveProduct={removeProduct}
-                onAddTask={(moduleIndex, itemIndex) => addTask(moduleIndex, itemIndex)}
-                onAddTaskAfter={addTaskAfter}
-                onRemoveTask={removeTask}
-              />
-            </ScrollArea>
-          </aside>
+        <form
+          onSubmit={form.handleSubmit(onSubmit)}
+          className={cn(
+            'grid min-h-0 bg-muted/10',
+            activeStep === 'spaces' ? 'grid-cols-1' : 'lg:grid-cols-[360px_minmax(0,1fr)] 2xl:grid-cols-[420px_minmax(0,1fr)]'
+          )}
+        >
+          {activeStep !== 'spaces' ? (
+            <aside className="min-h-0 border-r bg-muted/30">
+              <ScrollArea className="h-[calc(100vh-216px)]">
+                <OrderStructureSidebar
+                  values={watchedValues}
+                  selectedNode={normalizedSelectedNode}
+                  incompleteNodes={incompleteNodes}
+                  totalAmount={totalAmount}
+                  onSelectNode={selectStructureNode}
+                  onAddSpace={addSpace}
+                  onAddSpaceAfter={addSpaceAfter}
+                  onRemoveSpace={removeSpace}
+                  onAddProduct={addProduct}
+                  onRemoveProduct={removeProduct}
+                  onAddTask={(moduleIndex, itemIndex) => addTask(moduleIndex, itemIndex)}
+                  onAddTaskAfter={addTaskAfter}
+                  onRemoveTask={removeTask}
+                />
+              </ScrollArea>
+            </aside>
+          ) : null}
 
           <div className="flex min-h-0 flex-col bg-background">
-            <ScrollArea className="h-[calc(100vh-288px)]">
+            <ScrollArea
+              className={cn(
+                activeStep === 'spaces'
+                  ? 'h-[calc(100vh-374px)]'
+                  : 'h-[calc(100vh-288px)]'
+              )}
+            >
               <div className="w-full space-y-6 p-5 xl:p-8">
                 {activeStep === 'attachments' ? (
                   <AttachmentsStep
@@ -1033,29 +1086,29 @@ export function CreateOrderDialog({
                   />
                 ) : null}
 
-                {activeStep !== 'attachments' && activeStep !== 'confirm' ? (
+                {activeStep === 'spaces' ? (
+                  <StructureSpreadsheetStep
+                    form={form}
+                    modules={watchedModules}
+                    onAddTask={addTaskInline}
+                    onRemoveTask={removeTaskInline}
+                    onRemoveSpace={removeSpace}
+                    onSelectNode={selectStructureNode}
+                  />
+                ) : null}
+
+                {activeStep !== 'spaces' && activeStep !== 'attachments' && activeStep !== 'confirm' ? (
                   <NodeEditorPanel
                     form={form}
                     mode={mode}
-                    partnerLabel={partnerLabel}
                     parentOrders={parentOrders}
-                    partners={partners}
-                    partnerOpen={partnerOpen}
-                    partnerSearch={partnerSearch}
                     generatingOrderNo={generatingOrderNo}
-                    selectedPartnerName={selectedPartnerName}
-                    currentUser={currentUser}
+                    savingBasicOrder={savingBasicOrder}
                     selectedNode={normalizedSelectedNode}
                     modules={watchedModules}
-                    onPartnerOpenChange={setPartnerOpen}
-                    onPartnerSearchChange={(value) => {
-                      setPartnerSearch(value);
-                      fetchPartners(value);
-                    }}
-                    onSelectPartner={selectPartner}
                     onGenerateOrderNo={generateOrderNo}
+                    onSaveBasicOrder={() => void saveBasicOrder()}
                     onAddSpace={addSpace}
-                    onApplyCabinetTemplate={applyCabinetTemplate}
                     onSelectNode={selectStructureNode}
                     onRemoveSpace={removeSpace}
                     onAddProduct={addProduct}
@@ -1071,35 +1124,23 @@ export function CreateOrderDialog({
 
             <DialogFooter className="items-center justify-between gap-3 border-t bg-background px-8 py-5 sm:justify-between">
               <div className="min-w-0 flex-1 text-sm text-muted-foreground">
-                {incompleteCount > 0 ? (
-                  <>
-                    <Button type="button" variant="outline" size="sm" onClick={jumpToFirstIncomplete}>
-                      还有 {incompleteCount} 处未完整，查看缺项
-                    </Button>
-                    {showIncompleteDetails ? (
-                      <IncompleteDetailsList
-                        values={watchedValues}
-                        incompleteNodes={incompleteNodes}
-                        onSelectNode={selectStructureNode}
-                      />
-                    ) : null}
-                  </>
-                ) : (
+                {incompleteCount === 0 ? (
                   <span className="inline-flex items-center gap-1 text-emerald-600"><CircleCheck className="h-4 w-4" />结构已完整</span>
-                )}
+                ) : null}
               </div>
               <div className="flex flex-wrap justify-end gap-2">
-                <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>取消</Button>
-                <Button type="button" variant="outline" onClick={goPrev} disabled={activeStepIndex <= 0}>上一步</Button>
-                <Button type="button" variant="outline" onClick={() => void goNext()} disabled={activeStep === 'confirm'}>下一步</Button>
-                <Button type="button" variant="outline" onClick={saveDraft}>保存草稿</Button>
-                {activeStep !== 'confirm' ? (
-                  <Button type="button" onClick={() => void reviewBeforeSubmit()}>核对提交</Button>
+                {activeStep !== 'basic' ? (
+                  <>
+                    <Button type="button" variant="outline" onClick={goPrev} disabled={activeStepIndex <= 0}>上一步</Button>
+                    <Button type="button" variant="outline" onClick={() => void goNext()} disabled={activeStep === 'confirm'}>下一步</Button>
+                  </>
                 ) : null}
-                <Button type="submit" disabled={submitting} className="min-w-[112px] gap-2">
-                  {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
-                  {submitting ? '提交中...' : '直接提交'}
-                </Button>
+                {activeStep !== 'basic' ? (
+                  <Button type="submit" disabled={submitting} className="min-w-[112px] gap-2">
+                    {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+                    {submitting ? '保存中...' : '完成录入'}
+                  </Button>
+                ) : null}
               </div>
             </DialogFooter>
           </div>
@@ -1112,100 +1153,39 @@ export function CreateOrderDialog({
 function BasicStep({
   form,
   mode,
-  partnerLabel,
   parentOrders,
-  partners,
-  partnerOpen,
-  partnerSearch,
   generatingOrderNo,
-  selectedPartnerName,
-  currentUser,
-  onPartnerOpenChange,
-  onPartnerSearchChange,
-  onSelectPartner,
+  savingBasicOrder,
   onGenerateOrderNo,
+  onSaveBasicOrder,
 }: {
   form: UseFormReturn<OrderFormValues, unknown, OrderFormValues>;
   mode: OrderMode;
-  partnerLabel: string;
   parentOrders: Order[];
-  partners: TenantOption[];
-  partnerOpen: boolean;
-  partnerSearch: string;
   generatingOrderNo: boolean;
-  selectedPartnerName: string;
-  currentUser?: OrderPageContext['currentUser'];
-  onPartnerOpenChange: (open: boolean) => void;
-  onPartnerSearchChange: (value: string) => void;
-  onSelectPartner: (partner: TenantOption) => void;
+  savingBasicOrder: boolean;
   onGenerateOrderNo: () => void;
+  onSaveBasicOrder: () => void;
 }) {
   return (
     <section className="space-y-5">
-      <StepTitle icon={<ClipboardList className="h-5 w-5" />} title="基础信息" description="先确定订单编号、接收企业和交付要求。" />
+      <StepTitle icon={<ClipboardList className="h-5 w-5" />} title="基础信息" description="先确定订单编号、订单名称和交付要求。" />
       <div className="grid gap-4 md:grid-cols-2">
         <Field label="订单编号 *" error={form.formState.errors.order_no?.message}>
           <div className="flex gap-2">
             <Input {...form.register('order_no')} className="font-mono" placeholder="订单编号" />
-            <Button type="button" variant="outline" size="icon" onClick={onGenerateOrderNo} disabled={generatingOrderNo}>
-              {generatingOrderNo ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
+            <Button
+              type="button"
+              variant="outline"
+              size="icon"
+              onClick={onGenerateOrderNo}
+              disabled={generatingOrderNo}
+              aria-label="重新生成订单编号"
+              title="重新生成订单编号"
+            >
+              {generatingOrderNo ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
             </Button>
           </div>
-        </Field>
-
-        <Field label={`${partnerLabel} *`} error={form.formState.errors.to_tenant_id?.message}>
-          <Popover open={partnerOpen} onOpenChange={onPartnerOpenChange}>
-            <PopoverTrigger asChild>
-              <Button
-                type="button"
-                variant="outline"
-                role="combobox"
-                aria-expanded={partnerOpen}
-                className="w-full justify-between font-normal"
-              >
-                {selectedPartnerName || `选择${partnerLabel}...`}
-                <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
-              </Button>
-            </PopoverTrigger>
-            <PopoverContent className="w-[380px] p-0" align="start">
-              <Command shouldFilter={false}>
-                <CommandInput
-                  placeholder={`搜索${partnerLabel}...`}
-                  value={partnerSearch}
-                  onValueChange={onPartnerSearchChange}
-                />
-                <CommandList>
-                  <CommandEmpty>未找到{partnerLabel}</CommandEmpty>
-                  <CommandGroup>
-                    {partners.map((partner) => (
-                      <CommandItem key={partner.id} value={partner.id} onSelect={() => onSelectPartner(partner)}>
-                        <Check
-                          className={cn(
-                            'mr-2 h-4 w-4',
-                            form.watch('to_tenant_id') === partner.id ? 'opacity-100' : 'opacity-0'
-                          )}
-                        />
-                        <div>
-                          <p className="font-medium">{tenantName(partner)}</p>
-                          <p className="text-xs text-muted-foreground">
-                            {partner.contact_phone || partner.contact_person || partner.tenant_type || '-'}
-                          </p>
-                        </div>
-                      </CommandItem>
-                    ))}
-                  </CommandGroup>
-                </CommandList>
-              </Command>
-            </PopoverContent>
-          </Popover>
-        </Field>
-
-        <Field label="录入账号 ID">
-          <Input readOnly value={currentUser?.id || ''} placeholder="登录账号 ID" className="bg-muted font-mono text-xs" />
-        </Field>
-
-        <Field label="录入账号中文 ID">
-          <Input readOnly value={currentUser?.name || currentUser?.phone || ''} placeholder="登录账号名称" className="bg-muted" />
         </Field>
 
         {mode === 'factory_material' ? (
@@ -1221,8 +1201,8 @@ function BasicStep({
           </Field>
         ) : null}
 
-        <Field label="客户名称 *" error={form.formState.errors.customer_name?.message}>
-          <Input {...form.register('customer_name')} placeholder="王先生 / 张女士 / 项目名称" />
+        <Field label="订单名称 *" error={form.formState.errors.customer_name?.message}>
+          <Input {...form.register('customer_name')} placeholder="小区 / 楼栋 / 门牌号 / 客户简称" />
         </Field>
 
         <Field label="客户电话">
@@ -1232,14 +1212,25 @@ function BasicStep({
         <Field label="发货地址">
           <Input {...form.register('customer_address')} placeholder="省 / 市 / 区 / 街道 / 门牌号" />
         </Field>
-
-        <Field label="交付日期">
-          <Input type="date" {...form.register('delivery_date')} />
-        </Field>
       </div>
 
-      <Field label="订单说明">
-        <Textarea {...form.register('remark')} placeholder="填写订单要求、交付说明或协作备注" />
+      <Field label="订单备注">
+        <Textarea {...form.register('remark')} placeholder="填写订单要求、交付说明或协作备注" className="min-h-32" />
+      </Field>
+
+      <Field label="交付日期">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <Input type="date" {...form.register('delivery_date')} className="w-[180px]" />
+          <Button
+            type="button"
+            onClick={onSaveBasicOrder}
+            disabled={savingBasicOrder}
+            className="min-w-[128px] bg-emerald-600 px-6 text-white shadow-sm hover:bg-emerald-700"
+          >
+            {savingBasicOrder ? <Loader2 className="mr-1 h-4 w-4 animate-spin" /> : null}
+            保存订单
+          </Button>
+        </div>
       </Field>
     </section>
   );
@@ -1250,13 +1241,11 @@ function SpacesStep({
   modules,
   selectedModuleIndex,
   onSelectModule,
-  onApplyCabinetTemplate,
 }: {
   form: UseFormReturn<OrderFormValues, unknown, OrderFormValues>;
   modules: ReturnType<typeof useFieldArray<OrderFormValues, 'modules'>>;
   selectedModuleIndex: number;
   onSelectModule: (index: number) => void;
-  onApplyCabinetTemplate: () => void;
 }) {
   return (
     <section className="space-y-5">
@@ -1264,9 +1253,6 @@ function SpacesStep({
       <div className="flex flex-wrap gap-2">
         <Button type="button" variant="outline" onClick={() => modules.append(defaultModule('自定义空间'))}>
           <Plus className="mr-1 h-4 w-4" />新增空间
-        </Button>
-        <Button type="button" variant="secondary" onClick={onApplyCabinetTemplate}>
-          <Sparkles className="mr-1 h-4 w-4" />套用柜子模板
         </Button>
       </div>
       <div className="grid gap-3">
@@ -1303,6 +1289,327 @@ function SpacesStep({
             </div>
           );
         })}
+      </div>
+    </section>
+  );
+}
+
+function StructureOrderHeader({
+  form,
+  modules,
+  onAddSpace,
+}: {
+  form: UseFormReturn<OrderFormValues, unknown, OrderFormValues>;
+  modules: OrderModuleFormValues[];
+  onAddSpace: () => void;
+}) {
+  const orderNo = form.watch('order_no');
+  const orderName = form.watch('customer_name');
+  const customerPhone = form.watch('customer_phone');
+  const deliveryDate = form.watch('delivery_date');
+  const constructionEntryCount = countConstructionEntries(modules);
+
+  return (
+    <div className="overflow-x-auto rounded-md border bg-background shadow-sm">
+      <div className="grid min-w-[980px] grid-cols-[120px_170px_100px_minmax(120px,1fr)_90px_132px_90px_112px_250px] text-sm">
+        <div className="flex items-center justify-center border-r bg-muted/30 px-2 py-2 font-medium text-foreground">订单编号</div>
+        <div className="flex min-w-0 items-center justify-center border-r px-2 py-2 font-mono text-muted-foreground">
+          <span className="block whitespace-nowrap" title={orderNo || undefined}>{orderNo || '-'}</span>
+        </div>
+        <div className="flex items-center justify-center border-r bg-muted/30 px-2 py-2 font-medium text-foreground">订单名称</div>
+        <div className="flex min-w-0 items-center justify-center border-r px-2 py-2 text-muted-foreground">
+          <span className="block truncate">{orderName || '-'}</span>
+        </div>
+        <div className="flex items-center justify-center border-r bg-muted/30 px-2 py-2 font-medium text-foreground">联系电话</div>
+        <div className="flex min-w-0 items-center justify-center border-r px-2 py-2 text-muted-foreground">
+          <span className="block whitespace-nowrap">{customerPhone || '-'}</span>
+        </div>
+        <div className="flex items-center justify-center border-r bg-muted/30 px-2 py-2 font-medium text-foreground">交付日期</div>
+        <div className="flex items-center justify-center border-r px-2 py-2 text-muted-foreground">{deliveryDate || '-'}</div>
+        <div className="min-w-0 px-2 py-1.5 text-sm font-medium text-foreground">
+          <div className="flex h-full items-center justify-end gap-3">
+            <span>生成总数：<span className="font-mono">{constructionEntryCount}</span></span>
+            <Button type="button" variant="outline" size="sm" onClick={onAddSpace} className="h-8 whitespace-nowrap">
+              <Plus className="mr-1 h-4 w-4" />新增空间
+            </Button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function StructureSpreadsheetStep({
+  form,
+  modules,
+  onAddTask,
+  onRemoveTask,
+  onRemoveSpace,
+  onSelectNode,
+}: {
+  form: UseFormReturn<OrderFormValues, unknown, OrderFormValues>;
+  modules: OrderModuleFormValues[];
+  onAddTask: (moduleIndex: number) => void;
+  onRemoveTask: (moduleIndex: number, itemIndex: number, taskIndex: number) => void;
+  onRemoveSpace: (moduleIndex: number) => void;
+  onSelectNode: (node: SelectedNode) => void;
+}) {
+  const sectionRef = useRef<HTMLElement | null>(null);
+  const orderNo = form.watch('order_no');
+  const [expandedModuleIndexes, setExpandedModuleIndexes] = useState<Set<number>>(() => new Set());
+  const [activeModuleIndex, setActiveModuleIndex] = useState<number | null>(null);
+  const activeModuleExpanded = activeModuleIndex !== null && expandedModuleIndexes.has(activeModuleIndex);
+  const moduleGridClass = 'grid min-w-[980px] grid-cols-[170px_220px_minmax(320px,1fr)_280px]';
+
+  useEffect(() => {
+    const section = sectionRef.current;
+    const viewport = section?.closest('[data-slot="scroll-area-viewport"]');
+    if (!section || !(viewport instanceof HTMLElement)) return;
+
+    const syncActiveModule = () => {
+      const expandedIndexes = Array.from(expandedModuleIndexes).sort((a, b) => a - b);
+      if (expandedIndexes.length === 0) {
+        setActiveModuleIndex(null);
+        return;
+      }
+
+      const viewportTop = viewport.getBoundingClientRect().top;
+      const stickyHeader = section.querySelector<HTMLElement>('[data-current-module-header="true"]');
+      const threshold = viewportTop + (stickyHeader?.offsetHeight || 0) + 8;
+      let nextActive = expandedIndexes[0];
+
+      for (const moduleIndex of expandedIndexes) {
+        const row = section.querySelector<HTMLElement>(`[data-module-row="${moduleIndex}"]`);
+        if (!row) continue;
+        const rowTop = row.getBoundingClientRect().top;
+        if (rowTop <= threshold) nextActive = moduleIndex;
+      }
+
+      setActiveModuleIndex((current) => (current === nextActive ? current : nextActive));
+    };
+
+    syncActiveModule();
+    viewport.addEventListener('scroll', syncActiveModule, { passive: true });
+    window.addEventListener('resize', syncActiveModule);
+    return () => {
+      viewport.removeEventListener('scroll', syncActiveModule);
+      window.removeEventListener('resize', syncActiveModule);
+    };
+  }, [expandedModuleIndexes, modules.length]);
+
+  const toggleModuleTasks = (moduleIndex: number) => {
+    const willExpand = !expandedModuleIndexes.has(moduleIndex);
+    setExpandedModuleIndexes((current) => {
+      const next = new Set(current);
+      if (next.has(moduleIndex)) next.delete(moduleIndex);
+      else next.add(moduleIndex);
+      return next;
+    });
+    if (willExpand) setActiveModuleIndex(moduleIndex);
+    else setActiveModuleIndex((current) => (current === moduleIndex ? null : current));
+  };
+
+  const addTaskAndExpand = (moduleIndex: number) => {
+    onAddTask(moduleIndex);
+    setActiveModuleIndex(moduleIndex);
+    setExpandedModuleIndexes((current) => {
+      const next = new Set(current);
+      next.add(moduleIndex);
+      return next;
+    });
+  };
+
+  const renderStickyModuleHeader = (module: OrderModuleFormValues, moduleIndex: number) => {
+    const error = form.formState.errors.modules?.[moduleIndex]?.module_name?.message;
+    const moduleOrderNo = orderNo ? `${orderNo}-${moduleIndex + 1}` : `-${moduleIndex + 1}`;
+    return (
+      <div data-current-module-header="true" className="sticky top-0 z-40 overflow-x-auto rounded-md border border-rose-200 bg-rose-50 shadow-lg">
+        <div className={cn(moduleGridClass, 'border-b text-sm')}>
+          <div className="border-r bg-rose-50 p-0 align-middle">
+            <button
+              type="button"
+              onClick={() => toggleModuleTasks(moduleIndex)}
+              className="flex h-full min-h-12 w-full items-center gap-1 px-2 py-2 text-left font-mono text-xs font-medium text-foreground hover:bg-rose-100/70"
+              aria-expanded
+              title={`${moduleOrderNo}，收起三级订单`}
+            >
+              <ChevronRight className="h-3.5 w-3.5 shrink-0 rotate-90" />
+              <span className="min-w-0 truncate">{moduleOrderNo}</span>
+            </button>
+          </div>
+          <div className="border-r bg-emerald-50/80 p-1.5">
+            <DatalistInput
+              listId={`sticky-module-${moduleIndex}`}
+              values={ORDER_MODULE_PRESETS}
+              {...form.register(`modules.${moduleIndex}.module_name`)}
+              onFocus={() => {
+                setActiveModuleIndex(moduleIndex);
+                onSelectNode({ type: 'space', moduleIndex });
+              }}
+              placeholder="空间名称"
+              className={error ? 'border-destructive' : undefined}
+            />
+            {error ? <p className="mt-1 text-xs text-destructive">{error}</p> : null}
+          </div>
+          <div className="border-r bg-emerald-50/80 p-1.5">
+            <Input
+              {...form.register(`modules.${moduleIndex}.remark`)}
+              onFocus={() => {
+                setActiveModuleIndex(moduleIndex);
+                onSelectNode({ type: 'space', moduleIndex });
+              }}
+              placeholder="备注"
+            />
+          </div>
+          <div className="bg-emerald-50/80 p-1.5">
+            <div className="flex items-center gap-1">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => addTaskAndExpand(moduleIndex)}
+                className="h-8 whitespace-nowrap"
+              >
+                <Plus className="mr-1 h-4 w-4" />新增拆单任务
+              </Button>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                disabled={modules.length <= 1}
+                onClick={() => onRemoveSpace(moduleIndex)}
+                aria-label="删除空间"
+                title="删除空间"
+              >
+                <Trash2 className="h-4 w-4 text-destructive" />
+              </Button>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  const renderModuleRow = (module: OrderModuleFormValues, moduleIndex: number, keyPrefix = 'space-row') => {
+    const error = form.formState.errors.modules?.[moduleIndex]?.module_name?.message;
+    const isExpanded = expandedModuleIndexes.has(moduleIndex);
+    const isStickyRow = activeModuleExpanded && activeModuleIndex === moduleIndex;
+    const moduleOrderNo = orderNo ? `${orderNo}-${moduleIndex + 1}` : `-${moduleIndex + 1}`;
+    if (isStickyRow) {
+      return (
+        <div data-module-row={moduleIndex} key={`${keyPrefix}-${moduleIndex}`} aria-hidden="true" className="h-12 border-b bg-emerald-50/30" />
+      );
+    }
+
+    return (
+      <div data-module-row={moduleIndex} key={`${keyPrefix}-${moduleIndex}`} className={cn(moduleGridClass, 'border-b bg-emerald-50/80 last:border-b-0')}>
+        <div className={cn('border-r p-0 transition-colors', isExpanded ? 'bg-rose-50' : 'bg-emerald-50')}>
+          <button
+            type="button"
+            onClick={() => toggleModuleTasks(moduleIndex)}
+            className="flex h-full min-h-12 w-full items-center gap-1 px-2 py-2 text-left font-mono text-xs font-medium text-foreground hover:bg-rose-100/70"
+            aria-expanded={isExpanded}
+            title={`${moduleOrderNo}，${isExpanded ? '收起三级订单' : '展开三级订单'}`}
+          >
+            <ChevronRight className={cn('h-3.5 w-3.5 shrink-0 transition-transform', isExpanded && 'rotate-90')} />
+            <span className="min-w-0 truncate">{moduleOrderNo}</span>
+          </button>
+        </div>
+        <div className="border-r bg-emerald-50/80 p-1.5">
+          <DatalistInput
+            listId={`spreadsheet-module-${keyPrefix}-${moduleIndex}`}
+            values={ORDER_MODULE_PRESETS}
+            {...form.register(`modules.${moduleIndex}.module_name`)}
+            onFocus={() => {
+              setActiveModuleIndex(moduleIndex);
+              onSelectNode({ type: 'space', moduleIndex });
+            }}
+            placeholder="空间名称"
+            className={error ? 'border-destructive' : undefined}
+          />
+          {error ? <p className="mt-1 text-xs text-destructive">{error}</p> : null}
+        </div>
+        <div className="border-r bg-emerald-50/80 p-1.5">
+          <Input
+            {...form.register(`modules.${moduleIndex}.remark`)}
+            onFocus={() => {
+              setActiveModuleIndex(moduleIndex);
+              onSelectNode({ type: 'space', moduleIndex });
+            }}
+            placeholder="备注"
+          />
+        </div>
+        <div className="bg-emerald-50/80 p-1.5">
+          <div className="flex items-center gap-1">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => addTaskAndExpand(moduleIndex)}
+              className="h-8 whitespace-nowrap"
+            >
+              <Plus className="mr-1 h-4 w-4" />新增拆单任务
+            </Button>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              disabled={modules.length <= 1}
+              onClick={() => onRemoveSpace(moduleIndex)}
+              aria-label="删除空间"
+              title="删除空间"
+            >
+              <Trash2 className="h-4 w-4 text-destructive" />
+            </Button>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  const renderTaskRows = (module: OrderModuleFormValues, moduleIndex: number) => {
+    const isExpanded = expandedModuleIndexes.has(moduleIndex);
+    if (!isExpanded) return null;
+    const moduleOrderNo = orderNo ? `${orderNo}-${moduleIndex + 1}` : `-${moduleIndex + 1}`;
+    return (module.items[0]?.tasks || []).map((_, taskIndex) => {
+      const taskOrderNoPrefix = `${moduleOrderNo}-`;
+      const taskOrderNoSuffix = String(taskIndex + 1);
+      return (
+      <div key={`space-task-row-${moduleIndex}-${taskIndex}`} className="grid min-w-[980px] grid-cols-[170px_minmax(0,1fr)] border-b bg-muted/10">
+        <div className="flex items-center border-r px-2 py-3 font-mono text-xs text-muted-foreground">
+          <span className="whitespace-nowrap">
+            {taskOrderNoPrefix}
+            <span className="text-base font-semibold text-foreground">{taskOrderNoSuffix}</span>
+          </span>
+        </div>
+        <div className="min-w-0 p-3">
+          <TaskFields
+            form={form}
+            moduleIndex={moduleIndex}
+            itemIndex={0}
+            taskIndex={taskIndex}
+            onRemove={() => onRemoveTask(moduleIndex, 0, taskIndex)}
+          />
+        </div>
+      </div>
+      );
+    });
+  };
+
+  return (
+    <section ref={sectionRef} className="space-y-4">
+      {activeModuleExpanded && activeModuleIndex !== null && modules[activeModuleIndex]
+        ? renderStickyModuleHeader(modules[activeModuleIndex], activeModuleIndex)
+        : null}
+      <div className="overflow-x-auto rounded-md border bg-background shadow-sm">
+        <div className="min-w-[980px] text-sm">
+          {modules.map((module, moduleIndex) => (
+            <Fragment key={`space-body-${moduleIndex}`}>
+              {renderModuleRow(module, moduleIndex)}
+              {renderTaskRows(module, moduleIndex)}
+            </Fragment>
+          ))}
+        </div>
       </div>
     </section>
   );
@@ -1498,6 +1805,15 @@ function TaskFields({
   const errors = form.formState.errors.modules?.[moduleIndex]?.items?.[itemIndex]?.tasks?.[taskIndex];
   const lengthMm = form.watch(`${baseName}.length_mm`);
   const widthMm = form.watch(`${baseName}.width_mm`);
+  const quantity = form.watch(`${baseName}.quantity`);
+  const unitPrice = form.watch(`${baseName}.unit_price`);
+  const taskName = form.watch(`${baseName}.task_name`);
+  const hardware = form.watch(`${baseName}.hardware`);
+  const taskType = form.watch(`${baseName}.task_type`) as (typeof PRODUCTION_TASK_TYPES)[number] | undefined;
+  const taskTypeLabel = taskType ? TASK_TYPE_LABELS[taskType] : TASK_TYPE_LABELS.process;
+  const isDoorTask = isCabinetDoorTask(taskName, taskType);
+  const attachments = form.watch(`${baseName}.attachments`) || [];
+  const [uploading, setUploading] = useState(false);
 
   useEffect(() => {
     const areaName = `${baseName}.area` as const;
@@ -1518,92 +1834,276 @@ function TaskFields({
     }
   }, [baseName, form, lengthMm, widthMm]);
 
+  useEffect(() => {
+    const inferredType = inferTaskTypeFromTaskName(taskName);
+    if (inferredType && taskType !== inferredType) {
+      form.setValue(`${baseName}.task_type`, inferredType, { shouldDirty: true, shouldValidate: true });
+    }
+  }, [baseName, form, taskName, taskType]);
+
+  useEffect(() => {
+    const subtotalName = `${baseName}.subtotal` as const;
+    const quantityValue = optionalNumberValue(quantity);
+    const unitPriceValue = optionalNumberValue(unitPrice);
+    const currentSubtotal = optionalNumberValue(form.getValues(subtotalName));
+
+    if (quantityValue === undefined || unitPriceValue === undefined) {
+      if (currentSubtotal !== undefined) {
+        form.setValue(subtotalName, undefined, { shouldDirty: true, shouldValidate: true });
+      }
+      return;
+    }
+
+    const nextSubtotal = Number((quantityValue * unitPriceValue).toFixed(2));
+    if (currentSubtotal === undefined || Math.abs(currentSubtotal - nextSubtotal) > 0.001) {
+      form.setValue(subtotalName, nextSubtotal, { shouldDirty: true, shouldValidate: true });
+    }
+  }, [baseName, form, quantity, unitPrice]);
+
+  useEffect(() => {
+    if (!isCabinetDoorTask(taskName, taskType) || !shouldAutoFillHingeHardware(hardware)) return;
+
+    const doorHeight = optionalNumberValue(lengthMm);
+    if (doorHeight === undefined || doorHeight <= 0) return;
+
+    const hingeCount = hingeCountForDoorHeight(doorHeight);
+    if (hingeCount === undefined) return;
+
+    if (String(hardware ?? '').trim() !== '铰链') {
+      form.setValue(`${baseName}.hardware`, '铰链', { shouldDirty: true, shouldValidate: true });
+    }
+
+    const hardwareQuantityName = `${baseName}.hardware_quantity` as const;
+    const currentQuantity = optionalNumberValue(form.getValues(hardwareQuantityName));
+    if (currentQuantity !== hingeCount) {
+      form.setValue(hardwareQuantityName, hingeCount, { shouldDirty: true, shouldValidate: true });
+    }
+  }, [baseName, form, hardware, lengthMm, taskName, taskType]);
+
+  const uploadTaskFiles = async (files: File[]) => {
+    if (files.length === 0) return;
+    setUploading(true);
+    try {
+      const currentAttachments = form.getValues(`${baseName}.attachments`) || [];
+      const uploaded: OrderAttachmentFormValues[] = [];
+      for (const file of files) {
+        const formData = new FormData();
+        formData.append('file', file);
+        const response = await fetch('/api/orders/attachments', { method: 'POST', body: formData });
+        const data = await response.json();
+        if (data.success) uploaded.push(data.attachment);
+        else toast.error(data.error || `${file.name} 上传失败`);
+      }
+      if (uploaded.length > 0) {
+        form.setValue(`${baseName}.attachments`, [...currentAttachments, ...uploaded], { shouldDirty: true });
+      }
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const uploadClipboardImages = async (event: ClipboardEvent<HTMLDivElement>) => {
+    const imageFiles = Array.from(event.clipboardData.files).filter((file) => file.type.startsWith('image/'));
+    if (imageFiles.length === 0) return;
+    event.preventDefault();
+    await uploadTaskFiles(imageFiles);
+  };
+
+  const captureScreenshot = async () => {
+    if (!navigator.mediaDevices?.getDisplayMedia) {
+      toast.error('当前浏览器不支持直接截图，请先截图后 Ctrl+V 粘贴上传');
+      return;
+    }
+
+    setUploading(true);
+    let stream: MediaStream | undefined;
+    try {
+      stream = await navigator.mediaDevices.getDisplayMedia({ video: true });
+      const video = document.createElement('video');
+      video.srcObject = stream;
+      video.muted = true;
+      await video.play();
+
+      const canvas = document.createElement('canvas');
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
+      const context = canvas.getContext('2d');
+      if (!context || canvas.width === 0 || canvas.height === 0) {
+        toast.error('截图失败，请重试或使用粘贴截图');
+        return;
+      }
+
+      context.drawImage(video, 0, 0, canvas.width, canvas.height);
+      const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/png'));
+      if (!blob) {
+        toast.error('截图生成失败，请重试或使用粘贴截图');
+        return;
+      }
+
+      const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+      const file = new File([blob], `截图-${timestamp}.png`, { type: 'image/png' });
+      await uploadTaskFiles([file]);
+    } catch (error) {
+      if (error instanceof DOMException && error.name === 'NotAllowedError') return;
+      toast.error('截图失败，请重试或使用粘贴截图');
+    } finally {
+      stream?.getTracks().forEach((track) => track.stop());
+      setUploading(false);
+    }
+  };
+
   return (
-    <div className="space-y-5 rounded-lg border bg-background p-5 shadow-sm">
-      <div className="flex items-center justify-between">
-        <div className="font-medium">拆单任务 #{taskIndex + 1}</div>
-        <Button type="button" variant="ghost" size="icon" onClick={onRemove}>
-          <Trash2 className="h-4 w-4 text-destructive" />
-        </Button>
-      </div>
-      <div className="grid gap-3 md:grid-cols-12">
-        <Field className="md:col-span-3" label="拆单任务类型">
-          <select className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm" {...form.register(`${baseName}.task_type`)}>
-            {PRODUCTION_TASK_TYPES.map((type) => <option key={type} value={type}>{TASK_TYPE_LABELS[type]}</option>)}
-          </select>
-        </Field>
-        <Field className="md:col-span-3" label="拆单任务名称 *" error={errors?.task_name?.message}>
+    <div className="w-full max-w-full overflow-hidden rounded-md border bg-background p-2 shadow-sm" onPaste={uploadClipboardImages}>
+      <div className="grid w-full grid-cols-[136px_58px_58px_58px_42px_64px_58px_66px_46px_68px_52px_86px_52px_58px_64px_42px_26px_minmax(0,1fr)_30px_36px_28px] items-end gap-1">
+        <Field
+          label={(
+            <span className="flex items-center justify-between gap-2">
+              <span>任务名称 *</span>
+              <span className="rounded bg-muted px-1.5 py-0.5 text-[11px] font-normal text-muted-foreground">{taskTypeLabel}</span>
+            </span>
+          )}
+          error={errors?.task_name?.message}
+        >
+          <input type="hidden" {...form.register(`${baseName}.task_type`)} />
           <DatalistInput
             listId={`task-name-${moduleIndex}-${itemIndex}-${taskIndex}`}
             values={TASK_NAME_OPTIONS}
             {...form.register(`${baseName}.task_name`)}
             placeholder="侧板 A / 封边拆单任务"
+            compact
+            className="h-8 px-2 text-xs"
           />
         </Field>
-        <Field className="md:col-span-2" label="数量 *" error={errors?.quantity?.message}>
-          <Input type="number" min={0.01} step="0.01" {...form.register(`${baseName}.quantity`)} />
+        <Field label="长度 mm">
+          <Input className={cn(SPINNERLESS_NUMBER_INPUT_CLASS, 'h-8 px-2 text-xs')} type="number" min={0} step="0.1" {...form.register(`${baseName}.length_mm`)} />
         </Field>
-        <Field className="md:col-span-2" label="单位">
+        <Field label="宽度 mm">
+          <Input className={cn(SPINNERLESS_NUMBER_INPUT_CLASS, 'h-8 px-2 text-xs')} type="number" min={0} step="0.1" {...form.register(`${baseName}.width_mm`)} />
+        </Field>
+        <Field label="厚度 mm">
+          <Input className={cn(SPINNERLESS_NUMBER_INPUT_CLASS, 'h-8 px-2 text-xs')} type="number" min={0} step="0.1" {...form.register(`${baseName}.thickness_mm`)} />
+        </Field>
+        <Field label="数量 *" error={errors?.quantity?.message}>
+          <Input className={cn(SPINNERLESS_NUMBER_INPUT_CLASS, 'h-8 px-2 text-xs')} type="number" min={0.01} step="0.01" {...form.register(`${baseName}.quantity`)} />
+        </Field>
+        <Field label="面积">
+          <Input
+            type="number"
+            min={0}
+            step="0.0001"
+            className={cn(SPINNERLESS_NUMBER_INPUT_CLASS, 'h-8 px-2 text-xs')}
+            {...form.register(`${baseName}.area`)}
+          />
+        </Field>
+        <Field label="单位">
           <DatalistInput
             listId={`task-unit-${moduleIndex}-${itemIndex}-${taskIndex}`}
             values={ORDER_UNITS}
             {...form.register(`${baseName}.unit`)}
             placeholder="块 / 项 / 套"
+            compact
+            className="h-8 px-2 text-xs"
           />
         </Field>
-        <Field className="md:col-span-2" label="长度 mm">
-          <Input type="number" min={0} step="0.1" {...form.register(`${baseName}.length_mm`)} />
-        </Field>
-        <Field className="md:col-span-2" label="宽度 mm">
-          <Input type="number" min={0} step="0.1" {...form.register(`${baseName}.width_mm`)} />
-        </Field>
-        <Field className="md:col-span-2" label="厚度 mm">
-          <Input type="number" min={0} step="0.1" {...form.register(`${baseName}.thickness_mm`)} />
-        </Field>
-        <Field className="md:col-span-2" label="面积 (平方米)">
-          <Input
-            type="number"
-            min={0}
-            step="0.0001"
-            readOnly
-            className="bg-muted"
-            {...form.register(`${baseName}.area`)}
-          />
-        </Field>
-        <Field className="md:col-span-2" label="材质">
+        <Field label="材质">
           <DatalistInput
             listId={`task-material-${moduleIndex}-${itemIndex}-${taskIndex}`}
             values={MATERIAL_OPTIONS}
             {...form.register(`${baseName}.material`)}
             placeholder="多层板"
+            compact
+            className="h-8 px-2 text-xs"
           />
         </Field>
-        <Field className="md:col-span-2" label="颜色">
+        <Field label="免拉手">
+          {isDoorTask ? (
+            <DatalistInput
+              listId={`task-handleless-${moduleIndex}-${itemIndex}-${taskIndex}`}
+              values={HANDLELESS_OPTIONS}
+              {...form.register(`${baseName}.handleless`)}
+              placeholder="无"
+              compact
+              className="h-8 px-2 text-xs"
+            />
+          ) : (
+            <Input className="h-8 bg-muted px-2 text-xs" value="-" readOnly tabIndex={-1} />
+          )}
+        </Field>
+        <Field label="工艺">
+          <DatalistInput
+            listId={`task-craft-${moduleIndex}-${itemIndex}-${taskIndex}`}
+            values={TASK_CRAFT_OPTIONS}
+            {...form.register(`${baseName}.craft`)}
+            placeholder="混油"
+            compact
+            className="h-8 px-2 text-xs"
+          />
+        </Field>
+        <Field label="颜色">
           <DatalistInput
             listId={`task-color-${moduleIndex}-${itemIndex}-${taskIndex}`}
             values={COLOR_OPTIONS}
             {...form.register(`${baseName}.color`)}
             placeholder="暖白"
+            compact
+            className="h-8 px-2 text-xs"
           />
         </Field>
-
-        <Field className="md:col-span-3" label="施工面">
-          <DatalistInput listId={`task-surface-${moduleIndex}-${itemIndex}-${taskIndex}`} values={CONSTRUCTION_SURFACE_OPTIONS} {...form.register(`${baseName}.construction_surface`)} placeholder="一面四边" />
+        <Field label="施工面">
+          <DatalistInput listId={`task-surface-${moduleIndex}-${itemIndex}-${taskIndex}`} values={CONSTRUCTION_SURFACE_OPTIONS} {...form.register(`${baseName}.construction_surface`)} placeholder="一面四边" compact className="h-8 px-2 text-xs" />
         </Field>
-        <Field className="md:col-span-3" label="五金">
+        <Field label="单价">
+          <Input className={cn(SPINNERLESS_NUMBER_INPUT_CLASS, 'h-8 px-2 text-xs')} type="number" min={0} step="0.01" {...form.register(`${baseName}.unit_price`)} />
+        </Field>
+        <Field label="小计">
+          <Input className={cn(SPINNERLESS_NUMBER_INPUT_CLASS, 'h-8 px-2 text-xs')} type="number" min={0} step="0.01" {...form.register(`${baseName}.subtotal`)} />
+        </Field>
+        <Field label="五金">
           <DatalistInput
             listId={`task-hardware-${moduleIndex}-${itemIndex}-${taskIndex}`}
             values={HARDWARE_OPTIONS}
             {...form.register(`${baseName}.hardware`)}
             placeholder="铰链 / 拉手"
+            compact
+            className="h-8 px-2 text-xs"
           />
         </Field>
-        <Field className="md:col-span-2" label="五金数量">
-          <Input type="number" min={0} step="1" {...form.register(`${baseName}.hardware_quantity`)} />
+        <Field label="五金数">
+          <Input className={cn(SPINNERLESS_NUMBER_INPUT_CLASS, 'h-8 px-2 text-xs')} type="number" min={0} step="1" {...form.register(`${baseName}.hardware_quantity`)} />
         </Field>
-        <Field className="md:col-span-4" label="拆单任务备注">
-          <Input {...form.register(`${baseName}.remark`)} placeholder="补充要求" />
+        <Field label="备注">
+          <Input className="h-8 px-2 text-xs" {...form.register(`${baseName}.remark`)} placeholder="补充要求" />
         </Field>
+        <div aria-hidden="true" />
+        <Button
+          type="button"
+          variant="outline"
+          size="icon"
+          className="mb-0 h-8 w-8 bg-background"
+          disabled={uploading}
+          onClick={() => void captureScreenshot()}
+          title="选择屏幕或窗口截图上传"
+        >
+          <Camera className="h-3.5 w-3.5" />
+        </Button>
+        <Button type="button" variant="outline" size="icon" className="mb-0 h-8 w-10 bg-background text-xs" disabled={uploading} asChild>
+          <label className="cursor-pointer" title="上传图片、PDF，或复制截图后在本行粘贴">
+            {uploading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : attachments.length > 0 ? attachments.length : <Upload className="h-3.5 w-3.5" />}
+            <input
+              type="file"
+              multiple
+              accept="image/jpeg,image/png,image/webp,application/pdf"
+              className="hidden"
+              onChange={(event) => {
+                void uploadTaskFiles(Array.from(event.target.files || []));
+                event.currentTarget.value = '';
+              }}
+            />
+          </label>
+        </Button>
+        <Button type="button" variant="ghost" size="icon" className="mb-0 h-8 w-8 bg-background" onClick={onRemove}>
+          <Trash2 className="h-4 w-4 text-destructive" />
+        </Button>
       </div>
     </div>
   );
@@ -1772,38 +2272,30 @@ function ConfirmStep({ values, totalAmount }: { values: OrderFormValues; totalAm
 
 function CompactOrderProgress({
   activeStep,
-  progressValue,
   onSelect,
 }: {
   activeStep: CompactStepId;
-  progressValue: number;
   onSelect: (step: CompactStepId) => void;
 }) {
   return (
-    <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_180px] md:items-center">
-      <div className="grid gap-2 md:grid-cols-4">
-        {COMPACT_STEPS.map((step, index) => (
-          <button
-            key={step.id}
-            type="button"
-            onClick={() => onSelect(step.id)}
-            className={cn(
-              'rounded-md border px-3 py-2 text-left transition-colors',
-              activeStep === step.id ? 'border-primary bg-primary/5 text-primary' : 'border-border bg-background hover:bg-muted'
-            )}
-          >
-            <div className="text-sm font-medium">{index + 1}. {step.label}</div>
-            <div className="text-xs text-muted-foreground">{step.description}</div>
-          </button>
-        ))}
-      </div>
-      <div className="space-y-2">
-        <div className="flex items-center justify-between text-xs text-muted-foreground">
-          <span>录入进度</span>
-          <span>{progressValue}%</span>
-        </div>
-        <Progress value={progressValue} />
-      </div>
+    <div className="grid gap-2 md:grid-cols-4">
+      {COMPACT_STEPS.map((step, index) => (
+        <button
+          key={step.id}
+          type="button"
+          onClick={() => onSelect(step.id)}
+          className={cn(
+            'rounded-md border px-3 py-2 text-left transition-colors',
+            activeStep === step.id ? 'border-primary bg-primary/5 text-primary' : 'border-border bg-background hover:bg-muted'
+          )}
+        >
+          <div className="flex min-w-0 items-baseline gap-1.5 text-sm">
+            <span className="shrink-0 font-medium">{index + 1}. {step.label}</span>
+            <span className="shrink-0 text-muted-foreground">·</span>
+            <span className="min-w-0 truncate text-xs text-muted-foreground">{step.description}</span>
+          </div>
+        </button>
+      ))}
     </div>
   );
 }
@@ -1829,12 +2321,10 @@ function OrderStructureSidebar({
   values,
   selectedNode,
   incompleteNodes,
-  receiverName,
   totalAmount,
   onSelectNode,
   onAddSpace,
   onAddSpaceAfter,
-  onApplyCabinetTemplate,
   onRemoveSpace,
   onAddProduct,
   onRemoveProduct,
@@ -1845,12 +2335,10 @@ function OrderStructureSidebar({
   values: OrderFormValues;
   selectedNode: SelectedNode;
   incompleteNodes: IncompleteNode[];
-  receiverName: string;
   totalAmount: number;
   onSelectNode: (node: SelectedNode) => void;
   onAddSpace: () => void;
   onAddSpaceAfter: (moduleIndex: number) => void;
-  onApplyCabinetTemplate: () => void;
   onRemoveSpace: (moduleIndex: number) => void;
   onAddProduct: (moduleIndex: number) => void;
   onRemoveProduct: (moduleIndex: number, itemIndex: number) => void;
@@ -1923,9 +2411,6 @@ function OrderStructureSidebar({
         <div className="flex flex-wrap gap-2">
           <Button type="button" variant="outline" size="sm" onClick={onAddSpace}>
             <Plus className="mr-1 h-3.5 w-3.5" />空间
-          </Button>
-          <Button type="button" variant="secondary" size="sm" onClick={onApplyCabinetTemplate}>
-            <Sparkles className="mr-1 h-3.5 w-3.5" />柜子模板
           </Button>
         </div>
         <div className="flex gap-2">
@@ -2095,46 +2580,10 @@ function OrderStructureSidebar({
       </div>
 
       <SummaryBox
-        receiverName={receiverName}
         customerName={values.customer_name}
         modules={values.modules}
         totalAmount={totalAmount}
       />
-    </div>
-  );
-}
-
-function IncompleteDetailsList({
-  values,
-  incompleteNodes,
-  onSelectNode,
-}: {
-  values: OrderFormValues;
-  incompleteNodes: IncompleteNode[];
-  onSelectNode: (node: SelectedNode) => void;
-}) {
-  const visibleNodes = incompleteNodes.slice(0, 8);
-  const hiddenCount = Math.max(0, incompleteNodes.length - visibleNodes.length);
-
-  return (
-    <div className="mt-2 max-h-32 max-w-[520px] overflow-y-auto rounded-md border border-amber-200 bg-amber-50 p-2 text-xs text-amber-950 shadow-sm">
-      <div className="mb-1 font-medium">缺项清单</div>
-      <div className="space-y-1">
-        {visibleNodes.map((item) => (
-          <button
-            key={selectedNodeKey(item.node)}
-            type="button"
-            onClick={() => onSelectNode(item.node)}
-            className="block w-full rounded px-2 py-1 text-left transition hover:bg-amber-100"
-          >
-            <span className="font-medium">{selectedNodeLabel(item.node, values)}</span>
-            <span className="ml-1 text-amber-800">缺少：{item.missing.join('、')}</span>
-          </button>
-        ))}
-      </div>
-      {hiddenCount > 0 ? (
-        <div className="mt-1 px-2 text-amber-800">还有 {hiddenCount} 处缺项，继续补齐后会自动减少。</div>
-      ) : null}
     </div>
   );
 }
@@ -2180,22 +2629,14 @@ function TreeIconButton({
 function NodeEditorPanel({
   form,
   mode,
-  partnerLabel,
   parentOrders,
-  partners,
-  partnerOpen,
-  partnerSearch,
   generatingOrderNo,
-  selectedPartnerName,
-  currentUser,
+  savingBasicOrder,
   selectedNode,
   modules,
-  onPartnerOpenChange,
-  onPartnerSearchChange,
-  onSelectPartner,
   onGenerateOrderNo,
+  onSaveBasicOrder,
   onAddSpace,
-  onApplyCabinetTemplate,
   onSelectNode,
   onRemoveSpace,
   onAddProduct,
@@ -2207,22 +2648,14 @@ function NodeEditorPanel({
 }: {
   form: UseFormReturn<OrderFormValues, unknown, OrderFormValues>;
   mode: OrderMode;
-  partnerLabel: string;
   parentOrders: Order[];
-  partners: TenantOption[];
-  partnerOpen: boolean;
-  partnerSearch: string;
   generatingOrderNo: boolean;
-  selectedPartnerName: string;
-  currentUser?: OrderPageContext['currentUser'];
+  savingBasicOrder: boolean;
   selectedNode: SelectedNode;
   modules: OrderModuleFormValues[];
-  onPartnerOpenChange: (open: boolean) => void;
-  onPartnerSearchChange: (value: string) => void;
-  onSelectPartner: (partner: TenantOption) => void;
   onGenerateOrderNo: () => void;
+  onSaveBasicOrder: () => void;
   onAddSpace: () => void;
-  onApplyCabinetTemplate: () => void;
   onSelectNode: (node: SelectedNode) => void;
   onRemoveSpace: (moduleIndex: number) => void;
   onAddProduct: (moduleIndex: number) => void;
@@ -2237,18 +2670,11 @@ function NodeEditorPanel({
       <BasicStep
         form={form}
         mode={mode}
-        partnerLabel={partnerLabel}
         parentOrders={parentOrders}
-        partners={partners}
-        partnerOpen={partnerOpen}
-        partnerSearch={partnerSearch}
         generatingOrderNo={generatingOrderNo}
-        selectedPartnerName={selectedPartnerName}
-        currentUser={currentUser}
-        onPartnerOpenChange={onPartnerOpenChange}
-        onPartnerSearchChange={onPartnerSearchChange}
-        onSelectPartner={onSelectPartner}
+        savingBasicOrder={savingBasicOrder}
         onGenerateOrderNo={onGenerateOrderNo}
+        onSaveBasicOrder={onSaveBasicOrder}
       />
     );
   }
@@ -2262,7 +2688,6 @@ function NodeEditorPanel({
         onAddProduct={() => onAddProduct(selectedNode.moduleIndex)}
         onAddSpace={onAddSpace}
         onRemove={() => onRemoveSpace(selectedNode.moduleIndex)}
-        onApplyCabinetTemplate={onApplyCabinetTemplate}
       />
     );
   }
@@ -2275,7 +2700,6 @@ function NodeEditorPanel({
         moduleIndex={selectedNode.moduleIndex}
         itemIndex={selectedNode.itemIndex}
         canRemove={items.length > 1}
-        onAddTask={() => onAddTask(selectedNode.moduleIndex, selectedNode.itemIndex)}
         onCopy={() => onCopyProduct(selectedNode.moduleIndex, selectedNode.itemIndex)}
         onRemove={() => onRemoveProduct(selectedNode.moduleIndex, selectedNode.itemIndex)}
         onSelectNode={onSelectNode}
@@ -2303,7 +2727,6 @@ function SpaceNodePanel({
   onAddProduct,
   onAddSpace,
   onRemove,
-  onApplyCabinetTemplate,
 }: {
   form: UseFormReturn<OrderFormValues, unknown, OrderFormValues>;
   moduleIndex: number;
@@ -2311,7 +2734,6 @@ function SpaceNodePanel({
   onAddProduct: () => void;
   onAddSpace: () => void;
   onRemove: () => void;
-  onApplyCabinetTemplate: () => void;
 }) {
   const error = form.formState.errors.modules?.[moduleIndex]?.module_name?.message;
   const orderModule = form.watch(`modules.${moduleIndex}`);
@@ -2321,9 +2743,6 @@ function SpaceNodePanel({
       <div className="flex flex-wrap gap-2">
         <Button type="button" variant="outline" onClick={onAddProduct}>
           <Plus className="mr-1 h-4 w-4" />新增产品
-        </Button>
-        <Button type="button" variant="secondary" onClick={onApplyCabinetTemplate}>
-          <Sparkles className="mr-1 h-4 w-4" />套用柜子模板
         </Button>
         <Button type="button" variant="outline" onClick={onAddSpace}>
           <Plus className="mr-1 h-4 w-4" />新增空间
@@ -2356,7 +2775,6 @@ function ProductNodePanel({
   moduleIndex,
   itemIndex,
   canRemove,
-  onAddTask,
   onCopy,
   onRemove,
   onSelectNode,
@@ -2365,7 +2783,6 @@ function ProductNodePanel({
   moduleIndex: number;
   itemIndex: number;
   canRemove: boolean;
-  onAddTask: () => void;
   onCopy: () => void;
   onRemove: () => void;
   onSelectNode: (node: SelectedNode) => void;
@@ -2376,9 +2793,6 @@ function ProductNodePanel({
     <section className="space-y-5">
       <StepTitle icon={<Package className="h-5 w-5" />} title={productName || `产品 #${itemIndex + 1}`} description={`三级对象，归属：${spaceName || `空间 #${moduleIndex + 1}`}`} />
       <div className="flex flex-wrap gap-2">
-        <Button type="button" variant="outline" onClick={onAddTask}>
-          <Plus className="mr-1 h-4 w-4" />新增拆单任务
-        </Button>
         <Button type="button" variant="outline" onClick={onCopy}>
           <Copy className="mr-1 h-4 w-4" />复制产品
         </Button>
@@ -2444,12 +2858,10 @@ function TaskNodePanel({
 }
 
 function SummaryBox({
-  receiverName,
   customerName,
   modules,
   totalAmount,
 }: {
-  receiverName: string;
   customerName: string;
   modules: OrderModuleFormValues[];
   totalAmount: number;
@@ -2458,8 +2870,7 @@ function SummaryBox({
     <div className="space-y-3 rounded-lg border bg-background p-4 text-sm shadow-sm">
       <div className="font-medium">当前摘要</div>
       <div className="grid grid-cols-2 gap-2 text-muted-foreground">
-        <span>接收企业</span><span className="truncate text-right text-foreground">{receiverName || '-'}</span>
-        <span>客户名称</span><span className="truncate text-right text-foreground">{customerName || '-'}</span>
+        <span>订单名称</span><span className="truncate text-right text-foreground">{customerName || '-'}</span>
         <span>空间</span><span className="text-right text-foreground">{modules.length}</span>
         <span>产品</span><span className="text-right text-foreground">{countProducts(modules)}</span>
         <span>拆单任务</span><span className="text-right text-foreground">{countTasks(modules)}</span>
@@ -2494,8 +2905,9 @@ function StepTitle({ icon, title, description }: { icon: ReactNode; title: strin
 function DatalistInput({
   listId,
   values,
+  compact = false,
   ...props
-}: ComponentProps<typeof Input> & { listId: string; values: readonly string[] }) {
+}: ComponentProps<typeof Input> & { listId: string; values: readonly string[]; compact?: boolean }) {
   const inputRef = useRef<HTMLInputElement | null>(null);
   const [open, setOpen] = useState(false);
   const { ref: forwardedRef, onChange, onFocus, onClick, className, disabled, ...inputProps } = props as ComponentProps<'input'> & {
@@ -2523,7 +2935,7 @@ function DatalistInput({
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverAnchor asChild>
-        <div className="flex gap-2">
+        <div className={cn('flex', compact ? 'gap-1' : 'gap-2')}>
           <Input
             {...inputProps}
             ref={setInputRef}
@@ -2539,19 +2951,21 @@ function DatalistInput({
               if (!disabled) setOpen(true);
             }}
           />
-          <PopoverTrigger asChild>
-            <Button
-              type="button"
-              variant="outline"
-              size="icon"
-              className="h-9 w-9 shrink-0"
-              disabled={disabled}
-              title="展开选项"
-              aria-label="展开选项"
-            >
-              <ChevronsUpDown className="h-4 w-4" />
-            </Button>
-          </PopoverTrigger>
+          {!compact ? (
+            <PopoverTrigger asChild>
+              <Button
+                type="button"
+                variant="outline"
+                size="icon"
+                className="h-9 w-9 shrink-0"
+                disabled={disabled}
+                title="展开选项"
+                aria-label="展开选项"
+              >
+                <ChevronsUpDown className="h-4 w-4" />
+              </Button>
+            </PopoverTrigger>
+          ) : null}
         </div>
       </PopoverAnchor>
       <PopoverContent
@@ -2583,14 +2997,14 @@ function Field({
   className,
   children,
 }: {
-  label: string;
+  label: ReactNode;
   error?: string;
   className?: string;
   children: ReactNode;
 }) {
   return (
-    <div className={cn('space-y-1.5', className)}>
-      <Label className="text-xs">{label}</Label>
+    <div className={cn('space-y-1', className)}>
+      <Label className="text-[11px] leading-none">{label}</Label>
       {children}
       {error ? <p className="text-xs text-destructive">{error}</p> : null}
     </div>

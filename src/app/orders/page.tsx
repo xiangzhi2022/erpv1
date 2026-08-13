@@ -153,6 +153,29 @@ export default function OrdersPage() {
       return;
     }
 
+    if (status === 'withdrawn') {
+      setStatusLoading(true);
+      try {
+        const response = await fetch(`/api/orders/${orderId}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'withdraw_exchange', notes }),
+        });
+        const data = await response.json();
+        if (data.success) {
+          toast.success('订单流转已撤回，订单内容已保留');
+          await fetchOrders();
+        } else {
+          toast.error(data.error || '撤回失败');
+        }
+      } catch {
+        toast.error('撤回失败，请重试');
+      } finally {
+        setStatusLoading(false);
+      }
+      return;
+    }
+
     setStatusLoading(true);
     try {
       const response = await fetch(`/api/orders/${orderId}`, {

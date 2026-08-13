@@ -118,8 +118,9 @@ export function OrderDetailsSheet({ order, mode, open, onOpenChange, onStatusCha
               </div>
 
               <div className="grid gap-4 text-sm md:grid-cols-2">
+                <Info label="订单名称" value={order.customer_name} />
                 <Info label="发起企业" value={tenantName(order, 'from')} />
-                <Info label="接收企业" value={tenantName(order, 'to') || order.customer_name} />
+                <Info label="接收企业" value={tenantName(order, 'to') || '待流转'} />
                 <Info label="总金额" value={`¥${formatAmount(order.total_amount)}`} strong />
                 <Info label="交付日期" value={formatShortDate(order.delivery_date)} />
                 <Info label="创建时间" value={formatDate(order.created_at)} />
@@ -228,8 +229,8 @@ export function OrderDetailsSheet({ order, mode, open, onOpenChange, onStatusCha
                   </Button>
                 ) : null}
                 {canCancelOutgoing && (order.status === 'pending' || order.status === 'confirmed') ? (
-                  <Button size="sm" variant="outline" onClick={() => onStatusChange(order.id, 'cancelled')} className="text-destructive">
-                    <XCircle className="mr-1 h-4 w-4" /> 取消
+                  <Button size="sm" variant="outline" onClick={() => onStatusChange(order.id, 'withdrawn')} className="text-destructive">
+                    <XCircle className="mr-1 h-4 w-4" /> 撤回
                   </Button>
                 ) : null}
               </div>

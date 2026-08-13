@@ -23,7 +23,7 @@ import { Label } from '@/components/ui/label';
 
 type AuthMode = 'login' | 'register';
 
-const DEFAULT_REDIRECT_PATH = '/board';
+const DEFAULT_REDIRECT_PATH = '/orders';
 
 interface LoginResponse {
   success?: boolean;

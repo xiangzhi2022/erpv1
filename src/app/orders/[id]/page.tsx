@@ -389,7 +389,7 @@ function DetailPanel({ data, order, progress }: { data: SelectedData | null; ord
         <ProgressBlock value={progress} />
         <DetailGrid>
           <Detail label="订单编号" value={item.order_no} />
-          <Detail label="客户名称" value={item.customer_name} />
+          <Detail label="订单名称" value={item.customer_name} />
           <Detail label="客户电话" value={item.customer_phone} />
           <Detail label="预计交付" value={item.delivery_date || '-'} />
           <Detail label="创建时间" value={formatDate(item.created_at)} />

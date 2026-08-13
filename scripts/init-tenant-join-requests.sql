@@ -32,3 +32,6 @@ CREATE UNIQUE INDEX IF NOT EXISTS tenant_join_requests_pending_unique_idx
 
 CREATE UNIQUE INDEX IF NOT EXISTS tenant_users_unique_tenant_user_idx
   ON tenant_users(tenant_id, user_id);
+
+CREATE INDEX IF NOT EXISTS tenant_users_phone_idx ON tenant_users(phone);
+CREATE INDEX IF NOT EXISTS tenant_users_status_idx ON tenant_users(status);

@@ -1,4 +1,4 @@
-import { pgTable, serial, varchar, timestamp, boolean, integer, text, index, jsonb, uuid, numeric, date } from "drizzle-orm/pg-core"
+import { pgTable, serial, varchar, timestamp, boolean, integer, text, index, uniqueIndex, jsonb, uuid, numeric, date } from "drizzle-orm/pg-core"
 import { sql } from "drizzle-orm"
 
 // ============================================================================
@@ -44,19 +44,29 @@ export const tenants = pgTable("tenants", {
 	updated_at: timestamp("updated_at", { withTimezone: true }),
 });
 
-export const tenantUsers = pgTable("tenant_users", {
-	id: uuid("id").primaryKey().defaultRandom(),
-	tenant_id: uuid("tenant_id").notNull(),
-	user_id: uuid("user_id").notNull(),
-	phone: varchar("phone", { length: 20 }).notNull(),
-	password: varchar("password", { length: 255 }).notNull(),
-	name: varchar("name", { length: 100 }),
-	role: varchar("role", { length: 50 }).notNull().default("member"),
-	department: varchar("department", { length: 100 }),
-	status: varchar("status", { length: 20 }).notNull().default("active"),
-	created_at: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
-	updated_at: timestamp("updated_at", { withTimezone: true }),
-});
+export const tenantUsers = pgTable(
+	"tenant_users",
+	{
+		id: uuid("id").primaryKey().defaultRandom(),
+		tenant_id: uuid("tenant_id").notNull(),
+		user_id: uuid("user_id").notNull(),
+		phone: varchar("phone", { length: 20 }).notNull(),
+		password: varchar("password", { length: 255 }).notNull(),
+		name: varchar("name", { length: 100 }),
+		role: varchar("role", { length: 50 }).notNull().default("member"),
+		department: varchar("department", { length: 100 }),
+		status: varchar("status", { length: 20 }).notNull().default("active"),
+		created_at: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+		updated_at: timestamp("updated_at", { withTimezone: true }),
+	},
+	(table) => [
+		uniqueIndex("tenant_users_unique_tenant_user_idx").on(table.tenant_id, table.user_id),
+		index("tenant_users_tenant_id_idx").on(table.tenant_id),
+		index("tenant_users_user_id_idx").on(table.user_id),
+		index("tenant_users_phone_idx").on(table.phone),
+		index("tenant_users_status_idx").on(table.status),
+	]
+);
 
 export const tenantJoinRequests = pgTable(
 	"tenant_join_requests",
@@ -79,6 +89,7 @@ export const tenantJoinRequests = pgTable(
 		updated_at: timestamp("updated_at", { withTimezone: true }),
 	},
 	(table) => [
+		uniqueIndex("tenant_join_requests_pending_unique_idx").on(table.tenant_id, table.phone, table.request_type).where(sql`status = 'pending'`),
 		index("tenant_join_requests_tenant_id_idx").on(table.tenant_id),
 		index("tenant_join_requests_user_id_idx").on(table.user_id),
 		index("tenant_join_requests_phone_idx").on(table.phone),
@@ -176,6 +187,9 @@ export const employees = pgTable(
 		updated_at: timestamp("updated_at", { withTimezone: true }),
 	},
 	(table) => [
+		uniqueIndex("employees_unique_tenant_user_idx").on(table.tenant_id, table.user_id),
+		uniqueIndex("employees_unique_tenant_phone_idx").on(table.tenant_id, table.phone),
+		uniqueIndex("employees_unique_tenant_employee_no_idx").on(table.tenant_id, table.employee_no),
 		index("employees_employee_no_idx").on(table.employee_no),
 		index("employees_user_id_idx").on(table.user_id),
 		index("employees_department_id_idx").on(table.department_id),
