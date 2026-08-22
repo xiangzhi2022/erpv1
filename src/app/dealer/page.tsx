@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { Suspense, useCallback, useEffect, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Building2, ChevronLeft, ChevronRight, Plus, RotateCcw, Search } from 'lucide-react';
 import { toast } from 'sonner';
@@ -78,7 +78,7 @@ function formatDate(dateStr: string | null | undefined): string {
   });
 }
 
-export default function DealerPage() {
+function DealerPageContent() {
   const [response, setResponse] = useState<EnterpriseDirectoryResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const router = useRouter();
@@ -347,5 +347,21 @@ function DealerManagementContent() {
         onSuccess={handleSuccess}
       />
     </div>
+  );
+}
+
+export default function DealerPage() {
+  return (
+    <Suspense
+      fallback={(
+        <div role="status" aria-label="经销商页面加载中" className="space-y-4">
+          <Skeleton className="h-10 w-64" />
+          <Skeleton className="h-11 w-full" />
+          <Skeleton className="h-64 w-full" />
+        </div>
+      )}
+    >
+      <DealerPageContent />
+    </Suspense>
   );
 }

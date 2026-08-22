@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { Suspense, useEffect, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { toast } from 'sonner';
 import { ArrowLeft, Eye, EyeOff, Loader2, ShieldCheck } from 'lucide-react';
@@ -8,7 +8,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 
-export default function ResetPasswordPage() {
+function ResetPasswordPageContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
 
@@ -176,5 +176,23 @@ export default function ResetPasswordPage() {
         </div>
       </div>
     </div>
+  );
+}
+
+export default function ResetPasswordPage() {
+  return (
+    <Suspense
+      fallback={(
+        <main
+          role="status"
+          aria-label="重置密码页面加载中"
+          className="flex min-h-screen items-center justify-center bg-slate-50 text-slate-500"
+        >
+          <Loader2 className="h-6 w-6 animate-spin" aria-hidden="true" />
+        </main>
+      )}
+    >
+      <ResetPasswordPageContent />
+    </Suspense>
   );
 }

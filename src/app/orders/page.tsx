@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { Suspense, useCallback, useEffect, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Plus } from 'lucide-react';
 import { toast } from 'sonner';
@@ -47,7 +47,7 @@ function modeLabel(mode: OrderMode): string {
   return '材料商收单';
 }
 
-export default function OrdersPage() {
+function OrdersPageContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const initialMode = searchParams.get('mode') as OrderMode | null;
@@ -312,5 +312,19 @@ export default function OrdersPage() {
         loading={statusLoading}
       />
     </>
+  );
+}
+
+export default function OrdersPage() {
+  return (
+    <Suspense
+      fallback={(
+        <div role="status" aria-label="订单页面加载中">
+          <OrdersPageSkeleton />
+        </div>
+      )}
+    >
+      <OrdersPageContent />
+    </Suspense>
   );
 }

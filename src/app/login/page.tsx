@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { Suspense, useCallback, useEffect, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { toast } from 'sonner';
 import {
@@ -65,7 +65,7 @@ function GoogleIcon() {
   );
 }
 
-export default function LoginPage() {
+function LoginPageContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const [mode, setMode] = useState<AuthMode>(searchParams.get('mode') === 'register' ? 'register' : 'login');
@@ -571,5 +571,23 @@ export default function LoginPage() {
         </section>
       </div>
     </main>
+  );
+}
+
+export default function LoginPage() {
+  return (
+    <Suspense
+      fallback={(
+        <main
+          role="status"
+          aria-label="登录页面加载中"
+          className="flex min-h-screen items-center justify-center bg-[#f4efe6] text-slate-600"
+        >
+          <Loader2 className="h-6 w-6 animate-spin" aria-hidden="true" />
+        </main>
+      )}
+    >
+      <LoginPageContent />
+    </Suspense>
   );
 }
