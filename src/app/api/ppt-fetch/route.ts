@@ -127,7 +127,7 @@ export async function POST(request: NextRequest) {
   }
 
   // Production guard for external URLs
-  const isProduction = process.env.COZE_PROJECT_ENV === 'PROD';
+  const isProduction = process.env.NODE_ENV === 'production';
   const isLocalhost = url.includes('localhost') || url.includes('127.0.0.1');
   
   if (isProduction && !isLocalhost) {

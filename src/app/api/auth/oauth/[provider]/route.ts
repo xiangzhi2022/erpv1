@@ -31,7 +31,7 @@ export async function GET(
   }
 
   const clientId = process.env[config.clientIdEnv]!;
-  const domain = process.env.COZE_PROJECT_DOMAIN_DEFAULT || 'http://localhost:5000';
+  const domain = process.env.APP_URL || 'http://localhost:5000';
   const redirectUri = `${domain}/api/auth/oauth/${provider}/callback`;
   const redirectUrl = request.nextUrl.searchParams.get('redirect') || '/';
   const state = generateOAuthState(provider, redirectUrl);

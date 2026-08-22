@@ -3,8 +3,9 @@
 # 用途：AI 代码变更完成后的自动推送触发器
 set -Eeuo pipefail
 
-COZE_WORKSPACE_PATH="${COZE_WORKSPACE_PATH:-$(pwd)}"
-cd "${COZE_WORKSPACE_PATH}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="${PROJECT_ROOT:-$(cd "${SCRIPT_DIR}/.." && pwd)}"
+cd "${PROJECT_ROOT}"
 
 # 检查是否有变更（排除 .github/workflows 因为需要 workflow scope）
 if git diff --quiet && git diff --cached --quiet && [ -z "$(git ls-files --others --exclude-standard)" ]; then

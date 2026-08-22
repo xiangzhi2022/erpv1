@@ -201,7 +201,7 @@ export function buildClearSessionCookie(secure = false): string {
 }
 
 export function isProduction(): boolean {
-  return process.env.COZE_PROJECT_ENV === 'PROD';
+  return process.env.NODE_ENV === 'production';
 }
 
 export async function createSession(user: User, maxAgeMs?: number): Promise<string> {

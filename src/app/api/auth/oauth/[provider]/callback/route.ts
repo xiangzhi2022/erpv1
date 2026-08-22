@@ -166,7 +166,7 @@ export async function GET(
   }
 
   try {
-    const domain = process.env.COZE_PROJECT_DOMAIN_DEFAULT || 'http://localhost:5000';
+    const domain = process.env.APP_URL || 'http://localhost:5000';
     const redirectUri = `${domain}/api/auth/oauth/${provider}/callback`;
 
     // 1. 交换 token

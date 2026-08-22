@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { getSupabaseCredentials } from "@/db/client";
 import { getUserFromRequest } from "@/lib/auth";
 
 /** 合法的车间状态值 */
@@ -8,17 +9,21 @@ type ValidStatus = (typeof VALID_STATUSES)[number];
 function getSupabaseHeaders(
   options?: { prefer?: string }
 ): Record<string, string> {
-  const serviceKey = process.env.COZE_SUPABASE_SERVICE_ROLE_KEY;
+  const { secretKey } = getSupabaseCredentials();
+  if (!secretKey) {
+    throw new Error("SUPABASE_SECRET_KEY is required for workshop operations");
+  }
   return {
     "Content-Type": "application/json",
-    apikey: serviceKey || "",
-    Authorization: `Bearer ${serviceKey}`,
+    apikey: secretKey,
+    Authorization: `Bearer ${secretKey}`,
     Prefer: options?.prefer ?? "return=representation",
   };
 }
 
 function getSupabaseUrl(): string {
-  return `${process.env.COZE_SUPABASE_URL}/rest/v1`;
+  const { url } = getSupabaseCredentials();
+  return `${url}/rest/v1`;
 }
 
 /**

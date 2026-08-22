@@ -20,13 +20,13 @@ export async function POST(request: NextRequest) {
     const token = generateResetToken(email);
 
     // 构建重置链接
-    const domain = process.env.COZE_PROJECT_DOMAIN_DEFAULT || 'http://localhost:5000';
+    const domain = process.env.APP_URL || 'http://localhost:5000';
     const resetUrl = `${domain}/reset-password?token=${token}`;
 
     // ===== 邮件发送逻辑 =====
     // 生产环境应接入邮件服务（SMTP / SendGrid / Resend 等）
     // 当前为开发模式：将重置链接输出到控制台，方便调试
-    if (process.env.COZE_PROJECT_ENV === 'DEV') {
+    if (process.env.NODE_ENV !== 'production') {
       console.log(`[DEV] Password reset link: ${resetUrl}`);
       console.log(`[DEV] Recipient: ${email}`);
     }
@@ -77,7 +77,7 @@ export async function POST(request: NextRequest) {
       success: true,
       message: '如果该邮箱已注册，重置链接已发送',
       // 仅开发模式下返回重置链接
-      ...(process.env.COZE_PROJECT_ENV === 'DEV' ? { devResetUrl: resetUrl } : {}),
+      ...(process.env.NODE_ENV !== 'production' ? { devResetUrl: resetUrl } : {}),
     });
   } catch {
     return NextResponse.json({ success: false, error: '服务器内部错误' }, { status: 500 });

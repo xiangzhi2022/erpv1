@@ -97,7 +97,7 @@
 
 ## 数据库配置
 
-**数据库**: Supabase (环境变量 `COZE_SUPABASE_URL`)
+**数据库**: Supabase (环境变量 `NEXT_PUBLIC_SUPABASE_URL`)
 **Schema 定义**: `src/db/schema.ts` (Drizzle ORM)
 **关系定义**: `src/db/relations.ts`
 **客户端**: `src/db/client.ts` (导出 `getSupabaseClient`, `getSupabaseServiceClient`)
@@ -165,12 +165,12 @@
 
 | 变量 | 说明 |
 |------|------|
-| COZE_SUPABASE_URL | Supabase URL |
-| COZE_SUPABASE_ANON_KEY | Anon Key |
-| COZE_SUPABASE_SERVICE_ROLE_KEY | Service Role Key |
+| NEXT_PUBLIC_SUPABASE_URL | Supabase URL |
+| NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY | Publishable Key |
+| SUPABASE_SECRET_KEY | 服务端 Secret Key |
+| APP_URL | 应用对外访问地址 |
 | SKIP_CAPTCHA | 跳过验证码校验（开发用） |
 | PORT | 服务端口（默认 5000） |
-| COZE_PROJECT_DOMAIN_DEFAULT | 对外访问域名 |
 
 ### 数据库工具
 

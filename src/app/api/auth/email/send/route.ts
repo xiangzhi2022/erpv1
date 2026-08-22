@@ -39,7 +39,7 @@ export async function POST(request: NextRequest) {
     }
 
     // 仅开发模式下输出验证码到控制台
-    if (process.env.COZE_PROJECT_ENV === 'DEV') {
+    if (process.env.NODE_ENV !== 'production') {
       console.log(`[DEV] Email verification code for ${email}: ${code}`);
     }
 
@@ -49,7 +49,7 @@ export async function POST(request: NextRequest) {
       success: true,
       message: '验证码已发送到邮箱',
       // 仅在开发模式下返回验证码，生产环境绝不暴露
-      ...(process.env.COZE_PROJECT_ENV === 'DEV' ? { dev_code: code } : {}),
+      ...(process.env.NODE_ENV !== 'production' ? { dev_code: code } : {}),
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : '未知错误';

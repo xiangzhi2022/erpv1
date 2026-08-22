@@ -10,8 +10,8 @@ export async function GET() {
   if (guard) return guard;
 
   return NextResponse.json({
-    hasSupabaseUrl: !!process.env.COZE_SUPABASE_URL,
-    hasAnonKey: !!process.env.COZE_SUPABASE_ANON_KEY,
-    hasServiceKey: !!process.env.COZE_SUPABASE_SERVICE_ROLE_KEY,
+    hasSupabaseUrl: !!process.env.NEXT_PUBLIC_SUPABASE_URL,
+    hasPublishableKey: !!process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY,
+    hasSecretKey: !!process.env.SUPABASE_SECRET_KEY,
   });
 }

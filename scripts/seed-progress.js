@@ -1,11 +1,22 @@
 // Seed script for work_orders and progress_logs
-const SUPABASE_URL = 'https://cdcnjtgabgjkouavwxsl.supabase.co';
-const SERVICE_ROLE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNkY25qdGdhYmdqa291YXZ3eHNsIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3Nzg1MjM0MSwiZXhwIjoyMDkzNDI4MzQxfQ.LzvwvnkQx_lIjIjsZd8FxyXRaDwTPyiVELyTEuTacmE';
+const { config: loadDotenv } = require('dotenv');
+
+loadDotenv({ path: ['.env.local', '.env'], quiet: true });
+
+const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL;
+const SECRET_KEY = process.env.SUPABASE_SECRET_KEY;
+
+if (!SUPABASE_URL || !SECRET_KEY) {
+  throw new Error(
+    'NEXT_PUBLIC_SUPABASE_URL and SUPABASE_SECRET_KEY are required to seed progress data',
+  );
+}
+
 const TENANT_ID = 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11'; // 青崖官方
 
 const headers = {
-  apikey: SERVICE_ROLE_KEY,
-  Authorization: `Bearer ${SERVICE_ROLE_KEY}`,
+  apikey: SECRET_KEY,
+  Authorization: `Bearer ${SECRET_KEY}`,
   'Content-Type': 'application/json',
   Prefer: 'return=representation',
 };

@@ -3,8 +3,9 @@
 # 用途：AI 开始代码变更前自动从 GitHub 拉取最新代码
 set -Eeuo pipefail
 
-COZE_WORKSPACE_PATH="${COZE_WORKSPACE_PATH:-$(pwd)}"
-cd "${COZE_WORKSPACE_PATH}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="${PROJECT_ROOT:-$(cd "${SCRIPT_DIR}/.." && pwd)}"
+cd "${PROJECT_ROOT}"
 
 echo "⬇️  Pulling latest changes from origin/main..."
 

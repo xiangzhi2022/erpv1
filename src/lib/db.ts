@@ -3,7 +3,7 @@
  * 使用 Supabase REST API 直接操作数据库
  *
  * 所有凭证统一通过 @/db/client 的 getSupabaseCredentials() 获取，
- * 确保环境变量优先级、localhost 拒绝、legacy 兼容等规则一致。
+ * 确保环境变量读取和 localhost 拒绝等规则一致。
  */
 
 import { getSupabaseCredentials } from '@/db/client';
@@ -20,17 +20,17 @@ interface SqlResult {
 
 /**
  * 获取服务端 REST API 所需的 url + serviceKey。
- * 缺少 service_role_key 时直接抛出明确错误。
+ * 缺少 secret key 时直接抛出明确错误。
  */
 function getServiceCredentials(): { url: string; serviceKey: string } {
-  const { url, serviceRoleKey } = getSupabaseCredentials();
-  if (!serviceRoleKey) {
+  const { url, secretKey } = getSupabaseCredentials();
+  if (!secretKey) {
     throw new Error(
-      'COZE_SUPABASE_SERVICE_ROLE_KEY (or legacy SUPABASE_SERVICE_ROLE_KEY) is required ' +
+      'SUPABASE_SECRET_KEY is required ' +
         'for server-side database operations. Please configure it in your environment.'
     );
   }
-  return { url, serviceKey: serviceRoleKey };
+  return { url, serviceKey: secretKey };
 }
 
 /**

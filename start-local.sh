@@ -83,7 +83,7 @@ if command -v pnpm >/dev/null 2>&1; then
   log_success "pnpm $(pnpm -v)"
 else
   log_error "pnpm is not installed or not in PATH."
-  log_info "Install it with: npm install -g pnpm@9.0.0"
+  log_info "Install pnpm 9+ with Corepack or your system package manager."
   exit 1
 fi
 
@@ -107,7 +107,7 @@ load_env_file() {
 load_env_file ".env.local"
 load_env_file ".env"
 
-if [[ -z "${COZE_SUPABASE_URL:-}" && -z "${SUPABASE_URL:-}" ]]; then
+if [[ -z "${NEXT_PUBLIC_SUPABASE_URL:-}" ]]; then
   log_warn "Supabase URL is not configured. API/database features may fail."
 fi
 
@@ -196,8 +196,11 @@ fi
 
 export PORT
 export DEPLOY_RUN_PORT="${PORT}"
-export COZE_WORKSPACE_PATH="${PROJECT_DIR}"
-export COZE_PROJECT_ENV="${COZE_PROJECT_ENV:-DEV}"
+if [[ "${MODE}" == "prod" ]]; then
+  export NODE_ENV="production"
+else
+  export NODE_ENV="development"
+fi
 
 log_step "Step 5/6: Start service"
 

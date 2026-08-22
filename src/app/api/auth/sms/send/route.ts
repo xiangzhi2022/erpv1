@@ -46,14 +46,14 @@ export async function POST(request: NextRequest) {
 
     if (!hasSMSConfig) {
       // 仅开发模式下在控制台输出验证码
-      if (process.env.COZE_PROJECT_ENV === 'DEV') {
+      if (process.env.NODE_ENV !== 'production') {
         console.log(`[DEV] SMS verification code for ${phone}: ${code}`);
       }
       return NextResponse.json({
         success: true,
         message: '验证码已发送（开发模式，验证码见控制台）',
         // 仅在开发模式下返回验证码，生产环境绝不暴露
-        ...(process.env.COZE_PROJECT_ENV === 'DEV' ? { dev_code: code } : {}),
+        ...(process.env.NODE_ENV !== 'production' ? { dev_code: code } : {}),
       });
     }
 

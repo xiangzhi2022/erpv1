@@ -36,9 +36,12 @@ if (fs.existsSync(envPath)) {
 }
 
 const CONFIG = {
-  url: envConfig.COZE_SUPABASE_URL || process.env.COZE_SUPABASE_URL || 'https://cdcnjtgabgjkouavwxsl.supabase.co',
-  anonKey: envConfig.COZE_SUPABASE_ANON_KEY || process.env.COZE_SUPABASE_ANON_KEY || '',
-  serviceKey: envConfig.COZE_SUPABASE_SERVICE_ROLE_KEY || process.env.COZE_SUPABASE_SERVICE_ROLE_KEY || ''
+  url: envConfig.NEXT_PUBLIC_SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL || '',
+  publishableKey:
+    envConfig.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY ||
+    process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY ||
+    '',
+  secretKey: envConfig.SUPABASE_SECRET_KEY || process.env.SUPABASE_SECRET_KEY || ''
 };
 
 function request(method, path, body = null, useServiceKey = true) {
@@ -50,8 +53,8 @@ function request(method, path, body = null, useServiceKey = true) {
       path: url.pathname + url.search,
       method: method,
       headers: {
-        'apikey': useServiceKey ? CONFIG.serviceKey : CONFIG.anonKey,
-        'Authorization': `Bearer ${useServiceKey ? CONFIG.serviceKey : CONFIG.anonKey}`,
+        'apikey': useServiceKey ? CONFIG.secretKey : CONFIG.publishableKey,
+        'Authorization': `Bearer ${useServiceKey ? CONFIG.secretKey : CONFIG.publishableKey}`,
         'Content-Type': 'application/json'
       }
     };

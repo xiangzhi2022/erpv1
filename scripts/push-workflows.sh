@@ -12,8 +12,9 @@
 #   4. 生成并复制 token
 set -Eeuo pipefail
 
-COZE_WORKSPACE_PATH="${COZE_WORKSPACE_PATH:-$(pwd)}"
-cd "${COZE_WORKSPACE_PATH}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="${PROJECT_ROOT:-$(cd "${SCRIPT_DIR}/.." && pwd)}"
+cd "${PROJECT_ROOT}"
 
 if [ -z "${GH_TOKEN:-}" ]; then
   echo "❌ Error: GH_TOKEN environment variable is required."

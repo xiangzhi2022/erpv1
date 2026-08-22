@@ -2,16 +2,15 @@
  * 统一 Supabase 客户端模块
  *
  * 导出两个入口：
- *   - getSupabaseServiceClient()  — 服务端管理权限（service_role_key），绕过 RLS
+ *   - getSupabaseServiceClient()  — 服务端管理权限（secret key），绕过 RLS
  *   - getSupabaseClient(token?)   — 匿名/用户级客户端，可传入用户 token
  *
- * 环境变量优先级：COZE_SUPABASE_* > SUPABASE_*（legacy 兼容）
+ * 环境变量：NEXT_PUBLIC_SUPABASE_URL、NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY、
+ * SUPABASE_SECRET_KEY
  * 明确拒绝 localhost / 127.0.0.1 / ::1 / *.local 的 Supabase URL
  */
 
-import { createClient, SupabaseClient } from '@supabase/supabase-js';
-import { execSync } from 'child_process';
-import { getReportBuffer, createWrappedFetch } from 'coze-coding-dev-sdk';
+import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import { config as loadDotenv } from 'dotenv';
 
 // ── 环境变量加载状态 ──────────────────────────────────────────
@@ -33,120 +32,56 @@ function isLocalUrl(url: string): boolean {
 
 /**
  * 加载 Supabase 环境变量。
- * 优先使用已注入的 process.env，其次尝试 dotenv，最后尝试 coze_workload_identity。
+ * 优先使用已注入的 process.env，其次加载 .env.local 和 .env。
  */
 function loadEnv(): void {
   if (envLoaded) return;
 
-  // 如果 COZE_* 已存在则直接返回
-  if (process.env.COZE_SUPABASE_URL && process.env.COZE_SUPABASE_ANON_KEY) {
+  if (
+    process.env.NEXT_PUBLIC_SUPABASE_URL &&
+    process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY
+  ) {
     envLoaded = true;
     return;
   }
 
-  // 尝试 dotenv
   try {
-    loadDotenv();
-    if (process.env.COZE_SUPABASE_URL && process.env.COZE_SUPABASE_ANON_KEY) {
-      envLoaded = true;
-      return;
-    }
+    loadDotenv({ path: ['.env.local', '.env'], quiet: true });
   } catch {
     // dotenv 不可用
   }
-
-  // 尝试 coze_workload_identity
-  try {
-    const pythonCode = `
-import os
-import sys
-try:
-    from coze_workload_identity import Client
-    client = Client()
-    env_vars = client.get_project_env_vars()
-    client.close()
-    for env_var in env_vars:
-        print(f"{env_var.key}={env_var.value}")
-except Exception as e:
-    print(f"# Error: {e}", file=sys.stderr)
-`;
-    const output = execSync(`python3 -c '${pythonCode.replace(/'/g, "'\"'\"'")}'`, {
-      encoding: 'utf-8',
-      timeout: 10000,
-      stdio: ['pipe', 'pipe', 'pipe'],
-    });
-
-    const lines = output.trim().split('\n');
-    for (const line of lines) {
-      if (line.startsWith('#')) continue;
-      const eqIndex = line.indexOf('=');
-      if (eqIndex > 0) {
-        const key = line.substring(0, eqIndex);
-        let value = line.substring(eqIndex + 1);
-        if (
-          (value.startsWith("'") && value.endsWith("'")) ||
-          (value.startsWith('"') && value.endsWith('"'))
-        ) {
-          value = value.slice(1, -1);
-        }
-        if (!process.env[key]) {
-          process.env[key] = value;
-        }
-      }
-    }
-
-    envLoaded = true;
-  } catch {
-    // 静默失败
-  }
+  envLoaded = true;
 }
 
 // ── 统一环境变量读取 ──────────────────────────────────────────
 
 interface SupabaseCredentials {
   url: string;
-  anonKey: string;
-  serviceRoleKey?: string;
-}
-
-function isReportClientConfigured(): boolean {
-  return Boolean(process.env.COZE_INTEGRATION_BASE_URL && process.env.COZE_WORKLOAD_IDENTITY_API_KEY);
-}
-
-function getSupabaseReportFetch(label: string): typeof fetch | undefined {
-  if (!isReportClientConfigured()) return undefined;
-
-  try {
-    const buffer = getReportBuffer();
-    return buffer ? createWrappedFetch(buffer, label) : undefined;
-  } catch {
-    return undefined;
-  }
+  publishableKey: string;
+  secretKey?: string;
 }
 
 /**
  * 获取 Supabase 凭证。
- * COZE_SUPABASE_* 优先，兼容 legacy SUPABASE_*。
+ * 读取 Supabase 官方环境变量。
  * 拒绝 localhost 类 URL。
  */
 function getSupabaseCredentials(): SupabaseCredentials {
   loadEnv();
 
-  // COZE_* 优先，SUPABASE_* 兼容
-  const url = process.env.COZE_SUPABASE_URL || process.env.SUPABASE_URL;
-  const anonKey = process.env.COZE_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY;
-  const serviceRoleKey =
-    process.env.COZE_SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY;
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const publishableKey = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
+  const secretKey = process.env.SUPABASE_SECRET_KEY;
 
   if (!url) {
     throw new Error(
-      'COZE_SUPABASE_URL (or legacy SUPABASE_URL) is not set. ' +
+      'NEXT_PUBLIC_SUPABASE_URL is not set. ' +
         'Please configure your cloud Supabase credentials.'
     );
   }
-  if (!anonKey) {
+  if (!publishableKey) {
     throw new Error(
-      'COZE_SUPABASE_ANON_KEY (or legacy SUPABASE_ANON_KEY) is not set. ' +
+      'NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY is not set. ' +
         'Please configure your cloud Supabase credentials.'
     );
   }
@@ -159,32 +94,27 @@ function getSupabaseCredentials(): SupabaseCredentials {
     );
   }
 
-  return { url, anonKey, serviceRoleKey };
+  return { url, publishableKey, secretKey };
 }
 
 // ── 客户端工厂 ────────────────────────────────────────────────
 
 /**
  * 服务端管理权限客户端。
- * 必须存在 service_role_key，否则抛出明确错误。
- * 使用 service_role_key 绕过 RLS，用于服务端管理操作。
+ * 必须存在 secret key，否则抛出明确错误。
+ * 使用 secret key 绕过 RLS，用于服务端管理操作。
  */
 function getSupabaseServiceClient(): SupabaseClient {
-  const { url, serviceRoleKey } = getSupabaseCredentials();
+  const { url, secretKey } = getSupabaseCredentials();
 
-  if (!serviceRoleKey) {
+  if (!secretKey) {
     throw new Error(
-      'COZE_SUPABASE_SERVICE_ROLE_KEY (or legacy SUPABASE_SERVICE_ROLE_KEY) is required ' +
+      'SUPABASE_SECRET_KEY is required ' +
         'for service-level operations. Server-side admin actions cannot proceed without it.'
     );
   }
 
-  const globalOptions: Record<string, unknown> = {};
-  const reportFetch = getSupabaseReportFetch('supabase-service');
-  if (reportFetch) globalOptions.fetch = reportFetch;
-
-  return createClient(url, serviceRoleKey, {
-    global: globalOptions,
+  return createClient(url, secretKey, {
     db: {
       timeout: 60000,
     },
@@ -197,23 +127,17 @@ function getSupabaseServiceClient(): SupabaseClient {
 
 /**
  * 匿名/用户级客户端。
- * - 不传 token：使用 anon key（服务端无用户上下文时用 service_role_key 降级兜底）
- * - 传入 token：使用 anon key + 用户 Authorization header
+ * - 始终使用 publishable key
+ * - 传入 token 时附加用户 Authorization header
  */
 function getSupabaseClient(token?: string): SupabaseClient {
-  const { url, anonKey, serviceRoleKey } = getSupabaseCredentials();
-
-  // 有用户 token 时用 anon key；无 token 时优先用 service_role_key 兜底
-  const key = token ? anonKey : (serviceRoleKey ?? anonKey);
+  const { url, publishableKey } = getSupabaseCredentials();
 
   const globalOptions: Record<string, unknown> = {};
   if (token) {
     globalOptions.headers = { Authorization: `Bearer ${token}` };
   }
-  const reportFetch = getSupabaseReportFetch('supabase');
-  if (reportFetch) globalOptions.fetch = reportFetch;
-
-  return createClient(url, key, {
+  return createClient(url, publishableKey, {
     global: globalOptions,
     db: {
       timeout: 60000,

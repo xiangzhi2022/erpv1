@@ -37,9 +37,9 @@ function loadDotenv() {
 }
 loadDotenv();
 
-// Supabase 配置 - COZE_SUPABASE_* 优先，SUPABASE_* 兼容
-const supabaseUrl = process.env.COZE_SUPABASE_URL || process.env.SUPABASE_URL || '';
-const supabaseKey = process.env.COZE_SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY || '';
+// Supabase 服务端配置
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
+const supabaseKey = process.env.SUPABASE_SECRET_KEY || '';
 
 const supabase = createClient(supabaseUrl, supabaseKey);
 

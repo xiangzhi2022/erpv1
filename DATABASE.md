@@ -133,7 +133,7 @@ getSupabaseClient()           insertData() / selectData() / deleteData()
         |
         v
 getSupabaseCredentials()
-环境变量优先级: COZE_SUPABASE_* > SUPABASE_*
+环境变量: NEXT_PUBLIC_SUPABASE_URL、NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY、SUPABASE_SECRET_KEY
 拒绝 localhost / 127.0.0.1 / ::1 / *.local
 ```
 
@@ -170,15 +170,13 @@ await deleteData('users', { id: '123' });
 
 | 变量名 | 必填 | 说明 |
 |--------|------|------|
-| `COZE_SUPABASE_URL` | 是 | 云 Supabase 实例 URL（如 `https://xxx.supabase.co`） |
-| `COZE_SUPABASE_ANON_KEY` | 是 | 匿名访问 Key |
-| `COZE_SUPABASE_SERVICE_ROLE_KEY` | 是* | 服务端管理 Key（绕过 RLS） |
+| `NEXT_PUBLIC_SUPABASE_URL` | 是 | 云 Supabase 实例 URL（如 `https://xxx.supabase.co`） |
+| `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` | 是 | 浏览器和用户级请求使用的 Publishable Key |
+| `SUPABASE_SECRET_KEY` | 是* | 仅服务端使用的 Secret Key（绕过 RLS） |
 
 * 服务端管理操作必须设置，否则 `getSupabaseServiceClient()` 和 `src/lib/db.ts` 的函数会抛出明确错误。
 
-### Legacy 兼容
-
-如果 `COZE_SUPABASE_*` 未设置，系统会回退读取 `SUPABASE_*` 变量。建议全部迁移到 `COZE_*` 命名。
+旧环境变量别名不再兼容，请按 `.env.example` 配置官方变量名。`SUPABASE_SECRET_KEY` 严禁暴露到浏览器或提交到仓库。
 
 ### 本地 URL 拒绝
 

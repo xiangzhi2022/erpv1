@@ -24,11 +24,12 @@ log_error()   { echo -e "${RED}[ERROR]${NC} $1"; }
 log_step()    { echo -e "\n${BOLD}${CYAN}━━━ $1 ━━━${NC}\n"; }
 
 # ── 变量 ──────────────────────────────────────────────────────
-PROJECT_DIR="${COZE_WORKSPACE_PATH:-/workspace/projects}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_DIR="${PROJECT_DIR:-${SCRIPT_DIR}}"
 PORT="${DEPLOY_RUN_PORT:-5000}"
 LOG_DIR="/app/work/logs/bypass"
 MAX_WAIT=90  # 最大等待秒数
-IS_PROD="${COZE_PROJECT_ENV:-DEV}"
+NODE_ENV="${NODE_ENV:-development}"
 
 cd "${PROJECT_DIR}"
 
@@ -49,8 +50,8 @@ if command -v pnpm &>/dev/null; then
   PNPM_VER=$(pnpm -v)
   log_success "pnpm ${PNPM_VER}"
 else
-  log_warn "pnpm 未安装，正在安装..."
-  npm install -g pnpm 2>/dev/null && log_success "pnpm 安装成功" || { log_error "pnpm 安装失败"; exit 1; }
+  log_error "pnpm 未安装，请先通过 Corepack 或系统包管理工具安装 pnpm 9+。"
+  exit 1
 fi
 
 # 检查项目文件
@@ -69,14 +70,14 @@ else
 fi
 
 # 检查 Supabase 环境变量
-if [[ -n "${COZE_SUPABASE_URL:-}" ]]; then
+if [[ -n "${NEXT_PUBLIC_SUPABASE_URL:-}" ]]; then
   log_success "Supabase URL 已配置"
 else
-  log_warn "COZE_SUPABASE_URL 未设置"
+  log_warn "NEXT_PUBLIC_SUPABASE_URL 未设置"
 fi
 
 # 显示环境模式
-if [[ "${IS_PROD}" == "PROD" ]]; then
+if [[ "${NODE_ENV}" == "production" ]]; then
   log_info "运行模式: ${BOLD}生产环境 (PROD)${NC}"
 else
   log_info "运行模式: ${BOLD}开发环境 (DEV)${NC}"
@@ -96,7 +97,7 @@ else
 fi
 
 # ── Step 3: 构建（生产环境） ─────────────────────────────────
-if [[ "${IS_PROD}" == "PROD" ]]; then
+if [[ "${NODE_ENV}" == "production" ]]; then
   log_step "Step 3/7: 构建生产版本"
   bash scripts/build.sh 2>&1 | tail -20
   log_success "构建完成"
@@ -131,7 +132,7 @@ log_step "Step 5/7: 启动服务"
 
 mkdir -p "${LOG_DIR}"
 
-if [[ "${IS_PROD}" == "PROD" ]]; then
+if [[ "${NODE_ENV}" == "production" ]]; then
   log_info "启动生产服务器 (端口: ${PORT})..."
   nohup bash scripts/start.sh > "${LOG_DIR}/app.log" 2>&1 &
 else
@@ -188,7 +189,7 @@ for endpoint in "${API_ENDPOINTS[@]}"; do
 done
 
 # ── 解析访问地址 ──────────────────────────────────────────────
-DOMAIN="${COZE_PROJECT_DOMAIN_DEFAULT:-}"
+DOMAIN="${APP_URL:-}"
 
 # 标准化：确保是完整 URL
 if [[ -n "${DOMAIN}" ]]; then
@@ -220,7 +221,7 @@ echo -e "${BOLD}${GREEN}┠━━━━━━━━━━━━━━━━━�
 echo -e "${BOLD}${GREEN}┃${NC}                                                                  ${BOLD}${GREEN}┃${NC}"
 echo -e "${BOLD}${GREEN}┃${NC}  ${DIM}本地地址:${NC}   http://localhost:${PORT}                              ${BOLD}${GREEN}┃${NC}"
 echo -e "${BOLD}${GREEN}┃${NC}  ${DIM}服务端口:${NC}   ${PORT}                                                ${BOLD}${GREEN}┃${NC}"
-echo -e "${BOLD}${GREEN}┃${NC}  ${DIM}运行模式:${NC}   ${IS_PROD}                                               ${BOLD}${GREEN}┃${NC}"
+echo -e "${BOLD}${GREEN}┃${NC}  ${DIM}运行模式:${NC}   ${NODE_ENV}                                        ${BOLD}${GREEN}┃${NC}"
 echo -e "${BOLD}${GREEN}┃${NC}  ${DIM}服务 PID:${NC}   ${SERVER_PID}                                             ${BOLD}${GREEN}┃${NC}"
 echo -e "${BOLD}${GREEN}┃${NC}                                                                  ${BOLD}${GREEN}┃${NC}"
 echo -e "${BOLD}${GREEN}┠━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┫${NC}"

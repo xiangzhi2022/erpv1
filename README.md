@@ -1,13 +1,15 @@
-# projects
+# 青崖 ERP
 
-这是一个基于 [Next.js 16](https://nextjs.org) + [shadcn/ui](https://ui.shadcn.com) 的全栈应用项目，由扣子编程 CLI 创建。
+这是一个基于 [Next.js 16](https://nextjs.org)、[Supabase](https://supabase.com) 和 [shadcn/ui](https://ui.shadcn.com) 的全栈 ERP 应用。
 
 ## 快速开始
 
 ### 启动开发服务器
 
 ```bash
-coze dev
+cp .env.example .env.local
+pnpm install
+pnpm dev
 ```
 
 启动后，在浏览器中打开 [http://localhost:5000](http://localhost:5000) 查看应用。
@@ -17,13 +19,13 @@ coze dev
 ### 构建生产版本
 
 ```bash
-coze build
+pnpm build
 ```
 
 ### 启动生产服务器
 
 ```bash
-coze start
+pnpm start
 ```
 
 ## 项目结构

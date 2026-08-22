@@ -1,14 +1,9 @@
 import { NextResponse } from 'next/server';
-import { createClient } from '@supabase/supabase-js';
+import { getSupabaseServiceClient } from '@/db/client';
 import { getSession } from '@/lib/auth';
 
 function getSupabaseAdmin() {
-  const url = process.env.COZE_SUPABASE_URL;
-  const key = process.env.COZE_SUPABASE_SERVICE_ROLE_KEY;
-  if (!url || !key) {
-    throw new Error('Missing Supabase environment variables');
-  }
-  return createClient(url, key, { auth: { persistSession: false } });
+  return getSupabaseServiceClient();
 }
 
 async function getAuthUser() {

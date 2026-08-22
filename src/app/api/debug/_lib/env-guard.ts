@@ -2,10 +2,10 @@ import { NextResponse } from 'next/server';
 
 /**
  * Returns true when running in the development environment.
- * COZE_PROJECT_ENV is set to 'DEV' in sandbox and 'PROD' in production.
+ * NODE_ENV is set to 'production' in production deployments.
  */
 export function isDevEnv(): boolean {
-  return process.env.COZE_PROJECT_ENV !== 'PROD';
+  return process.env.NODE_ENV !== 'production';
 }
 
 /**

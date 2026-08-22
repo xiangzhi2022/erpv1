@@ -1,13 +1,12 @@
 #!/bin/bash
 set -Eeuo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="${PROJECT_ROOT:-$(cd "${SCRIPT_DIR}/.." && pwd)}"
+PORT="${PORT:-5000}"
+DEPLOY_RUN_PORT="${DEPLOY_RUN_PORT:-${PORT}}"
 
-PORT=5000
-COZE_WORKSPACE_PATH="${COZE_WORKSPACE_PATH:-$(pwd)}"
-DEPLOY_RUN_PORT=5000
-
-
-cd "${COZE_WORKSPACE_PATH}"
+cd "${PROJECT_ROOT}"
 
 kill_port_if_listening() {
     local pids

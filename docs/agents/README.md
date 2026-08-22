@@ -1,6 +1,6 @@
 # Multi-Agent 协作索引
 
-这些文档用于 Coze 多窗口手动调度 Codex / Claude / 其他编码 agent。每个窗口只引用一个角色文档，再附上具体任务即可。
+这些文档用于多窗口手动调度 Codex / Claude / 其他编码 agent。每个窗口只引用一个角色文档，再附上具体任务即可。
 
 ## 推荐使用方式
 
@@ -35,4 +35,3 @@ pnpm ts-check
 pnpm test
 pnpm lint
 ```
-
