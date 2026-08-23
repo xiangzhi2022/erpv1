@@ -1,71 +1,43 @@
-import { parseJsonObject } from '@/lib/api/request';
-import { getSupabaseClient } from '@/db/client';
-import { getUserFromRequest } from '@/lib/auth';
-import { calculateTaskWage, canManageProduction } from '@/lib/four-level-order';
-import {
-  ensureWorkerCanReceiveProductionTask,
-  resolveWageRuleForTask,
-  writeStatusLog,
-} from '@/lib/four-level-order-server';
+import { z } from 'zod';
+import { isApiError } from '@/lib/api/errors';
+import { parseJson, parseParams } from '@/lib/api/request';
+import { getEnterpriseContext, requirePermission } from '@/lib/enterprise/context';
+import { isEnterpriseAccessError } from '@/lib/enterprise/errors';
+import { createClient } from '@/lib/supabase/server';
+import { callProductionTaskRpc, productionRpcError } from '@/app/api/production/rpc';
 
-function jsonError(error: string, status: number) {
-  return Response.json({ success: false, error }, { status });
+const paramsSchema = z.object({ id: z.string().uuid() });
+const inputSchema = z.object({
+  assigned_worker_id: z.string().uuid(),
+  workshop_id: z.string().uuid().nullable().optional(),
+  workstation_id: z.string().uuid().nullable().optional(),
+}).strict();
+
+function jsonError(error: string, status: number) { return Response.json({ success: false, error }, { status }); }
+function errorResponse(error: unknown) {
+  if (isEnterpriseAccessError(error) || isApiError(error)) return jsonError(error.message, error.status);
+  console.error('production_task.assign_failed', { error });
+  return jsonError('分配任务失败', 500);
 }
 
 export async function PATCH(request: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
-    const user = await getUserFromRequest(request);
-    if (!user) return jsonError('请先登录', 401);
-    if (!canManageProduction(user)) return jsonError('无权分配任务', 403);
-    const { id } = await params;
-    const body = (await parseJsonObject(request)) as { assigned_worker_id?: string; workshop_id?: string; workstation_id?: string };
-    if (!body.assigned_worker_id) return jsonError('请选择工人', 400);
-    const supabase = getSupabaseClient();
-    const { data: task } = await supabase.from('production_tasks').select('*').eq('id', id).maybeSingle();
-    if (!task) return jsonError('生产任务不存在', 404);
-    if (user.tenant_id && task.tenant_id && task.tenant_id !== user.tenant_id) return jsonError('无权操作该任务', 403);
-
-    const taskRow = task as Record<string, unknown>;
-    const previousStatus = String(task.status || 'pending_assign');
-    try {
-      await ensureWorkerCanReceiveProductionTask(supabase, user, body.assigned_worker_id, taskRow);
-    } catch (error) {
-      return jsonError(error instanceof Error ? error.message : '所选工人不可接收该任务', 400);
+    const context = await getEnterpriseContext();
+    requirePermission(context, 'production.assign');
+    const { id } = await parseParams(params, paramsSchema);
+    const input = await parseJson(request, inputSchema);
+    const supabase = await createClient();
+    const { data, error } = await callProductionTaskRpc(supabase, 'assign_production_task', {
+      p_enterprise_id: context.enterpriseId,
+      p_task_id: id,
+      p_assigned_worker_id: input.assigned_worker_id,
+      p_workshop_id: input.workshop_id ?? null,
+      p_workstation_id: input.workstation_id ?? null,
+    });
+    if (error) {
+      const failure = productionRpcError(error, '分配任务失败');
+      return jsonError(failure.error, failure.status);
     }
-    const assignedTask: Record<string, unknown> = {
-      ...taskRow,
-      assigned_worker_id: body.assigned_worker_id,
-      worker_id: body.assigned_worker_id,
-      workshop_id: body.workshop_id || task.workshop_id || null,
-      workstation_id: body.workstation_id || task.workstation_id || null,
-      status: 'assigned',
-    };
-    const wageRule = await resolveWageRuleForTask(supabase, assignedTask);
-    const estimatedWage = wageRule ? calculateTaskWage(assignedTask, wageRule) : null;
-    const updateData: Record<string, unknown> = {
-      assigned_worker_id: body.assigned_worker_id,
-      worker_id: body.assigned_worker_id,
-      workshop_id: body.workshop_id || task.workshop_id || null,
-      workstation_id: body.workstation_id || task.workstation_id || null,
-      status: 'assigned',
-      updated_at: new Date().toISOString(),
-    };
-    if (wageRule) {
-      updateData.wage_rule_id = wageRule.id;
-      updateData.estimated_wage_amount = estimatedWage;
-    }
-
-    const { data, error } = await supabase
-      .from('production_tasks')
-      .update(updateData)
-      .eq('id', id)
-      .select()
-      .single();
-    if (error) return jsonError(error.message, 500);
-    await writeStatusLog(supabase, 'production_task', id, previousStatus, 'assigned', user.id, '分配生产任务');
     return Response.json({ success: true, data });
-  } catch (error) {
-    console.error('assign task failed:', error);
-    return jsonError('分配任务失败', 500);
-  }
+  } catch (error) { return errorResponse(error); }
 }

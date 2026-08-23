@@ -1,145 +1,126 @@
-import { getSupabaseClient } from '@/db/client';
-import { getUserFromRequest } from '@/lib/auth';
-import { canManageProduction, canViewWageSummary, canOperateWorkerTask } from '@/lib/four-level-order';
-import { getWorkerForUser } from '@/lib/four-level-order-server';
+import { z } from 'zod';
+import { isApiError } from '@/lib/api/errors';
+import { parseQuery } from '@/lib/api/request';
+import { getEnterpriseContext, requirePermission } from '@/lib/enterprise/context';
+import { isEnterpriseAccessError } from '@/lib/enterprise/errors';
+import { createClient } from '@/lib/supabase/server';
+
+const taskQuerySchema = z.object({
+  status: z.string().trim().min(1).max(64).optional(),
+  order_id: z.string().uuid().optional(),
+  space_id: z.string().uuid().optional(),
+  product_id: z.string().uuid().optional(),
+  worker_id: z.string().uuid().optional(),
+  task_type: z.string().trim().min(1).max(64).optional(),
+  workshop_id: z.string().uuid().optional(),
+  workstation_id: z.string().uuid().optional(),
+  keyword: z.string().trim().min(1).max(120).optional(),
+  page: z.coerce.number().int().min(1).max(10_000).default(1),
+  pageSize: z.coerce.number().int().min(1).max(100).default(20),
+}).strict();
+
+const TASK_SELECT = 'id,order_id,space_id,product_id,task_no,task_name,task_code,task_type,product_name,quantity,unit,length,width,thickness,area,material,color,process_name,status,progress,priority,workshop_id,workstation_id,remark,planned_start_date,planned_end_date,started_at,submitted_at,completed_at,created_at,updated_at,assigned_worker_id,worker_id';
 
 function jsonError(error: string, status: number) {
   return Response.json({ success: false, error }, { status });
 }
 
+function errorResponse(error: unknown) {
+  if (isEnterpriseAccessError(error) || isApiError(error)) return jsonError(error.message, error.status);
+  console.error('production_tasks.list_failed', { error });
+  return jsonError('获取生产任务失败', 500);
+}
+
+function isSelfOnly(grants: ReadonlySet<string>) {
+  return !['production.plan', 'production.assign', 'production.review', 'production.manage']
+    .some((permission) => grants.has(permission));
+}
+
 export async function GET(request: Request) {
   try {
-    const user = await getUserFromRequest(request);
-    if (!user) return jsonError('请先登录', 401);
-    if (!canManageProduction(user) && !canOperateWorkerTask(user)) return jsonError('无权查看生产任务', 403);
+    const context = await getEnterpriseContext();
+    requirePermission(context, 'production.read');
+    const filters = parseQuery(request, taskQuerySchema);
+    const supabase = await createClient();
 
-    const supabase = getSupabaseClient();
-    const { searchParams } = new URL(request.url);
-    const status = searchParams.get('status');
-    const orderId = searchParams.get('order_id');
-    const spaceId = searchParams.get('space_id');
-    const productId = searchParams.get('product_id');
-    const workerId = searchParams.get('worker_id');
-    const taskType = searchParams.get('task_type');
-    const workshopId = searchParams.get('workshop_id');
-    const workstationId = searchParams.get('workstation_id');
-    const keyword = (searchParams.get('keyword') || '').trim().toLowerCase();
-    const customer = (searchParams.get('customer') || '').trim().toLowerCase();
-    const hasFuzzyFilter = Boolean(keyword || customer);
-    const page = Math.max(1, Number.parseInt(searchParams.get('page') || '1', 10));
-    const pageSize = Math.min(100, Math.max(1, Number.parseInt(searchParams.get('pageSize') || '20', 10)));
+    let workerId: string | null = null;
+    if (isSelfOnly(context.grants)) {
+      const { data: worker, error } = await supabase
+        .from('workers')
+        .select('id')
+        .eq('enterprise_id', context.enterpriseId)
+        .eq('user_id', context.userId)
+        .eq('status', 'active')
+        .maybeSingle();
+      if (error) {
+        console.error('production_tasks.worker_lookup_failed', { code: error.code });
+        return jsonError('获取生产任务失败', 500);
+      }
+      if (!worker) return Response.json({ success: true, data: [], stats: { total: 0 }, pagination: { page: filters.page, pageSize: filters.pageSize, total: 0, totalPages: 0 } });
+      workerId = worker.id;
+    }
 
-    let currentWorker: Record<string, unknown> | null = null;
     let query = supabase
       .from('production_tasks')
-      .select('*', { count: 'exact' })
+      .select(TASK_SELECT, { count: 'exact' })
+      .eq('enterprise_id', context.enterpriseId)
       .order('created_at', { ascending: false });
-
-    if (!canManageProduction(user)) {
-      currentWorker = await getWorkerForUser(supabase, user);
-      if (!currentWorker) return Response.json({ success: true, data: [], stats: { total: 0 }, pagination: { page, pageSize, total: 0, totalPages: 0 } });
-      query = query.or(`assigned_worker_id.eq.${String(currentWorker.id)},worker_id.eq.${String(currentWorker.id)}`);
-    } else if (user.tenant_id) {
-      query = query.eq('tenant_id', user.tenant_id);
-    }
-    if (status && status !== 'all') query = query.eq('status', status);
-    if (orderId) query = query.eq('order_id', orderId);
-    if (spaceId) query = query.eq('space_id', spaceId);
-    if (productId) query = query.eq('product_id', productId);
-    if (workerId && canManageProduction(user)) query = query.eq('assigned_worker_id', workerId);
-    if (taskType && taskType !== 'all') query = query.eq('task_type', taskType);
-    if (workshopId) query = query.eq('workshop_id', workshopId);
-    if (workstationId) query = query.eq('workstation_id', workstationId);
-    if (!hasFuzzyFilter) query = query.range((page - 1) * pageSize, page * pageSize - 1);
-
-    const { data, error, count } = await query;
-    if (error) return jsonError(error.message, 500);
-
-    const taskRows = (data || []) as Record<string, unknown>[];
-    const orderIds = Array.from(new Set(taskRows.map((row) => String(row.order_id || '')).filter(Boolean)));
-    const spaceIds = Array.from(new Set(taskRows.map((row) => String(row.space_id || '')).filter(Boolean)));
-    const productIds = Array.from(new Set(taskRows.map((row) => String(row.product_id || '')).filter(Boolean)));
-    const workerIds = Array.from(new Set(taskRows.map((row) => String(row.assigned_worker_id || row.worker_id || '')).filter(Boolean)));
-    const [ordersRes, spacesRes, productsRes, workersRes] = await Promise.all([
-      orderIds.length ? supabase.from('orders').select('id, order_no, customer_name').in('id', orderIds) : Promise.resolve({ data: [] }),
-      spaceIds.length ? supabase.from('order_spaces').select('id, space_name').in('id', spaceIds) : Promise.resolve({ data: [] }),
-      productIds.length ? supabase.from('order_products').select('id, product_name').in('id', productIds) : Promise.resolve({ data: [] }),
-      workerIds.length ? supabase.from('workers').select('id, name, worker_no, craft_type').in('id', workerIds) : Promise.resolve({ data: [] }),
-    ]);
-    const orderMap = new Map(((ordersRes.data || []) as Record<string, unknown>[]).map((row) => [String(row.id), row]));
-    const spaceMap = new Map(((spacesRes.data || []) as Record<string, unknown>[]).map((row) => [String(row.id), row]));
-    const productMap = new Map(((productsRes.data || []) as Record<string, unknown>[]).map((row) => [String(row.id), row]));
-    const workerMap = new Map(((workersRes.data || []) as Record<string, unknown>[]).map((row) => [String(row.id), row]));
-
-    const visibleWages = canViewWageSummary(user);
-    let rows = taskRows.map((row) => {
-      const workerKey = String(row.assigned_worker_id || row.worker_id || '');
-      const copy: Record<string, unknown> = {
-        ...row,
-        order: orderMap.get(String(row.order_id || '')) || null,
-        space: spaceMap.get(String(row.space_id || '')) || null,
-        product: productMap.get(String(row.product_id || '')) || null,
-        worker: workerMap.get(workerKey) || null,
-      };
-      if (visibleWages) return copy;
-      delete copy.wage_rule_id;
-      delete copy.estimated_wage_amount;
-      delete copy.final_wage_amount;
-      return copy;
-    });
-
-    if (keyword || customer) {
-      rows = rows.filter((row) => {
-        const order = row.order as Record<string, unknown> | null;
-        const space = row.space as Record<string, unknown> | null;
-        const product = row.product as Record<string, unknown> | null;
-        const worker = row.worker as Record<string, unknown> | null;
-        const haystack = [
-          row.task_no,
-          row.task_name,
-          row.process_name,
-          row.task_type,
-          order?.order_no,
-          order?.customer_name,
-          space?.space_name,
-          product?.product_name,
-          worker?.name,
-          worker?.worker_no,
-        ].filter(Boolean).join(' ').toLowerCase();
-        const customerText = String(order?.customer_name || '').toLowerCase();
-        return (!keyword || haystack.includes(keyword)) && (!customer || customerText.includes(customer));
-      });
+    if (workerId) query = query.or(`assigned_worker_id.eq.${workerId},worker_id.eq.${workerId}`);
+    if (filters.status && filters.status !== 'all') query = query.eq('status', filters.status);
+    if (filters.order_id) query = query.eq('order_id', filters.order_id);
+    if (filters.space_id) query = query.eq('space_id', filters.space_id);
+    if (filters.product_id) query = query.eq('product_id', filters.product_id);
+    if (filters.worker_id && !workerId) query = query.eq('assigned_worker_id', filters.worker_id);
+    if (filters.task_type && filters.task_type !== 'all') query = query.eq('task_type', filters.task_type);
+    if (filters.workshop_id) query = query.eq('workshop_id', filters.workshop_id);
+    if (filters.workstation_id) query = query.eq('workstation_id', filters.workstation_id);
+    const { data, error, count } = await query.range((filters.page - 1) * filters.pageSize, filters.page * filters.pageSize - 1);
+    if (error) {
+      console.error('production_tasks.query_failed', { code: error.code });
+      return jsonError('获取生产任务失败', 500);
     }
 
-    const filteredTotal = rows.length;
-    if (hasFuzzyFilter) rows = rows.slice((page - 1) * pageSize, page * pageSize);
-
-    let statsQuery = supabase.from('production_tasks').select('status');
-    if (canManageProduction(user) && user.tenant_id) statsQuery = statsQuery.eq('tenant_id', user.tenant_id);
-    if (!canManageProduction(user) && currentWorker) {
-      statsQuery = statsQuery.or(`assigned_worker_id.eq.${String(currentWorker.id)},worker_id.eq.${String(currentWorker.id)}`);
+    let statsQuery = supabase.from('production_tasks').select('status').eq('enterprise_id', context.enterpriseId);
+    if (workerId) statsQuery = statsQuery.or(`assigned_worker_id.eq.${workerId},worker_id.eq.${workerId}`);
+    const { data: statsRows, error: statsError } = await statsQuery;
+    if (statsError) {
+      console.error('production_tasks.stats_failed', { code: statsError.code });
+      return jsonError('获取生产任务失败', 500);
     }
-    const statsRows = await statsQuery;
-    const allRows = (statsRows.data || []) as { status: string }[];
-    const stats = allRows.reduce<Record<string, number>>((acc, row) => {
-      acc[row.status] = (acc[row.status] || 0) + 1;
-      acc.total = (acc.total || 0) + 1;
+    const stats = (statsRows ?? []).reduce<Record<string, number>>((acc, task) => {
+      acc[task.status] = (acc[task.status] ?? 0) + 1;
+      acc.total = (acc.total ?? 0) + 1;
       return acc;
     }, { total: 0 });
 
+    const workerIds = Array.from(new Set((data ?? [])
+      .map((task) => task.assigned_worker_id ?? task.worker_id)
+      .filter((workerId): workerId is string => Boolean(workerId))));
+    const { data: workers, error: workersError } = workerIds.length > 0
+      ? await supabase.from('workers').select('id,name,worker_no')
+          .eq('enterprise_id', context.enterpriseId).in('id', workerIds)
+      : { data: [], error: null };
+    if (workersError) {
+      console.error('production_tasks.workers_failed', { code: workersError.code });
+      return jsonError('获取生产任务失败', 500);
+    }
+    const workersById = new Map((workers ?? []).map((worker) => [worker.id, { id: worker.id, name: worker.name, worker_no: worker.worker_no }]));
+    const safeTasks = (data ?? []).map(({ assigned_worker_id, worker_id, ...task }) => ({
+      ...task,
+      worker: workersById.get(assigned_worker_id ?? worker_id ?? '') ?? null,
+    }));
     return Response.json({
       success: true,
-      data: rows,
+      data: safeTasks,
       stats,
       pagination: {
-        page,
-        pageSize,
-        total: hasFuzzyFilter ? filteredTotal : count || 0,
-        totalPages: Math.ceil((hasFuzzyFilter ? filteredTotal : count || 0) / pageSize),
+        page: filters.page,
+        pageSize: filters.pageSize,
+        total: count ?? 0,
+        totalPages: Math.ceil((count ?? 0) / filters.pageSize),
       },
     });
   } catch (error) {
-    console.error('get production tasks failed:', error);
-    return jsonError('获取生产任务失败', 500);
+    return errorResponse(error);
   }
 }
