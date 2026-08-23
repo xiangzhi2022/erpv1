@@ -1,6 +1,7 @@
 import { parseJsonObject } from '@/lib/api/request';
-import { getSupabaseClient } from '@/db/client';
 import { getUserFromRequest } from '@/lib/auth';
+import { getEnterpriseContext, requirePermission } from '@/lib/enterprise/context';
+import { createClient } from '@/lib/supabase/server';
 import { canEditFinancialFields, canEditOrderContent } from '@/lib/four-level-order';
 import { canSeeOrder, loadOrderTree, writeStatusLog } from '@/lib/four-level-order-server';
 
@@ -11,9 +12,14 @@ function jsonError(error: string, status: number) {
   return Response.json({ success: false, error }, { status });
 }
 
-async function getProductContext(productId: string) {
-  const supabase = getSupabaseClient();
-  const { data: product } = await supabase.from('order_products').select('*').eq('id', productId).maybeSingle();
+async function getProductContext(productId: string, enterpriseId: string) {
+  const supabase = await createClient();
+  const { data: product } = await supabase
+    .from('order_products')
+    .select('*')
+    .eq('enterprise_id', enterpriseId)
+    .eq('id', productId)
+    .maybeSingle();
   if (!product) return { supabase, product: null, tree: null };
   const tree = await loadOrderTree(supabase, String(product.order_id));
   return { supabase, product: product as Record<string, unknown>, tree };
@@ -21,10 +27,12 @@ async function getProductContext(productId: string) {
 
 export async function PATCH(request: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
+    const context = await getEnterpriseContext();
+    requirePermission(context, 'orders.update');
     const user = await getUserFromRequest(request);
     if (!user) return jsonError('请先登录', 401);
     const { id } = await params;
-    const { supabase, product, tree } = await getProductContext(id);
+    const { supabase, product, tree } = await getProductContext(id, context.enterpriseId);
     if (!product || !tree) return jsonError('产品不存在', 404);
     if (!canSeeOrder(user, tree)) return jsonError('无权操作该产品', 403);
 
@@ -41,7 +49,13 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
       });
     }
     const previousStatus = typeof product.status === 'string' ? product.status : null;
-    const { data, error } = await supabase.from('order_products').update(updateData).eq('id', id).select().single();
+    const { data, error } = await supabase
+      .from('order_products')
+      .update(updateData)
+      .eq('enterprise_id', context.enterpriseId)
+      .eq('id', id)
+      .select()
+      .single();
     if (error) return jsonError(error.message, 500);
     if (typeof updateData.status === 'string' && updateData.status !== previousStatus) {
       await writeStatusLog(supabase, 'product', id, previousStatus, updateData.status, user.id, '更新产品状态');
@@ -55,14 +69,20 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
 
 export async function DELETE(request: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
+    const context = await getEnterpriseContext();
+    requirePermission(context, 'orders.update');
     const user = await getUserFromRequest(request);
     if (!user) return jsonError('请先登录', 401);
     if (!canEditOrderContent(user)) return jsonError('无权删除产品', 403);
     const { id } = await params;
-    const { supabase, product, tree } = await getProductContext(id);
+    const { supabase, product, tree } = await getProductContext(id, context.enterpriseId);
     if (!product || !tree) return jsonError('产品不存在', 404);
     if (!canSeeOrder(user, tree)) return jsonError('无权操作该产品', 403);
-    const { error } = await supabase.from('order_products').delete().eq('id', id);
+    const { error } = await supabase
+      .from('order_products')
+      .delete()
+      .eq('enterprise_id', context.enterpriseId)
+      .eq('id', id);
     if (error) return jsonError(error.message, 500);
     return Response.json({ success: true });
   } catch (error) {

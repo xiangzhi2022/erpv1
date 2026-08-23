@@ -1,6 +1,5 @@
-import { getSupabaseClient } from '@/db/client';
-import { getUserFromRequest } from '@/lib/auth';
-import { canViewFinancialFields } from '@/lib/four-level-order';
+import { createClient } from '@/lib/supabase/server';
+import { getEnterpriseContext, requirePermission } from '@/lib/enterprise/context';
 
 function jsonError(error: string, status: number) {
   return Response.json({ success: false, error }, { status });
@@ -13,18 +12,15 @@ function num(value: unknown): number {
 
 export async function GET(request: Request) {
   try {
-    const user = await getUserFromRequest(request);
-    if (!user) return jsonError('请先登录', 401);
-    if (!canViewFinancialFields(user)) return jsonError('无权查看财务汇总', 403);
-    const supabase = getSupabaseClient();
-    let ordersQuery = supabase.from('orders').select('total_amount,cost_amount,profit_amount,created_at');
-    if (user.tenant_id) ordersQuery = ordersQuery.eq('tenant_id', user.tenant_id);
+    void request;
+    const context = await getEnterpriseContext();
+    requirePermission(context, 'dashboard.read');
+    const supabase = await createClient();
     const [ordersRes, wagesRes] = await Promise.all([
-      ordersQuery,
-      supabase.from('worker_wage_records').select('wage_amount,status,created_at'),
+      supabase.from('orders').select('total_amount,cost_amount,profit_amount,created_at').eq('enterprise_id', context.enterpriseId),
+      supabase.from('worker_wage_records').select('wage_amount,status,created_at').eq('enterprise_id', context.enterpriseId),
     ]);
-    if (ordersRes.error) return jsonError(ordersRes.error.message, 500);
-    if (wagesRes.error) return jsonError(wagesRes.error.message, 500);
+    if (ordersRes.error || wagesRes.error) return jsonError('获取财务汇总失败', 500);
     const orders = (ordersRes.data || []) as Record<string, unknown>[];
     const wages = (wagesRes.data || []) as Record<string, unknown>[];
     return Response.json({

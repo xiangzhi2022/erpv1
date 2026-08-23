@@ -1,7 +1,5 @@
-import { getSupabaseClient } from '@/db/client';
-import { getUserFromRequest } from '@/lib/auth';
-import { canManageProduction, canViewFinancialFields } from '@/lib/four-level-order';
-import { isSuperAdmin } from '@/lib/role-access';
+import { createClient } from '@/lib/supabase/server';
+import { getEnterpriseContext, requirePermission } from '@/lib/enterprise/context';
 
 function jsonError(error: string, status: number) {
   return Response.json({ success: false, error }, { status });
@@ -14,24 +12,16 @@ function num(value: unknown): number {
 
 export async function GET(request: Request) {
   try {
-    const user = await getUserFromRequest(request);
-    if (!user) return jsonError('请先登录', 401);
-    if (!isSuperAdmin(user) && !canManageProduction(user) && !canViewFinancialFields(user)) return jsonError('无权查看看板', 403);
-    const supabase = getSupabaseClient();
-    let orderQuery = supabase.from('orders').select('id,status,total_amount,cost_amount,profit_amount,created_at,delivery_date');
-    let taskQuery = supabase.from('production_tasks').select('id,status,quantity,created_at');
-    if (user.tenant_id) {
-      orderQuery = orderQuery.eq('tenant_id', user.tenant_id);
-      taskQuery = taskQuery.eq('tenant_id', user.tenant_id);
-    }
+    void request;
+    const context = await getEnterpriseContext();
+    requirePermission(context, 'dashboard.read');
+    const supabase = await createClient();
     const [ordersRes, tasksRes, wagesRes] = await Promise.all([
-      orderQuery,
-      taskQuery,
-      supabase.from('worker_wage_records').select('wage_amount,status,created_at'),
+      supabase.from('orders').select('id,status,total_amount,cost_amount,profit_amount,created_at,delivery_date').eq('enterprise_id', context.enterpriseId),
+      supabase.from('production_tasks').select('id,status,quantity,created_at').eq('enterprise_id', context.enterpriseId),
+      supabase.from('worker_wage_records').select('wage_amount,status,created_at').eq('enterprise_id', context.enterpriseId),
     ]);
-    if (ordersRes.error) return jsonError(ordersRes.error.message, 500);
-    if (tasksRes.error) return jsonError(tasksRes.error.message, 500);
-    if (wagesRes.error) return jsonError(wagesRes.error.message, 500);
+    if (ordersRes.error || tasksRes.error || wagesRes.error) return jsonError('获取看板汇总失败', 500);
     const orders = (ordersRes.data || []) as Record<string, unknown>[];
     const tasks = (tasksRes.data || []) as Record<string, unknown>[];
     const wages = (wagesRes.data || []) as Record<string, unknown>[];

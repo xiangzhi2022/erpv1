@@ -46,8 +46,6 @@ export const API_ROUTE_POLICY_ENTRIES: readonly PolicyEntry[] = [
   ...enterpriseRoutes([
     '/api/categories/[id]',
     '/api/categories',
-    '/api/products/[id]',
-    '/api/products/[id]/tasks',
   ], 'catalog.read', 'catalog.manage'),
   ...enterpriseRoutes([
     '/api/customers',
@@ -149,6 +147,12 @@ export const API_ROUTE_POLICY_ENTRIES: readonly PolicyEntry[] = [
     '/api/worker/report',
     '/api/worker/tasks',
   ], 'production.read', 'production.manage'),
+  ...enterpriseRoutes([
+    '/api/products/[id]',
+  ], 'orders.read', 'orders.update'),
+  ...enterpriseRoutes([
+    '/api/products/[id]/tasks',
+  ], 'production.read', 'production.plan'),
   ...enterpriseRoutes([
     '/api/performance/workers/[id]',
     '/api/performance/workers',

@@ -1,27 +1,20 @@
 import { NextResponse } from 'next/server';
-import { getSupabaseClient } from '@/db/client';
-import { getUserFromRequest } from '@/lib/auth';
-import { isSuperAdmin } from '@/lib/role-access';
+import { createClient } from '@/lib/supabase/server';
+import { getEnterpriseContext, requirePermission } from '@/lib/enterprise/context';
 import { format, subMonths, startOfMonth, endOfMonth } from 'date-fns';
 
 type Row = Record<string, unknown>;
-type DashboardUser = {
-  id?: string;
-  role?: string;
-  tenant_id?: string;
-};
-
-async function safeRows<T extends Row>(
+async function safeRows(
   label: string,
-  query: PromiseLike<{ data: T[] | null; error: unknown }>
-): Promise<T[]> {
+  query: PromiseLike<{ data: unknown[] | null; error: unknown }>
+): Promise<Row[]> {
   try {
     const { data, error } = await query;
     if (error) {
       console.warn(`Dashboard KPI fallback for ${label}:`, error);
       return [];
     }
-    return Array.isArray(data) ? data : [];
+    return Array.isArray(data) ? data as Row[] : [];
   } catch (error) {
     console.warn(`Dashboard KPI fallback for ${label}:`, error);
     return [];
@@ -36,75 +29,68 @@ function calcGrowth(current: number, previous: number): number {
 
 export async function GET(request: Request) {
   try {
-    const user = (await getUserFromRequest(request)) as DashboardUser | null;
-    if (!user) {
-      return NextResponse.json({ success: false, error: '请先登录' }, { status: 401 });
-    }
-
-    const supabase = getSupabaseClient();
+    void request;
+    const context = await getEnterpriseContext();
+    requirePermission(context, 'dashboard.read');
+    const supabase = await createClient();
     const now = new Date();
     const thisMonthStart = format(startOfMonth(now), 'yyyy-MM-dd');
     const thisMonthEnd = format(endOfMonth(now), 'yyyy-MM-dd');
     const lastMonthStart = format(startOfMonth(subMonths(now, 1)), 'yyyy-MM-dd');
     const lastMonthEnd = format(endOfMonth(subMonths(now, 1)), 'yyyy-MM-dd');
 
-    // 构建订单查询 - 根据角色过滤
-    const isAdmin = isSuperAdmin(user);
-    const orderFilter = !isAdmin && user.tenant_id ? { tenant_id: user.tenant_id } : {};
-    const tenantFilter = !isAdmin && user.tenant_id ? { id: user.tenant_id } : {};
-
     const [
       allOrders,
       thisMonthOrders,
       lastMonthOrders,
-      allTenants,
-      lastMonthTenants,
+      allDealers,
+      lastMonthDealers,
       thisMonthCustomers,
       lastMonthCustomers,
       pendingTaskRows,
     ] = await Promise.all([
-      safeRows('orders', supabase.from('orders').select('status, total_amount, created_at').match(orderFilter)),
+      safeRows('orders', supabase.from('orders').select('status, total_amount, created_at').eq('enterprise_id', context.enterpriseId)),
       safeRows(
         'this_month_orders',
         supabase
           .from('orders')
           .select('total_amount')
+          .eq('enterprise_id', context.enterpriseId)
           .gte('created_at', thisMonthStart)
           .lte('created_at', thisMonthEnd)
-          .match(orderFilter)
       ),
       safeRows(
         'last_month_orders',
         supabase
           .from('orders')
           .select('total_amount')
+          .eq('enterprise_id', context.enterpriseId)
           .gte('created_at', lastMonthStart)
           .lte('created_at', lastMonthEnd)
-          .match(orderFilter)
       ),
-      safeRows('tenants', supabase.from('tenants').select('id, tenant_type, created_at').match(tenantFilter)),
+      safeRows('dealers', supabase.from('dealers').select('id, created_at').eq('enterprise_id', context.enterpriseId)),
       safeRows(
-        'last_month_tenants',
+        'last_month_dealers',
         supabase
-          .from('tenants')
-          .select('id, tenant_type, created_at')
+          .from('dealers')
+          .select('id, created_at')
+          .eq('enterprise_id', context.enterpriseId)
           .lte('created_at', lastMonthEnd)
-          .match(tenantFilter)
       ),
       safeRows(
         'this_month_customers',
-        supabase.from('customers').select('id').gte('created_at', thisMonthStart).lte('created_at', thisMonthEnd)
+        supabase.from('customers').select('id').eq('enterprise_id', context.enterpriseId).gte('created_at', thisMonthStart).lte('created_at', thisMonthEnd)
       ),
       safeRows(
         'last_month_customers',
-        supabase.from('customers').select('id').gte('created_at', lastMonthStart).lte('created_at', lastMonthEnd)
+        supabase.from('customers').select('id').eq('enterprise_id', context.enterpriseId).gte('created_at', lastMonthStart).lte('created_at', lastMonthEnd)
       ),
-      safeRows('pending_tasks', supabase.from('tasks').select('id, status').in('status', ['pending', 'in_progress'])),
+      safeRows('pending_tasks', supabase.from('tasks').select('id, status').eq('enterprise_id', context.enterpriseId).in('status', ['pending', 'in_progress'])),
     ]);
 
     // 核心指标计算
-    const dealerCount = allTenants.filter((t) => t.tenant_type === 'dealer').length;
-    const lastMonthDealerCount = lastMonthTenants.filter((t) => t.tenant_type === 'dealer').length;
+    const dealerCount = allDealers.length;
+    const lastMonthDealerCount = lastMonthDealers.length;
     const thisMonthNewCustomers = thisMonthCustomers.length;
     const lastMonthNewCustomers = lastMonthCustomers.length;
 

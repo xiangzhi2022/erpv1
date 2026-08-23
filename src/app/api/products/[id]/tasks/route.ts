@@ -1,6 +1,7 @@
 import { parseJsonObject } from '@/lib/api/request';
-import { getSupabaseClient } from '@/db/client';
 import { getUserFromRequest } from '@/lib/auth';
+import { getEnterpriseContext, requirePermission } from '@/lib/enterprise/context';
+import { createClient } from '@/lib/supabase/server';
 import {
   calculateTaskWage,
   canEditOrderContent,
@@ -30,13 +31,20 @@ function numberValue(value: unknown): number | null {
 
 export async function POST(request: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
+    const context = await getEnterpriseContext();
+    requirePermission(context, 'production.plan');
     const user = await getUserFromRequest(request);
     if (!user) return jsonError('请先登录', 401);
     if (!canManageProduction(user) && !canEditOrderContent(user)) return jsonError('无权新增生产任务', 403);
 
     const { id: productId } = await params;
-    const supabase = getSupabaseClient();
-    const { data: product } = await supabase.from('order_products').select('*').eq('id', productId).maybeSingle();
+    const supabase = await createClient();
+    const { data: product } = await supabase
+      .from('order_products')
+      .select('*')
+      .eq('enterprise_id', context.enterpriseId)
+      .eq('id', productId)
+      .maybeSingle();
     if (!product) return jsonError('产品不存在', 404);
     const tree = await loadOrderTree(supabase, String(product.order_id));
     if (!tree) return jsonError('订单不存在', 404);
@@ -51,6 +59,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     const { count } = await supabase
       .from('production_tasks')
       .select('id', { count: 'exact', head: true })
+      .eq('enterprise_id', context.enterpriseId)
       .eq('product_id', productId);
     const nextIndex = (count || 0) + 1;
     const taskNo = `${String(product.product_no || tree.order_no)}-T${String(nextIndex).padStart(2, '0')}`;
@@ -77,7 +86,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
       workstation_id: text(body.workstation_id),
       assigned_worker_id: text(body.assigned_worker_id),
       worker_id: text(body.assigned_worker_id),
-      tenant_id: user.tenant_id || tree.to_tenant_id || tree.tenant_id || null,
+      enterprise_id: context.enterpriseId,
       wage_rule_id: text(body.wage_rule_id),
       remark: text(body.remark),
       updated_at: new Date().toISOString(),

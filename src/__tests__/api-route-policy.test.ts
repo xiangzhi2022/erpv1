@@ -86,4 +86,22 @@ describe('API route policy manifest', () => {
 
     expect(offenders).toEqual([]);
   });
+
+  it('uses request-scoped Supabase access for migrated internal-work APIs', () => {
+    const internalRoots = [
+      'categories',
+      'customers',
+      'dashboard',
+      'notifications',
+      'products',
+      'tasks',
+    ].map((directory) => resolve(API_ROOT, directory));
+    const files = internalRoots.flatMap((root) => routeFiles(root));
+    const offenders = files.filter((file) => {
+      const source = readFileSync(file, 'utf8');
+      return /@\/db\/client|getSupabaseClient\s*\(/.test(source);
+    }).map((file) => relative(process.cwd(), file));
+
+    expect(offenders).toEqual([]);
+  });
 });

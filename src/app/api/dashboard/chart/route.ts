@@ -1,27 +1,20 @@
 import { NextResponse } from 'next/server';
-import { getSupabaseClient } from '@/db/client';
-import { getUserFromRequest } from '@/lib/auth';
-import { isSuperAdmin } from '@/lib/role-access';
+import { createClient } from '@/lib/supabase/server';
+import { getEnterpriseContext, requirePermission } from '@/lib/enterprise/context';
 import { format, subMonths, startOfMonth, endOfMonth } from 'date-fns';
 
 type Row = Record<string, unknown>;
-type DashboardUser = {
-  id?: string;
-  role?: string;
-  tenant_id?: string;
-};
-
-async function safeRows<T extends Row>(
+async function safeRows(
   label: string,
-  query: PromiseLike<{ data: T[] | null; error: unknown }>
-): Promise<T[]> {
+  query: PromiseLike<{ data: unknown[] | null; error: unknown }>
+): Promise<Row[]> {
   try {
     const { data, error } = await query;
     if (error) {
       console.warn(`Dashboard chart fallback for ${label}:`, error);
       return [];
     }
-    return Array.isArray(data) ? data : [];
+    return Array.isArray(data) ? data as Row[] : [];
   } catch (error) {
     console.warn(`Dashboard chart fallback for ${label}:`, error);
     return [];
@@ -52,15 +45,11 @@ const statusColorMap: Record<string, string> = {
 
 export async function GET(request: Request) {
   try {
-    const user = (await getUserFromRequest(request)) as DashboardUser | null;
-    if (!user) {
-      return NextResponse.json({ success: false, error: '请先登录' }, { status: 401 });
-    }
-
-    const supabase = getSupabaseClient();
+    void request;
+    const context = await getEnterpriseContext();
+    requirePermission(context, 'dashboard.read');
+    const supabase = await createClient();
     const now = new Date();
-    const isAdmin = isSuperAdmin(user);
-    const orderFilter = !isAdmin && user.tenant_id ? { tenant_id: user.tenant_id } : {};
 
     // 获取过去6个月的数据
     const queries = [];
@@ -75,18 +64,19 @@ export async function GET(request: Request) {
         orderQuery: supabase
           .from('orders')
           .select('total_amount')
+          .eq('enterprise_id', context.enterpriseId)
           .gte('created_at', monthStart)
-          .lte('created_at', monthEnd)
-          .match(orderFilter),
+          .lte('created_at', monthEnd),
         dealerQuery: supabase
-          .from('tenants')
+          .from('dealers')
           .select('id')
-          .eq('tenant_type', 'dealer')
+          .eq('enterprise_id', context.enterpriseId)
           .gte('created_at', monthStart)
           .lte('created_at', monthEnd),
         customerQuery: supabase
           .from('customers')
           .select('id')
+          .eq('enterprise_id', context.enterpriseId)
           .gte('created_at', monthStart)
           .lte('created_at', monthEnd),
       });
@@ -112,7 +102,7 @@ export async function GET(request: Request) {
 
     const statusRows = await safeRows(
       'order_status_distribution',
-      supabase.from('orders').select('status').match(orderFilter)
+      supabase.from('orders').select('status').eq('enterprise_id', context.enterpriseId)
     );
     const statusCount = statusRows.reduce<Record<string, number>>((acc, order) => {
       const status = String(order.status || 'pending');

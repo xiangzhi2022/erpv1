@@ -1,26 +1,20 @@
 import { NextResponse } from 'next/server';
-import { getSupabaseClient } from '@/db/client';
-import { getUserFromRequest } from '@/lib/auth';
-import { isSuperAdmin } from '@/lib/role-access';
+import { createClient } from '@/lib/supabase/server';
+import { getEnterpriseContext, requirePermission } from '@/lib/enterprise/context';
 
 type Row = Record<string, unknown>;
-type DashboardUser = {
-  id?: string;
-  role?: string;
-  tenant_id?: string;
-};
 
-async function safeRows<T extends Row>(
+async function safeRows(
   label: string,
-  query: PromiseLike<{ data: T[] | null; error: unknown }>
-): Promise<T[]> {
+  query: PromiseLike<{ data: unknown[] | null; error: unknown }>
+): Promise<Row[]> {
   try {
     const { data, error } = await query;
     if (error) {
       console.warn(`Dashboard activity fallback for ${label}:`, error);
       return [];
     }
-    return Array.isArray(data) ? data : [];
+    return Array.isArray(data) ? data as Row[] : [];
   } catch (error) {
     console.warn(`Dashboard activity fallback for ${label}:`, error);
     return [];
@@ -29,7 +23,7 @@ async function safeRows<T extends Row>(
 
 interface ActivityItem {
   id: string;
-  type: 'order' | 'tenant' | 'customer' | 'task' | 'shipping';
+  type: 'order' | 'dealer' | 'customer' | 'task';
   title: string;
   description: string;
   timestamp: string;
@@ -38,32 +32,29 @@ interface ActivityItem {
 
 export async function GET(request: Request) {
   try {
-    const user = (await getUserFromRequest(request)) as DashboardUser | null;
-    if (!user) {
-      return NextResponse.json({ success: false, error: '请先登录' }, { status: 401 });
-    }
-
-    const supabase = getSupabaseClient();
-    const isAdmin = isSuperAdmin(user);
-    const orderFilter = !isAdmin && user.tenant_id ? { tenant_id: user.tenant_id } : {};
+    void request;
+    const context = await getEnterpriseContext();
+    requirePermission(context, 'dashboard.read');
+    const supabase = await createClient();
 
     // 并行获取各类最近活动
-    const [recentOrders, recentTenants, recentCustomers, recentTasks, recentShippings] =
+    const [recentOrders, recentDealers, recentCustomers, recentTasks] =
       await Promise.all([
         safeRows(
           'orders',
           supabase
             .from('orders')
             .select('id, order_no, customer_name, status, created_at')
-            .match(orderFilter)
+            .eq('enterprise_id', context.enterpriseId)
             .order('created_at', { ascending: false })
             .limit(5)
         ),
         safeRows(
-          'tenants',
+          'dealers',
           supabase
-            .from('tenants')
-            .select('id, name, company_name, tenant_type, created_at')
+            .from('dealers')
+            .select('id, name, created_at')
+            .eq('enterprise_id', context.enterpriseId)
             .order('created_at', { ascending: false })
             .limit(3)
         ),
@@ -72,6 +63,7 @@ export async function GET(request: Request) {
           supabase
             .from('customers')
             .select('id, name, created_at')
+            .eq('enterprise_id', context.enterpriseId)
             .order('created_at', { ascending: false })
             .limit(3)
         ),
@@ -80,14 +72,7 @@ export async function GET(request: Request) {
           supabase
             .from('tasks')
             .select('id, title, status, created_at')
-            .order('created_at', { ascending: false })
-            .limit(3)
-        ),
-        safeRows(
-          'shipping',
-          supabase
-            .from('shipping')
-            .select('id, shipping_no, status, created_at')
+            .eq('enterprise_id', context.enterpriseId)
             .order('created_at', { ascending: false })
             .limit(3)
         ),
@@ -108,29 +93,24 @@ export async function GET(request: Request) {
     };
 
     for (const order of recentOrders) {
+      const status = String(order.status || 'pending');
       activities.push({
         id: String(order.id),
         type: 'order',
         title: `订单 ${order.order_no}`,
-        description: `${order.customer_name || '未知客户'} · ${statusLabels[order.status] || order.status}`,
+        description: `${order.customer_name || '未知客户'} · ${statusLabels[status] || status}`,
         timestamp: String(order.created_at || new Date().toISOString()),
       });
     }
 
-    // 租户活动
-    const tenantTypeLabels: Record<string, string> = {
-      dealer: '经销商',
-      manufacturer: '生产商',
-      material_supplier: '材料商',
-    };
-
-    for (const tenant of recentTenants) {
+    // 经销商活动
+    for (const dealer of recentDealers) {
       activities.push({
-        id: String(tenant.id),
-        type: 'tenant',
-        title: `${tenantTypeLabels[String(tenant.tenant_type)] || '租户'}注册`,
-        description: String(tenant.company_name || tenant.name || '未命名租户'),
-        timestamp: String(tenant.created_at || new Date().toISOString()),
+        id: String(dealer.id),
+        type: 'dealer',
+        title: '新增经销商',
+        description: String(dealer.name || '未命名经销商'),
+        timestamp: String(dealer.created_at || new Date().toISOString()),
       });
     }
 
@@ -153,17 +133,6 @@ export async function GET(request: Request) {
         title: `任务: ${task.title}`,
         description: `状态: ${statusLabels[String(task.status)] || task.status || '未知'}`,
         timestamp: String(task.created_at || new Date().toISOString()),
-      });
-    }
-
-    // 发货活动
-    for (const shipping of recentShippings) {
-      activities.push({
-        id: String(shipping.id),
-        type: 'shipping',
-        title: `发货 ${shipping.shipping_no}`,
-        description: `${statusLabels[String(shipping.status)] || shipping.status || '未知'}`,
-        timestamp: String(shipping.created_at || new Date().toISOString()),
       });
     }
 
