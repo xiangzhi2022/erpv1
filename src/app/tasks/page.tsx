@@ -81,6 +81,33 @@ interface NotificationItem {
   created_at: string;
 }
 
+interface ApiEnvelope<T, M extends Record<string, unknown> = Record<string, unknown>> {
+  data: T;
+  meta?: M;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+function apiErrorMessage(body: unknown, fallback: string): string {
+  if (!isRecord(body) || !isRecord(body.error)) return fallback;
+  return typeof body.error.message === "string" ? body.error.message : fallback;
+}
+
+async function readApiEnvelope<T, M extends Record<string, unknown> = Record<string, unknown>>(
+  response: Response,
+  fallback: string,
+): Promise<ApiEnvelope<T, M>> {
+  const body: unknown = await response.json();
+  if (!response.ok) throw new Error(apiErrorMessage(body, fallback));
+  if (!isRecord(body) || !("data" in body)) throw new Error(fallback);
+  return {
+    data: body.data as T,
+    ...(isRecord(body.meta) ? { meta: body.meta as M } : {}),
+  };
+}
+
 const statusConfig: Record<string, { label: string; color: string; icon: React.ComponentType<{ className?: string }> }> = {
   pending: { label: "待办", color: "bg-yellow-100 text-yellow-800 border-yellow-200", icon: Circle },
   in_progress: { label: "进行中", color: "bg-blue-100 text-blue-800 border-blue-200", icon: Clock },
@@ -141,21 +168,27 @@ export default function TasksPage() {
         fetch("/api/notifications").catch(() => null),
       ]);
 
-      if (tasksRes?.ok) {
-        const data = await tasksRes.json();
-        setTasks(data.data || []);
-        setStats(data.stats || null);
+      if (tasksRes) {
+        const body = await readApiEnvelope<Task[], { total: number; stats: TaskStats }>(
+          tasksRes,
+          "获取任务失败",
+        );
+        setTasks(body.data);
+        setStats(body.meta?.stats ?? null);
       }
 
-      if (catRes?.ok) {
-        const data = await catRes.json();
-        setCategories(data.data || []);
+      if (catRes) {
+        const body = await readApiEnvelope<Category[]>(catRes, "获取分类失败");
+        setCategories(body.data);
       }
 
-      if (notifRes?.ok) {
-        const data = await notifRes.json();
-        setNotifications(data.data || []);
-        setUnreadCount(data.unreadCount || 0);
+      if (notifRes) {
+        const body = await readApiEnvelope<NotificationItem[], { unreadCount: number }>(
+          notifRes,
+          "获取通知失败",
+        );
+        setNotifications(body.data);
+        setUnreadCount(body.meta?.unreadCount ?? 0);
       }
     } catch (error) {
       console.error("获取数据失败:", error);
@@ -218,14 +251,9 @@ export default function TasksPage() {
           completed: targetStatus === "completed",
         }),
       });
-      const data = await res.json();
-      if (data.success) {
-        setTasks((prev) =>
-          prev.map((t) => (t.id === task.id ? data.data : t))
-        );
-        // Refresh stats after status change
-        fetchData();
-      }
+      const body = await readApiEnvelope<Task>(res, "更新任务失败");
+      setTasks((prev) => prev.map((t) => (t.id === task.id ? body.data : t)));
+      fetchData();
     } catch {
       // Silent fail
     }
@@ -288,10 +316,9 @@ export default function TasksPage() {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(payload),
         });
-        const data = await res.json();
-        if (!data.success) throw new Error(data.error || "更新失败");
+        const body = await readApiEnvelope<Task>(res, "更新失败");
         setTasks((prev) =>
-          prev.map((t) => (t.id === editingTask.id ? data.data : t))
+          prev.map((t) => (t.id === editingTask.id ? body.data : t))
         );
       } else {
         const res = await fetch("/api/tasks", {
@@ -299,9 +326,8 @@ export default function TasksPage() {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(payload),
         });
-        const data = await res.json();
-        if (!data.success) throw new Error(data.error || "创建失败");
-        setTasks((prev) => [data.data, ...prev]);
+        const body = await readApiEnvelope<Task>(res, "创建失败");
+        setTasks((prev) => [body.data, ...prev]);
       }
       setSheetOpen(false);
       fetchData();
@@ -319,12 +345,9 @@ export default function TasksPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action: "toggle" }),
       });
-      const data = await res.json();
-      if (data.success) {
-        setTasks((prev) => prev.map((t) => (t.id === task.id ? data.data : t)));
-        // Refresh stats after toggle
-        fetchData();
-      }
+      const body = await readApiEnvelope<Task>(res, "切换任务状态失败");
+      setTasks((prev) => prev.map((t) => (t.id === task.id ? body.data : t)));
+      fetchData();
     } catch {
       // Silent fail
     }
@@ -334,10 +357,8 @@ export default function TasksPage() {
     if (!confirm("确认删除该任务？")) return;
     try {
       const res = await fetch(`/api/tasks/${id}`, { method: "DELETE" });
-      const data = await res.json();
-      if (data.success) {
-        setTasks((prev) => prev.filter((t) => t.id !== id));
-      }
+      await readApiEnvelope<{ deleted: boolean }>(res, "删除任务失败");
+      setTasks((prev) => prev.filter((t) => t.id !== id));
     } catch {
       // Silent fail
     }
@@ -350,11 +371,9 @@ export default function TasksPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action: "markAllRead" }),
       });
-      const data = await res.json();
-      if (data.success) {
-        setNotifications((prev) => prev.map((n) => ({ ...n, read: true })));
-        setUnreadCount(0);
-      }
+      await readApiEnvelope<{ markedCount: number }>(res, "标记通知失败");
+      setNotifications((prev) => prev.map((n) => ({ ...n, read: true })));
+      setUnreadCount(0);
     } catch {
       // Silent fail
     }
@@ -362,11 +381,12 @@ export default function TasksPage() {
 
   const handleCheckOverdue = async () => {
     try {
-      await fetch("/api/notifications", {
+      const response = await fetch("/api/notifications", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action: "checkOverdue" }),
       });
+      await readApiEnvelope<{ newNotifications: number }>(response, "检查过期任务失败");
       fetchData();
     } catch {
       // Silent fail
@@ -614,17 +634,15 @@ export default function TasksPage() {
                                   const res = await fetch(`/api/notifications/${n.id}`, {
                                     method: "PATCH",
                                   });
-                                  const data = await res.json();
-                                  if (data.success) {
-                                    setNotifications((prev) =>
-                                      prev.map((item) =>
-                                        item.id === n.id
-                                          ? { ...item, read: true }
-                                          : item
-                                      )
-                                    );
-                                    setUnreadCount((c) => Math.max(0, c - 1));
-                                  }
+                                  await readApiEnvelope<NotificationItem>(res, "标记通知失败");
+                                  setNotifications((prev) =>
+                                    prev.map((item) =>
+                                      item.id === n.id
+                                        ? { ...item, read: true }
+                                        : item
+                                    )
+                                  );
+                                  setUnreadCount((c) => Math.max(0, c - 1));
                                 } catch {
                                   // Silent fail
                                 }

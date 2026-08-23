@@ -167,8 +167,10 @@ export const API_ROUTE_POLICY_ENTRIES: readonly PolicyEntry[] = [
   ], 'roles.manage'),
   ...enterpriseRoutes([
     '/api/notifications/[id]',
+  ], 'notifications.read'),
+  ...enterpriseRoutesWithMutationPermissions([
     '/api/notifications',
-  ], 'notifications.read', 'notifications.manage'),
+  ], 'notifications.read', ['notifications.read', 'tasks.manage', 'notifications.manage']),
   ...enterpriseRoutes([
     '/api/tasks/[id]',
     '/api/tasks',

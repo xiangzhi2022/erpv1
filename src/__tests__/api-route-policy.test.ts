@@ -115,6 +115,15 @@ describe('API route policy manifest', () => {
     expect(getApiRoutePolicy('/api/finance/wage-records/wage-id/pay', 'PATCH')).toMatchObject({ permission: 'wages.settle' });
   });
 
+  it('allows recipients to mark notifications while keeping overdue checks service-guarded', () => {
+    expect(getApiRoutePolicy('/api/notifications/notification-id', 'PATCH')).toMatchObject({
+      permissions: ['notifications.read'],
+    });
+    expect(getApiRoutePolicy('/api/notifications', 'POST')).toMatchObject({
+      permissions: ['notifications.read', 'tasks.manage', 'notifications.manage'],
+    });
+  });
+
   it('rejects raw JSON parsing in mutation route handlers', () => {
     const offenders = routeFiles().filter((file) => {
       const source = readFileSync(file, 'utf8');

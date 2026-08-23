@@ -1,132 +1,34 @@
-import { parseJsonObject } from '@/lib/api/request';
-import { NextResponse } from "next/server";
-import {
-  getTaskById,
-  updateTask,
-  deleteTask,
-  toggleTask,
-} from "@/app/actions/tasks";
+import { ApiError } from '@/lib/api/errors';
+import { withApiHandler, type ApiHandlerContext } from '@/lib/api/handler';
+import { parseJson, parseParams } from '@/lib/api/request';
+import { apiSuccess } from '@/lib/api/response';
+import { taskIdSchema, taskMutationSchema } from '@/lib/tasks/schemas';
+import { deleteTask, getTaskById, toggleTask, updateTask } from '@/app/actions/tasks';
 
-// GET /api/tasks/[id] - 查询单个任务
-export async function GET(
-  _request: Request,
-  { params }: { params: Promise<{ id: string }> }
-) {
-  try {
-    const { id } = await params;
+export const GET = withApiHandler(
+  { policy: 'enterprise' },
+  async ({ params }) => {
+    const { id } = await parseParams(params, taskIdSchema);
     const task = await getTaskById(id);
-    if (!task) {
-      return NextResponse.json(
-        { success: false, error: "任务不存在" },
-        { status: 404 }
-      );
-    }
-    return NextResponse.json({ success: true, data: task });
-  } catch (e: unknown) {
-    const message = e instanceof Error ? e.message : "查询任务失败";
-    return NextResponse.json({ success: false, error: message }, { status: 500 });
-  }
+    if (!task) throw ApiError.notFound('TASK_NOT_FOUND', '任务不存在');
+    return apiSuccess(task);
+  },
+);
+
+async function mutateTask({ request, params }: ApiHandlerContext) {
+  const { id } = await parseParams(params, taskIdSchema);
+  const input = await parseJson(request, taskMutationSchema);
+  return apiSuccess('action' in input ? await toggleTask(id) : await updateTask(id, input));
 }
 
-// PATCH /api/tasks/[id] - 部分更新任务
-export async function PATCH(
-  request: Request,
-  { params }: { params: Promise<{ id: string }> }
-) {
-  try {
-    const { id } = await params;
-    const body = await parseJsonObject(request);
+export const PATCH = withApiHandler({ policy: 'enterprise' }, mutateTask);
+export const PUT = withApiHandler({ policy: 'enterprise' }, mutateTask);
 
-    // 特殊操作：切换完成状态
-    if (body.action === "toggle") {
-      const task = await toggleTask(id);
-      return NextResponse.json({ success: true, data: task });
-    }
-
-    // Whitelist allowed update fields to prevent arbitrary data injection
-    const allowedFields = [
-      "title", "description", "status", "priority",
-      "category_id", "assignee_id", "assignee_name", "assignee_avatar",
-      "completed", "due_date",
-    ];
-    const updateData: Record<string, unknown> = {};
-    for (const key of allowedFields) {
-      if (key in body) {
-        updateData[key] = body[key];
-      }
-    }
-
-    const task = await updateTask(id, updateData);
-
-    // 如果更新了指派负责人，创建分配通知
-    if (body.assignee_name && body.assignee_id) {
-      try {
-        const { createNotification } = await import("@/app/actions/tasks");
-        await createNotification({
-          task_id: id,
-          type: "assignment",
-          title: `任务重新分配: ${task.title}`,
-          message: `任务"${task.title}"已重新分配给 ${body.assignee_name}`,
-        });
-      } catch {
-        // 通知创建失败不影响主流程
-      }
-    }
-
-    return NextResponse.json({ success: true, data: task });
-  } catch (e: unknown) {
-    const message = e instanceof Error ? e.message : "更新任务失败";
-    return NextResponse.json({ success: false, error: message }, { status: 500 });
-  }
-}
-
-// PUT /api/tasks/[id] - 完整更新任务
-export async function PUT(
-  request: Request,
-  { params }: { params: Promise<{ id: string }> }
-) {
-  try {
-    const { id } = await params;
-    const body = await parseJsonObject(request);
-
-    // 特殊操作：切换完成状态
-    if (body.action === "toggle") {
-      const task = await toggleTask(id);
-      return NextResponse.json({ success: true, data: task });
-    }
-
-    // Whitelist allowed update fields
-    const allowedFields = [
-      "title", "description", "status", "priority",
-      "category_id", "assignee_id", "assignee_name", "assignee_avatar",
-      "completed", "due_date",
-    ];
-    const updateData: Record<string, unknown> = {};
-    for (const key of allowedFields) {
-      if (key in body) {
-        updateData[key] = body[key];
-      }
-    }
-
-    const task = await updateTask(id, updateData);
-    return NextResponse.json({ success: true, data: task });
-  } catch (e: unknown) {
-    const message = e instanceof Error ? e.message : "更新任务失败";
-    return NextResponse.json({ success: false, error: message }, { status: 500 });
-  }
-}
-
-// DELETE /api/tasks/[id] - 删除任务
-export async function DELETE(
-  _request: Request,
-  { params }: { params: Promise<{ id: string }> }
-) {
-  try {
-    const { id } = await params;
+export const DELETE = withApiHandler(
+  { policy: 'enterprise' },
+  async ({ params }) => {
+    const { id } = await parseParams(params, taskIdSchema);
     await deleteTask(id);
-    return NextResponse.json({ success: true });
-  } catch (e: unknown) {
-    const message = e instanceof Error ? e.message : "删除任务失败";
-    return NextResponse.json({ success: false, error: message }, { status: 500 });
-  }
-}
+    return apiSuccess({ deleted: true });
+  },
+);
