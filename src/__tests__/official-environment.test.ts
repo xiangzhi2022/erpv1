@@ -2,6 +2,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const createClientMock = vi.hoisted(() => vi.fn(() => ({ client: true })));
 
+vi.mock('server-only', () => ({}));
+
 vi.mock('@supabase/supabase-js', () => ({
   createClient: createClientMock,
 }));
@@ -66,12 +68,13 @@ describe('Supabase environment', () => {
     expect(() => getSupabaseCredentials()).toThrow(/NEXT_PUBLIC_SUPABASE_URL/);
   });
 
-  it('uses the publishable key for user clients and the secret key for service clients', async () => {
+  it('uses the publishable key for user clients and isolates the secret key in the admin client', async () => {
     process.env.NEXT_PUBLIC_SUPABASE_URL = 'https://example.supabase.co';
     process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY = 'sb_publishable_example';
     process.env.SUPABASE_SECRET_KEY = 'sb_secret_example';
 
-    const { getSupabaseClient, getSupabaseServiceClient } = await import('@/db/client');
+    const { getSupabaseClient } = await import('@/db/client');
+    const { createAdminClient } = await import('@/lib/supabase/admin');
 
     getSupabaseClient('user-token');
     expect(createClientMock).toHaveBeenLastCalledWith(
@@ -82,7 +85,7 @@ describe('Supabase environment', () => {
       }),
     );
 
-    getSupabaseServiceClient();
+    createAdminClient();
     expect(createClientMock).toHaveBeenLastCalledWith(
       'https://example.supabase.co',
       'sb_secret_example',
@@ -94,9 +97,9 @@ describe('Supabase environment', () => {
     process.env.NEXT_PUBLIC_SUPABASE_URL = 'https://example.supabase.co';
     process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY = 'sb_publishable_example';
 
-    const { getSupabaseServiceClient } = await import('@/db/client');
+    const { createAdminClient } = await import('@/lib/supabase/admin');
 
-    expect(() => getSupabaseServiceClient()).toThrow(/SUPABASE_SECRET_KEY/);
+    expect(() => createAdminClient()).toThrow(/SUPABASE_SECRET_KEY/);
     expect(createClientMock).not.toHaveBeenCalled();
   });
 });

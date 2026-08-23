@@ -1,9 +1,9 @@
 import { NextResponse } from 'next/server';
-import { getSupabaseServiceClient } from '@/db/client';
+import { createAdminClient } from '@/lib/supabase/admin';
 import { getSession } from '@/lib/auth';
 
 function getSupabaseAdmin() {
-  return getSupabaseServiceClient();
+  return createAdminClient();
 }
 
 async function getAuthUser() {

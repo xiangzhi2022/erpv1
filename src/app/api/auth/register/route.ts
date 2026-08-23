@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getSupabaseServiceClient } from '@/db/client';
+import { createAdminClient } from '@/lib/supabase/admin';
 import { hashPassword } from '@/lib/auth';
 import { randomUUID } from 'crypto';
 
@@ -60,7 +60,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ success: false, error: '企业类型不正确' }, { status: 400 });
     }
 
-    const supabase = getSupabaseServiceClient();
+    const supabase = createAdminClient();
     const { data: existingUser, error: checkUserError } = await supabase
       .from('users')
       .select('id')
