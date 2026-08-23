@@ -64,6 +64,7 @@ select ok(
 -- to this test transaction and rolls back with the fixture data.
 alter group v2_function_owner add user postgres;
 set local role v2_function_owner;
+set local search_path = public, extensions, app_private, pg_catalog;
 
 select throws_ok(
   $$ select * from app_private.consume_rate_limit('auth.login.ip', 'raw-ip', 10, 900) $$,
