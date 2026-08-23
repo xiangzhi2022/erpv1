@@ -8,6 +8,8 @@ begin
 end;
 $$;
 
+grant create on schema public to v2_function_owner;
+
 create function public.claim_api_idempotency(
   target_enterprise_id uuid,
   target_idempotency_key text,
@@ -114,6 +116,8 @@ revoke all on function app_private.claim_idempotency(
 revoke all on function app_private.complete_idempotency(
   uuid, uuid, text, text, uuid, smallint, jsonb, interval
 ) from public, anon, authenticated, service_role;
+
+revoke create on schema public from v2_function_owner;
 
 do $$
 begin

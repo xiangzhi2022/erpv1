@@ -8,6 +8,8 @@ begin
 end;
 $$;
 
+grant create on schema public to v2_function_owner;
+
 create table app_private.api_rate_limit_buckets (
   bucket text not null,
   identifier_hash text not null,
@@ -164,6 +166,8 @@ revoke all on function public.consume_api_rate_limit(text, text, integer, intege
 
 grant execute on function public.consume_api_rate_limit(text, text, integer, integer)
   to service_role;
+
+revoke create on schema public from v2_function_owner;
 
 do $$
 begin
