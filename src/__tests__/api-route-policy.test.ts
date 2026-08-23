@@ -156,6 +156,7 @@ describe('API route policy manifest', () => {
       resolve(API_ROOT, 'orders/prefix/route.ts'),
       resolve(API_ROOT, 'orders/sequence/route.ts'),
       resolve(API_ROOT, 'orders/[id]/spaces/route.ts'),
+      resolve(API_ROOT, 'orders/[id]/split/confirm/route.ts'),
       resolve(API_ROOT, 'orders/attachments/route.ts'),
       resolve(API_ROOT, 'spaces/[id]/products/route.ts'),
       resolve(API_ROOT, 'spaces/[id]/route.ts'),
