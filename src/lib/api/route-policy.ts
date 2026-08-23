@@ -87,7 +87,6 @@ export const API_ROUTE_POLICY_ENTRIES: readonly PolicyEntry[] = [
     '/api/orders/[id]',
     '/api/orders/[id]/spaces',
     '/api/orders/[id]/split/confirm',
-    '/api/orders/attachments',
     '/api/orders/basic',
     '/api/orders/generate',
     '/api/orders/prefix',
@@ -96,6 +95,9 @@ export const API_ROUTE_POLICY_ENTRIES: readonly PolicyEntry[] = [
     '/api/spaces/[id]/products',
     '/api/spaces/[id]',
   ], 'orders.read', 'orders.manage'),
+  ...enterpriseRoutes([
+    '/api/orders/attachments',
+  ], 'attachments.read', 'attachments.manage'),
   ...enterpriseRoutes([
     '/api/departments/[id]',
     '/api/departments',

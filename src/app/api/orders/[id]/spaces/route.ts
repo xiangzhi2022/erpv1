@@ -1,8 +1,6 @@
 import { parseJsonObject } from '@/lib/api/request';
-import { getSupabaseClient } from '@/db/client';
-import { getUserFromRequest } from '@/lib/auth';
-import { canEditOrderContent } from '@/lib/four-level-order';
-import { canSeeOrder, loadOrderTree, writeStatusLog } from '@/lib/four-level-order-server';
+import { getEnterpriseContext, requirePermission } from '@/lib/enterprise/context';
+import { createClient } from '@/lib/supabase/server';
 
 function jsonError(error: string, status: number) {
   return Response.json({ success: false, error }, { status });
@@ -13,15 +11,18 @@ export async function POST(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const user = await getUserFromRequest(request);
-    if (!user) return jsonError('请先登录', 401);
-    if (!canEditOrderContent(user)) return jsonError('无权新增空间', 403);
+    const context = await getEnterpriseContext();
+    requirePermission(context, 'orders.update');
 
     const { id } = await params;
-    const supabase = getSupabaseClient();
-    const tree = await loadOrderTree(supabase, id);
-    if (!tree) return jsonError('订单不存在', 404);
-    if (!canSeeOrder(user, tree)) return jsonError('无权操作该订单', 403);
+    const supabase = await createClient();
+    const { data: order } = await supabase
+      .from('orders')
+      .select('id,order_no')
+      .eq('enterprise_id', context.enterpriseId)
+      .eq('id', id)
+      .maybeSingle();
+    if (!order) return jsonError('订单不存在', 404);
 
     const body = (await parseJsonObject(request)) as Record<string, unknown>;
     const spaceName = typeof body.space_name === 'string' ? body.space_name.trim() : '';
@@ -30,13 +31,15 @@ export async function POST(
     const { count } = await supabase
       .from('order_spaces')
       .select('id', { count: 'exact', head: true })
+      .eq('enterprise_id', context.enterpriseId)
       .eq('order_id', id);
     const nextIndex = (count || 0) + 1;
-    const spaceNo = `${String(tree.order_no || 'ORDER')}-S${String(nextIndex).padStart(2, '0')}`;
+    const spaceNo = `${order.order_no}-S${String(nextIndex).padStart(2, '0')}`;
 
     const { data, error } = await supabase
       .from('order_spaces')
       .insert({
+        enterprise_id: context.enterpriseId,
         order_id: id,
         space_no: spaceNo,
         space_name: spaceName,
@@ -49,8 +52,16 @@ export async function POST(
       .select()
       .single();
 
-    if (error) return jsonError(error.message, 500);
-    await writeStatusLog(supabase, 'space', String(data.id), null, 'draft', user.id, '新增空间');
+    if (error) return jsonError('新增空间失败', 500);
+    await supabase.from('order_status_logs').insert({
+      enterprise_id: context.enterpriseId,
+      target_type: 'space',
+      target_id: data.id,
+      from_status: null,
+      to_status: 'draft',
+      changed_by: context.userId,
+      remark: '新增空间',
+    });
     return Response.json({ success: true, data });
   } catch (error) {
     console.error('create order space failed:', error);
