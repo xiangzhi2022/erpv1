@@ -30,6 +30,6 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ success: true, settings, prefixes, isAdmin });
   } catch (error) {
     console.error('load settings failed:', error);
-    return NextResponse.json({ success: false, error: '??????' }, { status: 500 });
+    return NextResponse.json({ success: false, error: '加载设置失败' }, { status: 500 });
   }
 }

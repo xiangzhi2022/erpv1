@@ -6,7 +6,7 @@ export default function ProtectedLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <ProtectedAppShell title="çäº§è¿åº¦" path="/progress">
+    <ProtectedAppShell title="生产进度" path="/progress">
       {children}
     </ProtectedAppShell>
   );

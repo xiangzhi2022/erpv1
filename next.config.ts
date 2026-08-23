@@ -1,16 +1,20 @@
 import type { NextConfig } from 'next';
 
 const nextConfig: NextConfig = {
-  // outputFileTracingRoot: path.resolve(__dirname, '../../'),  // Uncomment and add 'import path from "path"' if needed
-  /* config options here */
-  images: {
-    remotePatterns: [
+  poweredByHeader: false,
+  async headers() {
+    return [
       {
-        protocol: 'https',
-        hostname: '*',
-        pathname: '/**',
+        source: '/:path*',
+        headers: [
+          { key: 'X-Content-Type-Options', value: 'nosniff' },
+          { key: 'Referrer-Policy', value: 'strict-origin-when-cross-origin' },
+          { key: 'Permissions-Policy', value: 'camera=(), microphone=(), geolocation=()' },
+          { key: 'Cross-Origin-Opener-Policy', value: 'same-origin' },
+          { key: 'X-Frame-Options', value: 'DENY' },
+        ],
       },
-    ],
+    ];
   },
 };
 

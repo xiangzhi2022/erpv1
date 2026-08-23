@@ -18,7 +18,7 @@ export async function GET(request: NextRequest) {
       .maybeSingle();
 
     if (userError) {
-      return NextResponse.json({ success: false, error: '????????' }, { status: 500 });
+      return NextResponse.json({ success: false, error: '获取个人资料失败' }, { status: 500 });
     }
 
     const [{ data: enterprise }, { data: prefixRow }] = await Promise.all([
@@ -67,7 +67,7 @@ export async function GET(request: NextRequest) {
     });
   } catch (error) {
     console.error('get profile failed:', error);
-    return NextResponse.json({ success: false, error: '????????' }, { status: 500 });
+    return NextResponse.json({ success: false, error: '获取个人资料失败' }, { status: 500 });
   }
 }
 
@@ -79,7 +79,7 @@ export async function PUT(request: NextRequest) {
     const parsed = profileSchema.safeParse(await parseJsonObject(request));
     if (!parsed.success) {
       return NextResponse.json(
-        { success: false, error: parsed.error.issues[0]?.message || '??????' },
+        { success: false, error: parsed.error.issues[0]?.message || '请求参数无效' },
         { status: 400 }
       );
     }
@@ -93,12 +93,12 @@ export async function PUT(request: NextRequest) {
       .eq('id', auth.user.id);
 
     if (error) {
-      return NextResponse.json({ success: false, error: '????????' }, { status: 500 });
+      return NextResponse.json({ success: false, error: '更新个人资料失败' }, { status: 500 });
     }
 
-    return NextResponse.json({ success: true, message: '???????' });
+    return NextResponse.json({ success: true, message: '个人资料已更新' });
   } catch (error) {
     console.error('update profile failed:', error);
-    return NextResponse.json({ success: false, error: '????????' }, { status: 500 });
+    return NextResponse.json({ success: false, error: '更新个人资料失败' }, { status: 500 });
   }
 }

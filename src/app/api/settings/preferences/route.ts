@@ -12,7 +12,7 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ success: true, preferences });
   } catch (error) {
     console.error('get preferences failed:', error);
-    return NextResponse.json({ success: false, error: '????????' }, { status: 500 });
+    return NextResponse.json({ success: false, error: '获取偏好设置失败' }, { status: 500 });
   }
 }
 
@@ -23,7 +23,7 @@ export async function PUT(request: NextRequest) {
 
     const { key, value } = await parseJsonObject(request);
     if (!key || value === undefined) {
-      return NextResponse.json({ success: false, error: '?????' }, { status: 400 });
+      return NextResponse.json({ success: false, error: '缺少设置项或值' }, { status: 400 });
     }
 
     if (typeof key !== 'string' || !key.trim()) {
@@ -48,6 +48,6 @@ export async function PUT(request: NextRequest) {
     return NextResponse.json({ success: true, message: '偏好设置已更新' });
   } catch (error) {
     console.error('update preferences failed:', error);
-    return NextResponse.json({ success: false, error: '????????' }, { status: 500 });
+    return NextResponse.json({ success: false, error: '更新偏好设置失败' }, { status: 500 });
   }
 }

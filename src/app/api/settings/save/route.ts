@@ -9,7 +9,7 @@ export async function POST(request: NextRequest) {
     if (authFailed(auth)) return auth.response;
 
     const { prefix, companyName, phone, address } = await parseJsonObject(request);
-    if (!prefix) return NextResponse.json({ success: false, error: '??????' }, { status: 400 });
+    if (!prefix) return NextResponse.json({ success: false, error: '请输入订单前缀' }, { status: 400 });
 
     const settings: Array<[string, unknown]> = [
       ['order_prefix', prefix],
@@ -31,12 +31,12 @@ export async function POST(request: NextRequest) {
 
     if (rows.length > 0) {
       const { error } = await supabase.from('user_settings').upsert(rows, { onConflict: 'enterprise_id,user_id,key' });
-      if (error) return NextResponse.json({ success: false, error: '??????' }, { status: 500 });
+      if (error) return NextResponse.json({ success: false, error: '保存设置失败' }, { status: 500 });
     }
 
-    return NextResponse.json({ success: true, message: '??????' });
+    return NextResponse.json({ success: true, message: '设置已保存' });
   } catch (error) {
     console.error('save settings failed:', error);
-    return NextResponse.json({ success: false, error: '??????' }, { status: 500 });
+    return NextResponse.json({ success: false, error: '保存设置失败' }, { status: 500 });
   }
 }

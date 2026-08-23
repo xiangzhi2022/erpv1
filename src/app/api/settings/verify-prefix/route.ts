@@ -32,7 +32,7 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ success: true, available: true, message: '该前缀可用' });
   } catch (error) {
     console.error('verify prefix failed:', error);
-    return NextResponse.json({ success: false, error: '?????' }, { status: 500 });
+    return NextResponse.json({ success: false, error: '验证订单前缀失败' }, { status: 500 });
   }
 }
 
@@ -41,11 +41,11 @@ export async function POST(request: NextRequest) {
     const auth = await requireSettingsUser(request);
     if (authFailed(auth)) return auth.response;
     if (!isSettingsAdmin(auth.user)) {
-      return NextResponse.json({ success: false, error: '?????????????' }, { status: 403 });
+      return NextResponse.json({ success: false, error: '只有管理员可以管理订单前缀' }, { status: 403 });
     }
 
     const { prefix, companyName, phone, address } = await parseJsonObject(request);
-    if (typeof prefix !== 'string' || !prefix) return NextResponse.json({ success: false, error: '?????' }, { status: 400 });
+    if (typeof prefix !== 'string' || !prefix) return NextResponse.json({ success: false, error: '请输入订单前缀' }, { status: 400 });
 
     const supabase = await createClient();
     const upperPrefix = prefix.toUpperCase();
@@ -70,11 +70,11 @@ export async function POST(request: NextRequest) {
           ...payload,
         });
 
-    if (result.error) return NextResponse.json({ success: false, error: '????' }, { status: 500 });
-    return NextResponse.json({ success: true, message: '??????' });
+    if (result.error) return NextResponse.json({ success: false, error: '保存订单前缀失败' }, { status: 500 });
+    return NextResponse.json({ success: true, message: '订单前缀已保存' });
   } catch (error) {
     console.error('save prefix failed:', error);
-    return NextResponse.json({ success: false, error: '?????' }, { status: 500 });
+    return NextResponse.json({ success: false, error: '保存订单前缀失败' }, { status: 500 });
   }
 }
 
@@ -83,18 +83,18 @@ export async function DELETE(request: NextRequest) {
     const auth = await requireSettingsUser(request);
     if (authFailed(auth)) return auth.response;
     if (!isSettingsAdmin(auth.user)) {
-      return NextResponse.json({ success: false, error: '?????????????' }, { status: 403 });
+      return NextResponse.json({ success: false, error: '只有管理员可以管理订单前缀' }, { status: 403 });
     }
 
     const prefix = new URL(request.url).searchParams.get('prefix');
-    if (!prefix) return NextResponse.json({ success: false, error: '?????????' }, { status: 400 });
+    if (!prefix) return NextResponse.json({ success: false, error: '请指定要删除的订单前缀' }, { status: 400 });
 
     const client = await createClient();
     const { error } = await client.from('order_prefixes').delete().eq('enterprise_id', auth.context.enterpriseId).eq('prefix', prefix.toUpperCase());
-    if (error) return NextResponse.json({ success: false, error: '????' }, { status: 500 });
-    return NextResponse.json({ success: true, message: '??????' });
+    if (error) return NextResponse.json({ success: false, error: '删除订单前缀失败' }, { status: 500 });
+    return NextResponse.json({ success: true, message: '订单前缀已删除' });
   } catch (error) {
     console.error('delete prefix failed:', error);
-    return NextResponse.json({ success: false, error: '?????' }, { status: 500 });
+    return NextResponse.json({ success: false, error: '删除订单前缀失败' }, { status: 500 });
   }
 }

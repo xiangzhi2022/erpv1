@@ -32,6 +32,21 @@ const ENV_KEYS = [
   'SUPABASE_SECRET_KEY',
 ] as const;
 
+function expectSecurityContext(response: Response): void {
+  const responseCsp = response.headers.get('content-security-policy');
+  const requestCsp = response.headers.get('x-middleware-request-content-security-policy');
+  const requestNonce = response.headers.get('x-middleware-request-x-nonce');
+  const requestId = response.headers.get('x-request-id');
+
+  expect(responseCsp).not.toBeNull();
+  const responseCspValue = responseCsp ?? '';
+  expect(responseCspValue).toMatch(/script-src[^;]*'nonce-[^']+'/);
+  expect(requestCsp).toBe(responseCspValue);
+  expect(responseCspValue).toContain(`'nonce-${requestNonce}'`);
+  expect(requestId).toMatch(/^[0-9a-f-]{36}$/i);
+  expect(response.headers.get('x-middleware-request-x-request-id')).toBe(requestId);
+}
+
 const originalEnvironment = Object.fromEntries(
   ENV_KEYS.map((key) => [key, process.env[key]]),
 ) as Record<(typeof ENV_KEYS)[number], string | undefined>;
@@ -159,19 +174,28 @@ describe('Supabase session proxy', () => {
     expect(pageResponse.headers.get('location')).toBe(
       'https://erp.example.com/login?next=%2Forders%3Fview%3Dopen',
     );
+    expectSecurityContext(pageResponse);
 
     const apiResponse = await proxy(new NextRequest('https://erp.example.com/api/orders'));
     expect(apiResponse.status).toBe(401);
-    await expect(apiResponse.json()).resolves.toMatchObject({
+    const apiBody = await apiResponse.json();
+    expect(apiBody).toMatchObject({
       error: { code: 'UNAUTHORIZED', requestId: expect.any(String) },
     });
+    expect(apiBody.error.requestId).toBe(apiResponse.headers.get('x-request-id'));
+    expectSecurityContext(apiResponse);
 
     const publicPage = await proxy(new NextRequest('https://erp.example.com/login'));
+    const publicUnauthorizedPage = await proxy(new NextRequest('https://erp.example.com/401'));
     const publicAuthApi = await proxy(
       new NextRequest('https://erp.example.com/api/auth/login', { method: 'POST' }),
     );
     expect(publicPage.status).toBe(200);
+    expect(publicUnauthorizedPage.status).toBe(200);
     expect(publicAuthApi.status).toBe(200);
+    expectSecurityContext(publicPage);
+    expectSecurityContext(publicUnauthorizedPage);
+    expectSecurityContext(publicAuthApi);
     expect(mocks.getSession).not.toHaveBeenCalled();
   });
 
@@ -190,6 +214,10 @@ describe('Supabase session proxy', () => {
 
     expect(undeclared.status).toBe(404);
     expect(diagnostic.status).toBe(404);
+    expectSecurityContext(undeclared);
+    expectSecurityContext(diagnostic);
+    const undeclaredBody = await undeclared.json();
+    expect(undeclaredBody.error.requestId).toBe(undeclared.headers.get('x-request-id'));
   });
 
   it('enforces the manifest permission against database grants', async () => {
@@ -215,9 +243,13 @@ describe('Supabase session proxy', () => {
 
     expect(readResponse.status).toBe(200);
     expect(writeResponse.status).toBe(403);
-    await expect(writeResponse.json()).resolves.toMatchObject({
+    const writeBody = await writeResponse.json();
+    expect(writeBody).toMatchObject({
       error: { code: 'ENTERPRISE_PERMISSION_DENIED' },
     });
+    expect(writeBody.error.requestId).toBe(writeResponse.headers.get('x-request-id'));
+    expectSecurityContext(readResponse);
+    expectSecurityContext(writeResponse);
   });
 
   it('allows mixed mutations when the enterprise has any declared operation grant', async () => {
@@ -236,5 +268,32 @@ describe('Supabase session proxy', () => {
     }));
 
     expect(response.status).toBe(200);
+    expectSecurityContext(response);
+  });
+
+  it('preserves the security context and refreshed session on enterprise-selection errors', async () => {
+    mocks.createServerClient.mockImplementation((_url, _key, options) => ({
+      auth: {
+        getClaims: async () => {
+          options.cookies.setAll(
+            [{ name: 'sb-session', value: 'refreshed-token', options: { httpOnly: true } }],
+            { 'cache-control': 'private, no-store' },
+          );
+          return { data: { claims: { sub: 'user-1' } }, error: null };
+        },
+        getSession: mocks.getSession,
+      },
+      rpc: mocks.rpc,
+    }));
+    const { proxy } = await import('@/proxy');
+
+    const response = await proxy(new NextRequest('https://erp.example.com/api/orders'));
+
+    expect(response.status).toBe(409);
+    expect(response.cookies.get('sb-session')?.value).toBe('refreshed-token');
+    expect(response.headers.get('cache-control')).toBe('private, no-store');
+    expectSecurityContext(response);
+    const body = await response.json();
+    expect(body.error.requestId).toBe(response.headers.get('x-request-id'));
   });
 });
