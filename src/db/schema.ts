@@ -1,5 +1,25 @@
 import { pgTable, serial, varchar, timestamp, boolean, integer, text, index, uniqueIndex, jsonb, uuid, numeric, date } from "drizzle-orm/pg-core"
 import { sql } from "drizzle-orm"
+import { rolePermissions, roles } from "./v2-schema"
+
+export {
+	apiIdempotencyKeys,
+	auditEvents,
+	enterpriseMemberships,
+	enterprises,
+	identityActionRequests,
+	orgUnits,
+	organizationWorkshops,
+	permissionCatalog,
+	roleBindingSites,
+	roleBindingWorkshops,
+	roleBindings,
+	rolePermissions,
+	roles,
+	securityEvents,
+	sites,
+	workstations,
+} from "./v2-schema"
 
 // ============================================================================
 // 系统表 - 禁止删除
@@ -214,25 +234,6 @@ export const employeePositions = pgTable(
 	]
 );
 
-export const roles = pgTable(
-	"roles",
-	{
-		id: uuid("id").primaryKey().defaultRandom(),
-		name: varchar("name", { length: 120 }).notNull(),
-		code: varchar("code", { length: 80 }).notNull(),
-		description: text("description"),
-		status: varchar("status", { length: 20 }).notNull().default("active"),
-		tenant_id: uuid("tenant_id"),
-		created_at: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
-		updated_at: timestamp("updated_at", { withTimezone: true }),
-	},
-	(table) => [
-		index("roles_code_idx").on(table.code),
-		index("roles_tenant_id_idx").on(table.tenant_id),
-		index("roles_status_idx").on(table.status),
-	]
-);
-
 export const permissions = pgTable(
 	"permissions",
 	{
@@ -250,20 +251,6 @@ export const permissions = pgTable(
 		index("permissions_code_idx").on(table.code),
 		index("permissions_module_idx").on(table.module),
 		index("permissions_tenant_id_idx").on(table.tenant_id),
-	]
-);
-
-export const rolePermissions = pgTable(
-	"role_permissions",
-	{
-		id: uuid("id").primaryKey().defaultRandom(),
-		role_id: uuid("role_id").notNull(),
-		permission_id: uuid("permission_id").notNull(),
-		created_at: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
-	},
-	(table) => [
-		index("role_permissions_role_id_idx").on(table.role_id),
-		index("role_permissions_permission_id_idx").on(table.permission_id),
 	]
 );
 

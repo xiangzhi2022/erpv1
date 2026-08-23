@@ -7,9 +7,7 @@ import {
   positions,
   employees,
   employeePositions,
-  roles,
   permissions,
-  rolePermissions,
   employeeRoles,
   orders,
   orderSpaces,
@@ -32,6 +30,19 @@ import {
   tasks,
   notifications,
 } from './schema';
+import {
+  enterpriseMemberships,
+  enterprises,
+  organizationWorkshops,
+  permissionCatalog,
+  roleBindingSites,
+  roleBindingWorkshops,
+  roleBindings,
+  rolePermissions,
+  roles,
+  sites,
+  workstations,
+} from './v2-schema';
 
 export const usersRelations = relations(users, ({ one }) => ({
   tenant: one(tenants, {
@@ -45,7 +56,6 @@ export const tenantsRelations = relations(tenants, ({ many }) => ({
   departments: many(departments),
   positions: many(positions),
   employees: many(employees),
-  roles: many(roles),
   permissions: many(permissions),
   workshops: many(workshops),
   orders: many(orders),
@@ -121,31 +131,118 @@ export const employeePositionsRelations = relations(employeePositions, ({ one })
   }),
 }));
 
+export const enterprisesRelations = relations(enterprises, ({ many }) => ({
+  memberships: many(enterpriseMemberships),
+  sites: many(sites),
+  workshops: many(organizationWorkshops),
+  roles: many(roles),
+}));
+
+export const enterpriseMembershipsRelations = relations(enterpriseMemberships, ({ one, many }) => ({
+  enterprise: one(enterprises, {
+    fields: [enterpriseMemberships.tenantId],
+    references: [enterprises.id],
+  }),
+  roleBindings: many(roleBindings),
+}));
+
 export const rolesRelations = relations(roles, ({ one, many }) => ({
-  tenant: one(tenants, {
-    fields: [roles.tenant_id],
-    references: [tenants.id],
+  enterprise: one(enterprises, {
+    fields: [roles.tenantId],
+    references: [enterprises.id],
   }),
   permissions: many(rolePermissions),
+  bindings: many(roleBindings),
   employees: many(employeeRoles),
 }));
 
-export const permissionsRelations = relations(permissions, ({ one, many }) => ({
+export const permissionsRelations = relations(permissions, ({ one }) => ({
   tenant: one(tenants, {
     fields: [permissions.tenant_id],
     references: [tenants.id],
   }),
+}));
+
+export const permissionCatalogRelations = relations(permissionCatalog, ({ many }) => ({
   roles: many(rolePermissions),
 }));
 
 export const rolePermissionsRelations = relations(rolePermissions, ({ one }) => ({
   role: one(roles, {
-    fields: [rolePermissions.role_id],
-    references: [roles.id],
+    fields: [rolePermissions.tenantId, rolePermissions.roleId],
+    references: [roles.tenantId, roles.id],
   }),
-  permission: one(permissions, {
-    fields: [rolePermissions.permission_id],
-    references: [permissions.id],
+  permission: one(permissionCatalog, {
+    fields: [rolePermissions.permissionCode],
+    references: [permissionCatalog.code],
+  }),
+}));
+
+export const roleBindingsRelations = relations(roleBindings, ({ one, many }) => ({
+  role: one(roles, {
+    fields: [roleBindings.tenantId, roleBindings.roleId],
+    references: [roles.tenantId, roles.id],
+  }),
+  membership: one(enterpriseMemberships, {
+    fields: [roleBindings.tenantId, roleBindings.membershipId],
+    references: [enterpriseMemberships.tenantId, enterpriseMemberships.id],
+  }),
+  sites: many(roleBindingSites),
+  workshops: many(roleBindingWorkshops),
+}));
+
+export const roleBindingSitesRelations = relations(roleBindingSites, ({ one }) => ({
+  binding: one(roleBindings, {
+    fields: [roleBindingSites.tenantId, roleBindingSites.bindingId, roleBindingSites.scopeKind],
+    references: [roleBindings.tenantId, roleBindings.id, roleBindings.scopeKind],
+  }),
+  site: one(sites, {
+    fields: [roleBindingSites.tenantId, roleBindingSites.siteId],
+    references: [sites.tenantId, sites.id],
+  }),
+}));
+
+export const roleBindingWorkshopsRelations = relations(roleBindingWorkshops, ({ one }) => ({
+  binding: one(roleBindings, {
+    fields: [
+      roleBindingWorkshops.tenantId,
+      roleBindingWorkshops.bindingId,
+      roleBindingWorkshops.scopeKind,
+    ],
+    references: [roleBindings.tenantId, roleBindings.id, roleBindings.scopeKind],
+  }),
+  workshop: one(organizationWorkshops, {
+    fields: [roleBindingWorkshops.tenantId, roleBindingWorkshops.workshopId],
+    references: [organizationWorkshops.tenantId, organizationWorkshops.id],
+  }),
+}));
+
+export const sitesRelations = relations(sites, ({ one, many }) => ({
+  enterprise: one(enterprises, {
+    fields: [sites.tenantId],
+    references: [enterprises.id],
+  }),
+  workshops: many(organizationWorkshops),
+  bindings: many(roleBindingSites),
+}));
+
+export const organizationWorkshopsRelations = relations(organizationWorkshops, ({ one, many }) => ({
+  enterprise: one(enterprises, {
+    fields: [organizationWorkshops.tenantId],
+    references: [enterprises.id],
+  }),
+  site: one(sites, {
+    fields: [organizationWorkshops.tenantId, organizationWorkshops.siteId],
+    references: [sites.tenantId, sites.id],
+  }),
+  workstations: many(workstations),
+  bindings: many(roleBindingWorkshops),
+}));
+
+export const workstationsRelations = relations(workstations, ({ one }) => ({
+  workshop: one(organizationWorkshops, {
+    fields: [workstations.tenantId, workstations.workshopId],
+    references: [organizationWorkshops.tenantId, organizationWorkshops.id],
   }),
 }));
 

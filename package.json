@@ -11,6 +11,7 @@
     "db:stop": "supabase stop",
     "db:test": "supabase test db",
     "db:types": "supabase gen types typescript --local > src/db/database.types.ts",
+    "db:types:check": "node scripts/verify-generated-database-types.mjs",
     "dev": "bash ./scripts/dev.sh",
     "preinstall": "npx only-allow pnpm",
     "lint": "eslint",
