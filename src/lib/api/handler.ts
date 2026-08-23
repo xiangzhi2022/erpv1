@@ -93,7 +93,9 @@ export function withApiHandler<T>(options: ApiHandlerOptions, handler: Handler<T
       return successResponse(await handler(context), requestId);
     } catch (caught) {
       const known = isApiError(caught) ? caught : enterpriseError(caught);
-      if (known) return errorResponse(known, known.status, requestId);
+      if (known) {
+        return errorResponse(known, known.status, requestId, known.responseHeaders);
+      }
 
       log.error('api.unhandled_error', {
         requestId,

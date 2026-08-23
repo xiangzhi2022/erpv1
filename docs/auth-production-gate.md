@@ -22,6 +22,19 @@ production Auth configuration or store provider secrets.
 - `SKIP_CAPTCHA` must be absent from every production and deploy-preview
   environment.
 
+## Required application secrets
+
+- Generate an independent, high-entropy `RATE_LIMIT_PEPPER` and store it as a
+  Netlify protected environment variable for production and deploy previews.
+- Never reuse a Supabase key as the pepper, expose it to the browser, print it in
+  build/runtime logs, or commit its real value. `.env.example` contains only a
+  non-secret placeholder.
+- Treat the pepper as a hard release gate: authentication, uploads, organization
+  switching, and critical mutations intentionally fail closed with HTTP 503 when
+  it is absent or invalid.
+- Verify only that the variable exists in each required Netlify deploy context;
+  do not retrieve or echo its value during release checks.
+
 ## Legacy identity activation
 
 1. Run `pnpm legacy-auth:report` against a reviewed read-only snapshot. The

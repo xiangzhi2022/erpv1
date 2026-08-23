@@ -52,6 +52,7 @@ export function errorResponse(
   error: { code: string; message: string; fieldErrors?: ApiFieldErrors },
   status: number,
   requestId: string,
+  headers?: HeadersInit,
 ): NextResponse<ApiErrorBody> {
   const body: ApiErrorBody = {
     error: {
@@ -61,7 +62,7 @@ export function errorResponse(
       ...(error.fieldErrors ? { fieldErrors: error.fieldErrors } : {}),
     },
   };
-  const response = NextResponse.json(body, { status });
+  const response = NextResponse.json(body, { status, headers });
   response.headers.set('x-request-id', requestId);
   response.headers.set('cache-control', 'no-store');
   return response;

@@ -1,7 +1,10 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
+import { ApiError } from '@/lib/api/errors';
 import { executeIdempotentMutation } from '@/lib/api/idempotency';
+
+vi.mock('server-only', () => ({}));
 
 const context = {
   enterpriseId: '10000000-0000-4000-8000-000000000001',
@@ -13,6 +16,16 @@ function request(key?: string) {
     method: 'POST',
     headers: key ? { 'Idempotency-Key': key } : undefined,
   });
+}
+
+const allowRateLimit = vi.fn().mockResolvedValue({
+  allowed: true,
+  remaining: 119,
+  retryAfterSeconds: 0,
+});
+
+function rateLimitDependencies() {
+  return { enforceRateLimit: allowRateLimit };
 }
 
 describe('API mutation idempotency', () => {
@@ -38,6 +51,12 @@ describe('API mutation idempotency', () => {
       .includes('executeIdempotentMutation'));
 
     expect(offenders).toEqual([]);
+
+    const bucketOverrides = routeFiles.filter((file) => {
+      const source = readFileSync(resolve(process.cwd(), file), 'utf8');
+      return source.includes('rateLimitBucket');
+    });
+    expect(bucketOverrides).toEqual([]);
   });
 
   it('exposes authenticated wrappers without exposing private idempotency functions', () => {
@@ -53,6 +72,20 @@ describe('API mutation idempotency', () => {
     expect(migration).toMatch(/revoke all on function app_private\.claim_idempotency[\s\S]*from public, anon, authenticated/);
   });
 
+  it('consumes review rate limits only in the shared approve handler', () => {
+    const delegatedRoutes = [
+      'src/app/api/production/tasks/[id]/abnormal/route.ts',
+      'src/app/api/production/tasks/[id]/review/route.ts',
+      'src/app/api/production/tasks/[id]/rework/route.ts',
+    ];
+    for (const file of delegatedRoutes) {
+      const source = readFileSync(resolve(process.cwd(), file), 'utf8');
+      expect(source).toContain('approveTask');
+      expect(source).not.toContain('executeIdempotentMutation');
+      expect(source).not.toContain('enforceRateLimit');
+    }
+  });
+
   it('rejects a missing idempotency key before executing the mutation', async () => {
     const rpc = vi.fn();
     const execute = vi.fn();
@@ -63,6 +96,7 @@ describe('API mutation idempotency', () => {
       input: { value: 1 },
       rpc,
       execute,
+      dependencies: rateLimitDependencies(),
     });
 
     expect(response.status).toBe(400);
@@ -83,6 +117,7 @@ describe('API mutation idempotency', () => {
       input: { value: 1 },
       rpc,
       execute,
+      dependencies: rateLimitDependencies(),
     });
 
     expect(response.status).toBe(201);
@@ -108,6 +143,7 @@ describe('API mutation idempotency', () => {
       input: { nested: { b: 2, a: 1 } },
       rpc,
       execute,
+      dependencies: rateLimitDependencies(),
     });
 
     expect(response.status).toBe(200);
@@ -131,8 +167,90 @@ describe('API mutation idempotency', () => {
       input: { value: 1 },
       rpc,
       execute: vi.fn(),
+      dependencies: rateLimitDependencies(),
     });
 
     expect(response.status).toBe(409);
+  });
+
+  it('enforces one shared user bucket across distinct routes before claiming idempotency', async () => {
+    const events: string[] = [];
+    const enforceRateLimit = vi.fn().mockImplementation(async () => {
+      events.push('rate-limit');
+      return { allowed: true, remaining: 119, retryAfterSeconds: 0 };
+    });
+    const rpc = vi.fn().mockImplementation(async () => {
+      events.push('claim');
+      return {
+        data: [{ outcome: 'replay', response_status: 200, response_body: { data: {} }, claim_token: null }],
+        error: null,
+      };
+    });
+
+    for (const path of ['/api/production/tasks/one/start', '/api/finance/settlements']) {
+      await executeIdempotentMutation({
+        request: new Request(`https://erp.example.test${path}`, {
+          method: 'POST',
+          headers: { 'Idempotency-Key': `operation-${path}` },
+        }),
+        context,
+        input: { value: 1 },
+        rpc,
+        execute: vi.fn(),
+        dependencies: { enforceRateLimit },
+      });
+    }
+
+    expect(events).toEqual(['rate-limit', 'claim', 'rate-limit', 'claim']);
+    expect(enforceRateLimit).toHaveBeenCalledTimes(2);
+    for (const [options] of enforceRateLimit.mock.calls) {
+      expect(options).toEqual({
+        bucket: 'critical.mutations.user',
+        identifier: context.userId,
+        limit: 120,
+        windowSeconds: 60,
+      });
+    }
+  });
+
+  it('returns the standard 429 envelope without claiming or executing', async () => {
+    const rpc = vi.fn();
+    const execute = vi.fn();
+    const response = await executeIdempotentMutation({
+      request: new Request('https://erp.example.test/api/example', {
+        method: 'POST',
+        headers: {
+          'Idempotency-Key': 'limited-operation',
+          'x-request-id': 'idempotency-request-1',
+        },
+      }),
+      context,
+      input: { value: 1 },
+      rpc,
+      execute,
+      dependencies: {
+        enforceRateLimit: vi.fn().mockRejectedValue(new ApiError(
+          'RATE_LIMITED',
+          429,
+          '请求过于频繁',
+          undefined,
+          { 'retry-after': '37' },
+        )),
+      },
+    });
+
+    expect(response.status).toBe(429);
+    await expect(response.json()).resolves.toEqual({
+      error: {
+        code: 'RATE_LIMITED',
+        message: '请求过于频繁',
+        requestId: 'idempotency-request-1',
+      },
+    });
+    expect(response.headers.get('retry-after')).toBe('37');
+    expect(response.headers.get('cache-control')).toBe('no-store');
+    expect(response.headers.get('x-request-id')).toBe('idempotency-request-1');
+    expect(rpc).not.toHaveBeenCalled();
+    expect(execute).not.toHaveBeenCalled();
   });
 });

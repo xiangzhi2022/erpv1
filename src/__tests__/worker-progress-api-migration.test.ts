@@ -20,6 +20,13 @@ vi.mock('@/lib/enterprise/context', () => ({
   getEnterpriseContext: mocks.getEnterpriseContext,
   requirePermission: mocks.requirePermission,
 }));
+vi.mock('@/lib/security/rate-limit', () => ({
+  enforceRateLimit: vi.fn().mockResolvedValue({
+    allowed: true,
+    remaining: 119,
+    retryAfterSeconds: 0,
+  }),
+}));
 
 type Filter = readonly [string, unknown];
 

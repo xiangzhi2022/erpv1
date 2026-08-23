@@ -31,6 +31,13 @@ vi.mock('@/lib/enterprise/context', () => ({
 }));
 vi.mock('@/db/client', () => ({ getSupabaseClient: mocks.getSupabaseClient }));
 vi.mock('@/lib/auth', () => ({ getUserFromRequest: mocks.getUserFromRequest }));
+vi.mock('@/lib/security/rate-limit', () => ({
+  enforceRateLimit: vi.fn().mockResolvedValue({
+    allowed: true,
+    remaining: 119,
+    retryAfterSeconds: 0,
+  }),
+}));
 
 function emptyClient() {
   return {

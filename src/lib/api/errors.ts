@@ -6,6 +6,7 @@ export class ApiError extends Error {
     public readonly status: number,
     message: string,
     public readonly fieldErrors?: ApiFieldErrors,
+    public readonly responseHeaders?: HeadersInit,
   ) {
     super(message);
     this.name = 'ApiError';
@@ -31,8 +32,20 @@ export class ApiError extends Error {
     return new ApiError(code, 422, message);
   }
 
-  static rateLimited(code = 'RATE_LIMITED', message = '请求过于频繁'): ApiError {
-    return new ApiError(code, 429, message);
+  static rateLimited(
+    code = 'RATE_LIMITED',
+    message = '请求过于频繁',
+    retryAfterSeconds?: number,
+  ): ApiError {
+    return new ApiError(
+      code,
+      429,
+      message,
+      undefined,
+      retryAfterSeconds && retryAfterSeconds > 0
+        ? { 'retry-after': String(Math.ceil(retryAfterSeconds)) }
+        : undefined,
+    );
   }
 }
 

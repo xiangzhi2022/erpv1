@@ -1,7 +1,25 @@
+import { randomUUID } from 'node:crypto';
 import { NextResponse } from 'next/server';
+import { isApiError } from '@/lib/api/errors';
+import { errorResponse } from '@/lib/api/response';
 import { AuthServiceError } from './service';
 
-export function authRouteError(error: unknown): NextResponse {
+const REQUEST_ID_PATTERN = /^[A-Za-z0-9._:-]{1,128}$/;
+
+function resolveRequestId(request?: Request): string {
+  const candidate = request?.headers.get('x-request-id');
+  return candidate && REQUEST_ID_PATTERN.test(candidate) ? candidate : randomUUID();
+}
+
+export function authRouteError(error: unknown, request?: Request): NextResponse {
+  if (isApiError(error)) {
+    return errorResponse(
+      error,
+      error.status,
+      resolveRequestId(request),
+      error.responseHeaders,
+    );
+  }
   if (error instanceof AuthServiceError) {
     return NextResponse.json(
       { success: false, error: error.message, error_code: error.code },

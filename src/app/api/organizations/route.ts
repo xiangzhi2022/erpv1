@@ -3,8 +3,11 @@ import { randomUUID } from 'node:crypto';
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import { ACTIVE_TENANT_COOKIE_NAME, isProduction } from '@/lib/auth';
+import { isApiError } from '@/lib/api/errors';
+import { errorResponse as apiErrorResponse } from '@/lib/api/response';
 import { isEnterprisePermissionCode } from '@/lib/enterprise/permissions';
 import { getLandingPath } from '@/lib/role-access';
+import { enforceRateLimit } from '@/lib/security/rate-limit';
 import { createClient } from '@/lib/supabase/server';
 
 const switchEnterpriseSchema = z.object({
@@ -27,6 +30,29 @@ interface MembershipRow {
 
 function errorResponse(code: string, message: string, status: number) {
   return NextResponse.json({ success: false, error: { code, message } }, { status });
+}
+
+const REQUEST_ID_PATTERN = /^[A-Za-z0-9._:-]{1,128}$/;
+
+function requestId(request: Request): string {
+  const candidate = request.headers.get('x-request-id');
+  return candidate && REQUEST_ID_PATTERN.test(candidate) ? candidate : randomUUID();
+}
+
+function rateLimitErrorResponse(request: Request, error: unknown) {
+  const id = requestId(request);
+  if (isApiError(error)) {
+    return apiErrorResponse(error, error.status, id, error.responseHeaders);
+  }
+  console.error('organization.switch_rate_limit_failed', {
+    requestId: id,
+    errorName: error instanceof Error ? error.name : 'NonErrorException',
+  });
+  return apiErrorResponse(
+    { code: 'INTERNAL_ERROR', message: '服务器内部错误' },
+    500,
+    id,
+  );
 }
 
 async function verifiedUserId() {
@@ -84,6 +110,17 @@ export async function POST(request: NextRequest) {
 
   const { client, userId } = await verifiedUserId();
   if (!userId) return errorResponse('IDENTITY_REQUIRED', '请先登录', 401);
+
+  try {
+    await enforceRateLimit({
+      bucket: 'enterprise.switch.user',
+      identifier: userId,
+      limit: 30,
+      windowSeconds: 60,
+    });
+  } catch (error) {
+    return rateLimitErrorResponse(request, error);
+  }
 
   const { data, error } = await client.rpc('authorize_enterprise_selection', {
     target_enterprise_id: parsed.data.enterpriseId,

@@ -1,15 +1,49 @@
+import { randomUUID } from 'node:crypto';
 import { NextRequest, NextResponse } from 'next/server';
+import { isApiError } from '@/lib/api/errors';
+import { errorResponse } from '@/lib/api/response';
+import { requirePermission } from '@/lib/enterprise/context';
+import { enforceRateLimit } from '@/lib/security/rate-limit';
 import { createClient } from '@/lib/supabase/server';
 import { UPLOADS_BUCKET } from '@/lib/storage';
 import { authFailed, requireSettingsUser } from '../_utils';
 
 const MAX_FILE_SIZE = 2 * 1024 * 1024;
 const ALLOWED_TYPES = ['image/jpeg', 'image/png', 'image/webp'];
+const REQUEST_ID_PATTERN = /^[A-Za-z0-9._:-]{1,128}$/;
+
+function requestId(request: Request): string {
+  const candidate = request.headers.get('x-request-id');
+  return candidate && REQUEST_ID_PATTERN.test(candidate) ? candidate : randomUUID();
+}
+
+function uploadErrorResponse(request: Request, error: unknown) {
+  const id = requestId(request);
+  if (isApiError(error)) {
+    return errorResponse(error, error.status, id, error.responseHeaders);
+  }
+  console.error('avatar.upload_failed', {
+    requestId: id,
+    errorName: error instanceof Error ? error.name : 'NonErrorException',
+  });
+  return errorResponse(
+    { code: 'INTERNAL_ERROR', message: '头像上传失败' },
+    500,
+    id,
+  );
+}
 
 export async function POST(request: NextRequest) {
   try {
     const auth = await requireSettingsUser(request);
     if (authFailed(auth)) return auth.response;
+    requirePermission(auth.context, 'settings.manage');
+    await enforceRateLimit({
+      bucket: 'uploads.user',
+      identifier: auth.user.id,
+      limit: 30,
+      windowSeconds: 3600,
+    });
 
     const formData = await request.formData();
     const file = formData.get('avatar') as File | null;
@@ -43,7 +77,6 @@ export async function POST(request: NextRequest) {
     if (profileError) return NextResponse.json({ success: false, error: '保存头像失败' }, { status: 500 });
     return NextResponse.json({ success: true, avatarUrl });
   } catch (error) {
-    console.error('upload avatar failed:', error);
-    return NextResponse.json({ success: false, error: '头像上传失败' }, { status: 500 });
+    return uploadErrorResponse(request, error);
   }
 }

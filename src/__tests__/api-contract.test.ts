@@ -111,6 +111,25 @@ describe('uniform API contract', () => {
     await expect(response.json()).resolves.toMatchObject({ error: { code } });
   });
 
+  it('returns Retry-After for durable rate-limit rejections', async () => {
+    const route = withApiHandler({ policy: 'public' }, async () => {
+      throw ApiError.rateLimited('RATE_LIMITED', '请求过于频繁', 37);
+    });
+
+    const response = await route(request('/api/auth/login'));
+
+    expect(response.status).toBe(429);
+    expect(response.headers.get('retry-after')).toBe('37');
+    expect(response.headers.get('cache-control')).toBe('no-store');
+    await expect(response.json()).resolves.toMatchObject({
+      error: {
+        code: 'RATE_LIMITED',
+        message: '请求过于频繁',
+        requestId: expect.any(String),
+      },
+    });
+  });
+
   it('hides unknown exceptions and records a sanitized structured error', async () => {
     const error = vi.fn();
     const route = withApiHandler({

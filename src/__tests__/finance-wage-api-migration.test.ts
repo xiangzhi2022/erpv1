@@ -58,6 +58,13 @@ vi.mock('@/lib/four-level-order', async (importOriginal) => ({
   canManageWageRules: () => true,
 }));
 vi.mock('@/lib/four-level-order-server', () => ({ writeStatusLog: mocks.writeStatusLog }));
+vi.mock('@/lib/security/rate-limit', () => ({
+  enforceRateLimit: vi.fn().mockResolvedValue({
+    allowed: true,
+    remaining: 119,
+    retryAfterSeconds: 0,
+  }),
+}));
 
 beforeEach(() => {
   vi.clearAllMocks();

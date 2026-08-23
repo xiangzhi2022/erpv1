@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { registerSchema } from '@/lib/auth/schemas';
 import { createAuthService } from '@/lib/auth/service';
 import { authRouteError, authValidationError } from '@/lib/auth/route-response';
+import { enforceRateLimit, requireTrustedClientIp } from '@/lib/security/rate-limit';
 
 const ENTERPRISE_TYPE_ALIASES: Record<string, 'manufacturer' | 'dealer' | 'supplier'> = {
   manufacturer: 'manufacturer',
@@ -13,6 +14,12 @@ const ENTERPRISE_TYPE_ALIASES: Record<string, 'manufacturer' | 'dealer' | 'suppl
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
   try {
+    await enforceRateLimit({
+      bucket: 'auth.register.ip',
+      identifier: requireTrustedClientIp(request),
+      limit: 5,
+      windowSeconds: 3600,
+    });
     const body = (await parseJsonObject(request)) as Record<string, unknown>;
     const rawType = typeof body.enterpriseType === 'string'
       ? body.enterpriseType
@@ -43,6 +50,6 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       { status: result.requiresVerification ? 202 : 201 },
     );
   } catch (error) {
-    return authRouteError(error);
+    return authRouteError(error, request);
   }
 }
