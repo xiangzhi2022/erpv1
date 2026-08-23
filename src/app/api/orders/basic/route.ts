@@ -61,9 +61,24 @@ export async function POST(request: NextRequest) {
     };
 
     if (input.existing_order_id) {
+      const basicOrderUpdatePayload = {
+        order_no: payload.order_no,
+        customer_name: payload.customer_name,
+        customer_phone: payload.customer_phone,
+        customer_address: payload.customer_address,
+        status: payload.status,
+        delivery_date: payload.delivery_date,
+        remark: payload.remark,
+        dealer_id: payload.dealer_id,
+        order_flow: payload.order_flow,
+        from_enterprise_id: payload.from_enterprise_id,
+        to_enterprise_id: payload.to_enterprise_id,
+        target_factory_id: payload.target_factory_id,
+        parent_order_id: payload.parent_order_id,
+      };
       const { data, error } = await supabase
         .from('orders')
-        .update(payload)
+        .update(basicOrderUpdatePayload)
         .eq('enterprise_id', context.enterpriseId)
         .eq('id', input.existing_order_id)
         .select()

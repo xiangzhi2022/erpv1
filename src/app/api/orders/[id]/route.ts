@@ -6,6 +6,7 @@ import type { Database } from '@/db/database.types';
 import { getEnterpriseContext, requirePermission, type EnterpriseContext } from '@/lib/enterprise/context';
 import { isEnterpriseAccessError } from '@/lib/enterprise/errors';
 import { ORDER_STATUS_VALUES } from '@/lib/four-level-order';
+import type { OrderExchangeAction } from '@/lib/order-exchange';
 import { createClient } from '@/lib/supabase/server';
 
 type OrderRow = Database['public']['Tables']['orders']['Row'];
@@ -40,8 +41,7 @@ const PATCHABLE_STRING_FIELDS = [
   'parent_order_id',
 ] as const;
 
-const PATCHABLE_NUMBER_FIELDS = ['total_amount', 'deposit_amount'] as const;
-const INTERNAL_FINANCIAL_FIELDS = ['cost_amount', 'profit_amount'] as const;
+const FINANCIAL_FIELDS = ['total_amount', 'deposit_amount', 'cost_amount', 'profit_amount'] as const;
 const INTERNAL_ORDER_RESPONSE_FIELDS = ['cost_amount', 'profit_amount', 'internal_remark'] as const;
 const PARTNER_TASK_IDENTITY_FIELDS = ['worker', 'assigned_worker_id', 'worker_id', 'assigned_to'] as const;
 const paramsSchema = z.object({ id: z.string().uuid() });
@@ -225,13 +225,22 @@ function setNullableStringField(
   if (typeof value === 'string' || value === null) update[field] = value;
 }
 
-function setNumberField(
-  update: OrderUpdate,
-  body: Record<string, unknown>,
-  field: (typeof PATCHABLE_NUMBER_FIELDS)[number] | (typeof INTERNAL_FINANCIAL_FIELDS)[number],
-): void {
-  const value = body[field];
-  if (typeof value === 'number' && Number.isFinite(value)) update[field] = value;
+async function transitionOrderExchanges(
+  supabase: SupabaseClient<Database>,
+  exchangeIds: string[],
+  action: OrderExchangeAction,
+  message?: string | null,
+): Promise<string | null> {
+  for (const exchangeId of exchangeIds) {
+    const { error } = await supabase.rpc('transition_order_exchange', {
+      target_exchange_id: exchangeId,
+      target_action: action,
+      target_message: message ?? null,
+      target_proposed_changes: null,
+    });
+    if (error) return error.code;
+  }
+  return null;
 }
 
 export async function GET(
@@ -261,7 +270,9 @@ export async function PATCH(
     requirePermission(context, 'orders.update');
     const { id } = await parseParams(params, paramsSchema);
     const body = await parseJson(request, patchOrderSchema);
-    const requestedInternalUpdate = ['internal_remark', ...INTERNAL_FINANCIAL_FIELDS]
+    const requestedFinancialUpdate = FINANCIAL_FIELDS
+      .some((field) => body[field] !== undefined);
+    const requestedInternalUpdate = ['internal_remark', ...FINANCIAL_FIELDS]
       .some((field) => body[field as keyof typeof body] !== undefined);
     if (requestedInternalUpdate && !canUpdateInternalFinancials(context)) {
       return jsonError('无权修改内部字段', 403);
@@ -274,22 +285,29 @@ export async function PATCH(
     if (body.action === 'withdraw_exchange' || body.status === 'withdrawn') {
       const { data: withdrawnExchanges, error: withdrawError } = await supabase
         .from('order_exchanges')
-        .update({
-          status: 'withdrawn',
-          handled_by: context.userId,
-          handled_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
-        })
+        .select('id')
         .eq('enterprise_id', context.enterpriseId)
         .eq('order_id', id)
         .eq('from_enterprise_id', context.enterpriseId)
-        .in('status', ['draft', 'sent', 'change_requested', 'accepted'])
-        .select('id');
+        .in('status', ['draft', 'sent', 'change_requested', 'accepted']);
       if (withdrawError) {
         console.error('order_detail.withdraw_exchange_failed', { code: withdrawError.code });
         return jsonError('撤回订单流转失败', 500);
       }
       if (!withdrawnExchanges || withdrawnExchanges.length === 0) return jsonError('没有可撤回的订单流转', 400);
+      const transitionError = await transitionOrderExchanges(
+        supabase,
+        withdrawnExchanges.map((exchange) => exchange.id),
+        'withdraw',
+        typeof body.notes === 'string' ? body.notes : null,
+      );
+      if (transitionError) {
+        console.error('order_detail.withdraw_exchange_failed', { code: transitionError });
+        return jsonError(
+          transitionError === 'P0001' ? '订单流转状态已变化' : '撤回订单流转失败',
+          transitionError === 'P0001' ? 409 : 500,
+        );
+      }
       const refreshed = await loadOrderDetail(supabase, context.enterpriseId, id);
       if (refreshed.failed) return jsonError('获取订单详情失败', 500);
       return Response.json({ success: true, data: sanitizeOrderDetail(context, refreshed.tree || tree) });
@@ -298,10 +316,6 @@ export async function PATCH(
     const updateData: OrderUpdate = { updated_at: new Date().toISOString() };
     if (typeof body.customer_name === 'string' && body.customer_name.trim()) updateData.customer_name = body.customer_name.trim();
     for (const field of PATCHABLE_STRING_FIELDS) setNullableStringField(updateData, body, field);
-    for (const field of PATCHABLE_NUMBER_FIELDS) setNumberField(updateData, body, field);
-    if (canUpdateInternalFinancials(context)) {
-      for (const field of INTERNAL_FINANCIAL_FIELDS) setNumberField(updateData, body, field);
-    }
     if (typeof body.notes === 'string' && body.notes.trim()) updateData.remark = body.notes.trim();
 
     if (body.status !== undefined) {
@@ -311,18 +325,36 @@ export async function PATCH(
       }
       updateData.status = nextStatus;
     }
-    if (Object.keys(updateData).length === 1) return jsonError('没有可更新的订单字段', 400);
+    const hasDirectOrderUpdate = Object.keys(updateData).length > 1;
+    if (!hasDirectOrderUpdate && !requestedFinancialUpdate) return jsonError('没有可更新的订单字段', 400);
 
-    const { data, error } = await supabase
-      .from('orders')
-      .update(updateData)
-      .eq('enterprise_id', context.enterpriseId)
-      .eq('id', id)
-      .select()
-      .single();
-    if (error || !data) {
-      console.error('order_detail.update_failed', { code: error?.code });
-      return jsonError('更新订单失败', 500);
+    if (hasDirectOrderUpdate) {
+      const { data, error } = await supabase
+        .from('orders')
+        .update(updateData)
+        .eq('enterprise_id', context.enterpriseId)
+        .eq('id', id)
+        .select()
+        .single();
+      if (error || !data) {
+        console.error('order_detail.update_failed', { code: error?.code });
+        return jsonError('更新订单失败', 500);
+      }
+    }
+
+    if (requestedFinancialUpdate) {
+      const { data: pricingRows, error: pricingError } = await supabase.rpc('finance_update_order_pricing', {
+        target_enterprise_id: context.enterpriseId,
+        target_order_id: id,
+        target_total_amount: body.total_amount ?? null,
+        target_cost_amount: body.cost_amount ?? null,
+        target_profit_amount: body.profit_amount ?? null,
+        target_deposit_amount: body.deposit_amount ?? null,
+      });
+      if (pricingError || !pricingRows?.[0]) {
+        console.error('order_detail.pricing_update_failed', { code: pricingError?.code });
+        return jsonError('更新订单财务字段失败', pricingError?.code === '42501' ? 403 : 500);
+      }
     }
 
     if (typeof updateData.status === 'string' && updateData.status !== tree.status) {
@@ -342,38 +374,39 @@ export async function PATCH(
     }
 
     if (body.status === 'accepted' || body.status === 'reviewed') {
-      const { error: exchangeError } = await supabase
+      const { data: exchanges, error: exchangeLookupError } = await supabase
         .from('order_exchanges')
-        .update({
-          status: 'accepted',
-          handled_by: context.userId,
-          handled_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
-        })
+        .select('id')
         .eq('enterprise_id', context.enterpriseId)
         .eq('order_id', id)
         .eq('to_enterprise_id', context.enterpriseId)
         .in('status', ['sent', 'change_requested']);
+      const exchangeError = exchangeLookupError?.code ?? await transitionOrderExchanges(
+        supabase,
+        (exchanges ?? []).map((exchange) => exchange.id),
+        'accept',
+      );
       if (exchangeError) {
-        console.error('order_detail.accept_exchange_failed', { code: exchangeError.code });
+        console.error('order_detail.accept_exchange_failed', { code: exchangeError });
         return jsonError('更新订单失败', 500);
       }
     }
 
     if (body.status === 'cancelled') {
-      const { error: exchangeError } = await supabase
+      const { data: exchanges, error: exchangeLookupError } = await supabase
         .from('order_exchanges')
-        .update({
-          status: 'cancelled',
-          handled_by: context.userId,
-          handled_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
-        })
+        .select('id')
         .eq('enterprise_id', context.enterpriseId)
         .eq('order_id', id)
         .in('status', ['sent', 'change_requested']);
+      const exchangeError = exchangeLookupError?.code ?? await transitionOrderExchanges(
+        supabase,
+        (exchanges ?? []).map((exchange) => exchange.id),
+        'withdraw',
+        typeof body.notes === 'string' ? body.notes : null,
+      );
       if (exchangeError) {
-        console.error('order_detail.cancel_exchange_failed', { code: exchangeError.code });
+        console.error('order_detail.cancel_exchange_failed', { code: exchangeError });
         return jsonError('更新订单失败', 500);
       }
     }

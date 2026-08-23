@@ -253,6 +253,7 @@ export async function POST(request: Request) {
     const values = await parseJson(request, orderFormSchema);
     const updating = Boolean(values.existing_order_id);
     requirePermission(context, updating ? 'orders.update' : 'orders.create');
+    if (updating) requirePermission(context, 'finance.manage');
     if (!updating) requirePermission(context, 'orders.update');
     const hasTasks = values.modules.some((module) => module.items.some((item) => item.tasks.length > 0));
     if (hasTasks) {
@@ -301,8 +302,34 @@ export async function POST(request: Request) {
       if (await hasExistingOrderChildren(supabase, context.enterpriseId, values.existing_order_id)) {
         return jsonError('已有订单明细，暂不支持覆盖更新', 409);
       }
-      const { data, error } = await supabase.from('orders').update(orderPayload).eq('enterprise_id', context.enterpriseId).eq('id', values.existing_order_id).select(ORDER_FIELDS).maybeSingle();
-      if (error || !data) return jsonError('订单不存在或无法更新', 404);
+      const nonFinancialOrderPayload = {
+        order_no: orderPayload.order_no,
+        customer_name: orderPayload.customer_name,
+        customer_phone: orderPayload.customer_phone,
+        customer_address: orderPayload.customer_address,
+        status: orderPayload.status,
+        delivery_date: orderPayload.delivery_date,
+        remark: orderPayload.remark,
+        target_factory_id: orderPayload.target_factory_id,
+        dealer_id: orderPayload.dealer_id,
+        order_flow: orderPayload.order_flow,
+        from_enterprise_id: orderPayload.from_enterprise_id,
+        to_enterprise_id: orderPayload.to_enterprise_id,
+        parent_order_id: orderPayload.parent_order_id,
+        updated_at: orderPayload.updated_at,
+      };
+      const { error } = await supabase.from('orders').update(nonFinancialOrderPayload).eq('enterprise_id', context.enterpriseId).eq('id', values.existing_order_id);
+      if (error) return jsonError('订单不存在或无法更新', 404);
+      const { data: pricingRows, error: pricingError } = await supabase.rpc('finance_update_order_pricing', {
+        target_enterprise_id: context.enterpriseId,
+        target_order_id: values.existing_order_id,
+        target_total_amount: totalAmount,
+        target_cost_amount: null,
+        target_profit_amount: null,
+        target_deposit_amount: null,
+      });
+      const data = pricingRows?.[0];
+      if (pricingError || !data) return jsonError('订单不存在或无法更新', 404);
       order = data as OrderRow;
     } else {
       const { data, error } = await supabase.from('orders').insert({ ...orderPayload, created_by: context.userId }).select(ORDER_FIELDS).single();

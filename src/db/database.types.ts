@@ -2825,6 +2825,16 @@ export type Database = {
           response_status: number | null
         }[]
       }
+      create_order_exchange: {
+        Args: {
+          target_from_enterprise_id: string
+          target_message?: string | null
+          target_order_id: string
+          target_proposed_changes?: Json | null
+          target_to_enterprise_id: string
+        }
+        Returns: Database["public"]["Tables"]["order_exchanges"]["Row"][]
+      }
       create_production_work_order: {
         Args: {
           target_enterprise_id: string
@@ -2972,6 +2982,15 @@ export type Database = {
           p_task_id: string
         }
         Returns: Json
+      }
+      transition_order_exchange: {
+        Args: {
+          target_action: string
+          target_exchange_id: string
+          target_message?: string | null
+          target_proposed_changes?: Json | null
+        }
+        Returns: Database["public"]["Tables"]["order_exchanges"]["Row"][]
       }
       transition_own_production_task: {
         Args: {

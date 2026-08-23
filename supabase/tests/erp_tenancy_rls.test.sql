@@ -155,16 +155,15 @@ select matches(
   'order exchange select policy admits authorized receiving enterprises'
 );
 
-select matches(
-  (select with_check from pg_policies where schemaname = 'public' and tablename = 'order_exchanges' and policyname = 'order_exchanges_participant_insert'),
-  'enterprise_id.*from_enterprise_id.*orders.submit',
-  'order exchange insert policy fixes the sender enterprise'
-);
-
-select matches(
-  (select qual from pg_policies where schemaname = 'public' and tablename = 'order_exchanges' and policyname = 'order_exchanges_participant_update'),
-  'to_enterprise_id.*orders.accept',
-  'order exchange update policy admits authorized receivers'
+select is_empty(
+  $$
+    select policyname
+    from pg_policies
+    where schemaname = 'public'
+      and tablename = 'order_exchanges'
+      and cmd in ('INSERT', 'UPDATE', 'DELETE')
+  $$,
+  'order exchange writes are restricted to the state-machine RPCs'
 );
 
 insert into public.enterprises (id, code, name, enterprise_type) values

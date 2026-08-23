@@ -6,6 +6,7 @@ export type OrderExchangeStatus =
   | 'sent'
   | 'accepted'
   | 'change_requested'
+  | 'returned'
   | 'rejected'
   | 'withdrawn'
   | 'completed';
@@ -23,6 +24,7 @@ export const ORDER_EXCHANGE_STATUSES: OrderExchangeStatus[] = [
   'sent',
   'accepted',
   'change_requested',
+  'returned',
   'rejected',
   'withdrawn',
   'completed',
@@ -33,6 +35,7 @@ export const ORDER_EXCHANGE_STATUS_LABELS: Record<OrderExchangeStatus, string> =
   sent: '已发起',
   accepted: '已接受',
   change_requested: '请求修改',
+  returned: '已退回',
   rejected: '已拒绝',
   withdrawn: '已撤回',
   completed: '已完成',

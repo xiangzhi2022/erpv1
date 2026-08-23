@@ -72,34 +72,28 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ success: false, error: '发起企业和接收企业不能相同' }, { status: 400 });
     }
     const supabase = await createClient();
-    const { data: order, error: orderError } = await supabase
-      .from('orders')
-      .select('id')
-      .eq('enterprise_id', context.enterpriseId)
-      .eq('id', input.order_id)
-      .maybeSingle();
-    if (orderError || !order) {
-      return NextResponse.json({ success: false, error: '订单不存在' }, { status: 404 });
-    }
-    const { data, error } = await supabase
-      .from('order_exchanges')
-      .insert({
-        enterprise_id: context.enterpriseId,
-        order_id: input.order_id,
-        from_enterprise_id: context.enterpriseId,
-        to_enterprise_id: input.to_tenant_id,
-        from_user_id: context.userId,
-        status: 'sent',
-        message: input.message || null,
-        proposed_changes: input.proposed_changes ?? null,
-      })
-      .select()
-      .single();
+    const { data, error } = await supabase.rpc('create_order_exchange', {
+      target_from_enterprise_id: context.enterpriseId,
+      target_order_id: input.order_id,
+      target_to_enterprise_id: input.to_tenant_id,
+      target_message: input.message || null,
+      target_proposed_changes: input.proposed_changes ?? null,
+    });
     if (error) {
       console.error('order_exchanges.create_failed', { code: error.code });
+      if (error.code === 'P0002') {
+        return NextResponse.json({ success: false, error: '订单或接收企业不存在' }, { status: 404 });
+      }
+      if (error.code === '42501') {
+        return NextResponse.json({ success: false, error: '无权发起订单流转' }, { status: 403 });
+      }
       return NextResponse.json({ success: false, error: '创建订单流转失败' }, { status: 500 });
     }
-    return NextResponse.json({ success: true, exchange: data });
+    const exchange = data?.[0];
+    if (!exchange) {
+      return NextResponse.json({ success: false, error: '创建订单流转失败' }, { status: 500 });
+    }
+    return NextResponse.json({ success: true, exchange });
   } catch (error) {
     console.error('order_exchanges.create_failed', { error });
     return NextResponse.json({ success: false, error: '创建订单流转失败' }, { status: 500 });
