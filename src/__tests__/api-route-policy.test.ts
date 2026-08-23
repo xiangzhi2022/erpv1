@@ -149,10 +149,12 @@ describe('API route policy manifest', () => {
     const files = [
       resolve(API_ROOT, 'dealer/orders/route.ts'),
       resolve(API_ROOT, 'dealer/orders/[id]/route.ts'),
+      resolve(API_ROOT, 'dealer/orders/create/route.ts'),
       resolve(API_ROOT, 'order-exchanges/route.ts'),
       resolve(API_ROOT, 'order-exchanges/[id]/route.ts'),
       resolve(API_ROOT, 'supplier/orders/route.ts'),
       resolve(API_ROOT, 'orders/generate/route.ts'),
+      resolve(API_ROOT, 'orders/basic/route.ts'),
       resolve(API_ROOT, 'orders/prefix/route.ts'),
       resolve(API_ROOT, 'orders/sequence/route.ts'),
       resolve(API_ROOT, 'orders/[id]/spaces/route.ts'),
