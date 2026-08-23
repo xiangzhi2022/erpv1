@@ -98,6 +98,23 @@ describe('API route policy manifest', () => {
     expect(getApiRoutePolicy('/api/spaces/123/products', 'POST')).toMatchObject({ permission: 'orders.update' });
   });
 
+  it('uses operation-specific production and wage permissions', () => {
+    expect(getApiRoutePolicy('/api/production/eligible-workers', 'GET')).toMatchObject({ permission: 'production.assign' });
+    expect(getApiRoutePolicy('/api/production/tasks/task-id/assign', 'PATCH')).toMatchObject({ permission: 'production.assign' });
+    expect(getApiRoutePolicy('/api/production/tasks/task-id/approve', 'PATCH')).toMatchObject({ permission: 'production.review' });
+    expect(getApiRoutePolicy('/api/production/tasks/task-id/rework', 'PATCH')).toMatchObject({ permission: 'production.review' });
+    expect(getApiRoutePolicy('/api/production/tasks/task-id/start', 'PATCH')).toMatchObject({ permission: 'production.report.self' });
+    expect(getApiRoutePolicy('/api/production/tasks/task-id/submit', 'PATCH')).toMatchObject({ permission: 'production.report.self' });
+    expect(getApiRoutePolicy('/api/progress/report', 'POST')).toMatchObject({ permission: 'production.report.self' });
+    expect(getApiRoutePolicy('/api/worker/report', 'POST')).toMatchObject({ permission: 'production.report.self' });
+    expect(getApiRoutePolicy('/api/worker/me/wages', 'GET')).toMatchObject({ permission: 'wages.read.self' });
+    expect(getApiRoutePolicy('/api/workers/worker-id/wages', 'GET')).toMatchObject({ permission: 'wages.read.all' });
+    expect(getApiRoutePolicy('/api/wage-rules', 'GET')).toMatchObject({ permission: 'wages.manage' });
+    expect(getApiRoutePolicy('/api/wages/calculate', 'POST')).toMatchObject({ permission: 'wages.manage' });
+    expect(getApiRoutePolicy('/api/finance/settlements', 'POST')).toMatchObject({ permission: 'wages.settle' });
+    expect(getApiRoutePolicy('/api/finance/wage-records/wage-id/pay', 'PATCH')).toMatchObject({ permission: 'wages.settle' });
+  });
+
   it('rejects raw JSON parsing in mutation route handlers', () => {
     const offenders = routeFiles().filter((file) => {
       const source = readFileSync(file, 'utf8');
@@ -139,7 +156,7 @@ describe('API route policy manifest', () => {
     const files = internalRoots.flatMap((root) => routeFiles(root));
     const offenders = files.filter((file) => {
       const source = readFileSync(file, 'utf8');
-      return /@\/db\/client|getSupabaseClient\s*\(/.test(source);
+      return /@\/db\/client|getSupabaseClient\s*\(|getUserFromRequest\s*\(/.test(source);
     }).map((file) => relative(process.cwd(), file));
 
     expect(offenders).toEqual([]);
@@ -223,6 +240,29 @@ describe('API route policy manifest', () => {
     const offenders = files.filter((file) => {
       const source = readFileSync(file, 'utf8');
       return /@\/db\/client|getSupabaseClient\s*\(|\.select\([^)]*(?:tenant_id|from_tenant_id|to_tenant_id)|\.(?:eq|is)\(['"](?:tenant_id|from_tenant_id|to_tenant_id)['"]/.test(source);
+    }).map((file) => relative(process.cwd(), file));
+
+    expect(offenders).toEqual([]);
+  });
+
+  it('uses request-scoped enterprise access for production and finance APIs', () => {
+    const roots = [
+      'finance',
+      'performance',
+      'production',
+      'progress',
+      'wage-records',
+      'wage-rules',
+      'wages',
+      'worker',
+    ].map((directory) => resolve(API_ROOT, directory));
+    const files = [
+      ...roots.flatMap((root) => routeFiles(root)),
+      resolve(API_ROOT, 'workers/[id]/wages/route.ts'),
+    ];
+    const offenders = files.filter((file) => {
+      const source = readFileSync(file, 'utf8');
+      return /@\/db\/client|getSupabaseClient\s*\(|getUserFromRequest\s*\(|\.(?:eq|is)\(['"]tenant_id['"]/.test(source);
     }).map((file) => relative(process.cwd(), file));
 
     expect(offenders).toEqual([]);
