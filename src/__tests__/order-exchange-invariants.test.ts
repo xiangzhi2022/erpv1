@@ -34,7 +34,11 @@ describe('order exchange invariants forward migration', () => {
     expect(createExchange).toContain(
       'source_order.target_factory_id is distinct from target_from_enterprise_id',
     );
-    expect(createExchange).toContain('else true');
+    expect(createExchange).toContain('source_order.order_flow is null');
+    expect(createExchange).toContain(
+      "source_order.order_flow not in ('dealer_to_factory', 'factory_to_supplier')",
+    );
+    expect(createExchange).not.toMatch(/or\s+case[\s\S]+?end\s+then/i);
   });
 
   it('rejects a second active exchange while holding the order lock', () => {

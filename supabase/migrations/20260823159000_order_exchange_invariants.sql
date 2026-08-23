@@ -50,13 +50,16 @@ begin
 
   if source_order.from_enterprise_id is distinct from target_from_enterprise_id
     or source_order.to_enterprise_id is distinct from target_to_enterprise_id
-    or case
-      when source_order.order_flow = 'dealer_to_factory'
-        then source_order.target_factory_id is distinct from target_to_enterprise_id
-      when source_order.order_flow = 'factory_to_supplier'
-        then source_order.target_factory_id is distinct from target_from_enterprise_id
-      else true
-    end then
+    or source_order.order_flow is null
+    or source_order.order_flow not in ('dealer_to_factory', 'factory_to_supplier')
+    or (
+      source_order.order_flow = 'dealer_to_factory'
+      and source_order.target_factory_id is distinct from target_to_enterprise_id
+    )
+    or (
+      source_order.order_flow = 'factory_to_supplier'
+      and source_order.target_factory_id is distinct from target_from_enterprise_id
+    ) then
     raise exception 'ORDER_EXCHANGE_TARGET_MISMATCH' using errcode = '22023';
   end if;
 
