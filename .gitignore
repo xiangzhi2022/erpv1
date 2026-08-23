@@ -12,6 +12,8 @@ dist/
 .cache/
 coverage/
 storybook-static/
+supabase/.branches/
+supabase/.temp/
 
 # TypeScript build info
 tsconfig.tsbuildinfo
