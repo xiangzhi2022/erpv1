@@ -606,8 +606,6 @@ export function CreateOrderDialog({
   const [savedOrderId, setSavedOrderId] = useState('');
   const [activeStep, setActiveStep] = useState<StepId>('basic');
   const [selectedNode, setSelectedNode] = useState<SelectedNode>({ type: 'order' });
-  const [selectedModuleIndex, setSelectedModuleIndex] = useState(0);
-  const [selectedItemIndex, setSelectedItemIndex] = useState(0);
 
   const form = useForm<OrderFormValues, unknown, OrderFormValues>({
     resolver: zodResolver(orderFormSchema) as unknown as Resolver<OrderFormValues>,
@@ -619,12 +617,8 @@ export function CreateOrderDialog({
     name: 'modules',
   });
 
-  const watchedModules = form.watch('modules') || [];
   const watchedValues = form.watch();
-  const safeModuleIndex = Math.min(selectedModuleIndex, Math.max(0, watchedModules.length - 1));
-  const selectedModule = watchedModules[safeModuleIndex];
-  const safeItemIndex = Math.min(selectedItemIndex, Math.max(0, (selectedModule?.items.length || 1) - 1));
-  const selectedItem = selectedModule?.items[safeItemIndex];
+  const watchedModules = watchedValues.modules;
   const activeStepIndex = STEPS.findIndex((step) => step.id === activeStep);
   const compactStep = compactStepForStep(activeStep);
   const recorderName = currentUser?.name || currentUser?.phone || '';
@@ -646,13 +640,10 @@ export function CreateOrderDialog({
       setActiveStep('basic');
       return;
     }
-    setSelectedModuleIndex(node.moduleIndex);
     if (node.type === 'space') {
-      setSelectedItemIndex(0);
       setActiveStep('spaces');
       return;
     }
-    setSelectedItemIndex(node.itemIndex);
     setActiveStep(node.type === 'product' ? 'products' : 'tasks');
   }, []);
 
@@ -660,13 +651,6 @@ export function CreateOrderDialog({
     const modulesSnapshot = form.getValues('modules') || [];
     const nextNode = nodeForStep(step, modulesSnapshot, selectedNode);
     setSelectedNode(nextNode);
-    if (nextNode.type === 'order') {
-      setSelectedModuleIndex(0);
-      setSelectedItemIndex(0);
-    } else {
-      setSelectedModuleIndex(nextNode.moduleIndex);
-      setSelectedItemIndex(nextNode.type === 'space' ? 0 : nextNode.itemIndex);
-    }
     setActiveStep(step);
   }, [form, selectedNode]);
 
@@ -702,8 +686,6 @@ export function CreateOrderDialog({
     setSavedOrderId('');
     setActiveStep('basic');
     setSelectedNode({ type: 'order' });
-    setSelectedModuleIndex(0);
-    setSelectedItemIndex(0);
     generateOrderNo();
   }, [form, generateOrderNo, mode, open]);
 
@@ -1114,7 +1096,6 @@ export function CreateOrderDialog({
                     onAddProduct={addProduct}
                     onCopyProduct={copyProduct}
                     onRemoveProduct={removeProduct}
-                    onAddTask={(moduleIndex, itemIndex) => addTask(moduleIndex, itemIndex)}
                     onCopyTask={copyTask}
                     onRemoveTask={removeTask}
                   />
@@ -1232,64 +1213,6 @@ function BasicStep({
           </Button>
         </div>
       </Field>
-    </section>
-  );
-}
-
-function SpacesStep({
-  form,
-  modules,
-  selectedModuleIndex,
-  onSelectModule,
-}: {
-  form: UseFormReturn<OrderFormValues, unknown, OrderFormValues>;
-  modules: ReturnType<typeof useFieldArray<OrderFormValues, 'modules'>>;
-  selectedModuleIndex: number;
-  onSelectModule: (index: number) => void;
-}) {
-  return (
-    <section className="space-y-5">
-      <StepTitle icon={<Layers3 className="h-5 w-5" />} title="空间/房间" description="先搭好二级空间，再在空间下录入产品和拆单任务。" />
-      <div className="flex flex-wrap gap-2">
-        <Button type="button" variant="outline" onClick={() => modules.append(defaultModule('自定义空间'))}>
-          <Plus className="mr-1 h-4 w-4" />新增空间
-        </Button>
-      </div>
-      <div className="grid gap-3">
-        {modules.fields.map((moduleField, index) => {
-          const error = form.formState.errors.modules?.[index]?.module_name?.message;
-          return (
-            <div key={moduleField.id} className={cn('rounded-lg border p-5 shadow-sm', selectedModuleIndex === index ? 'border-primary bg-primary/5' : 'bg-background')}>
-              <div className="grid gap-3 md:grid-cols-[1fr_1fr_auto] md:items-end">
-                <Field label={`空间 #${index + 1} *`} error={error}>
-                  <DatalistInput
-                    listId={`module-presets-${index}`}
-                    values={ORDER_MODULE_PRESETS}
-                    {...form.register(`modules.${index}.module_name`)}
-                    onFocus={() => onSelectModule(index)}
-                    placeholder="主卧 / 厨房 / 客厅 / 自定义"
-                  />
-                </Field>
-                <Field label="空间备注">
-                  <Input {...form.register(`modules.${index}.remark`)} onFocus={() => onSelectModule(index)} placeholder="可选" />
-                </Field>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon"
-                  disabled={modules.fields.length <= 1}
-                  onClick={() => {
-                    modules.remove(index);
-                    onSelectModule(0);
-                  }}
-                >
-                  <Trash2 className="h-4 w-4 text-destructive" />
-                </Button>
-              </div>
-            </div>
-          );
-        })}
-      </div>
     </section>
   );
 }
@@ -1615,55 +1538,6 @@ function StructureSpreadsheetStep({
   );
 }
 
-function ProductsStep({
-  form,
-  moduleIndex,
-  selectedItemIndex,
-  onSelectItem,
-}: {
-  form: UseFormReturn<OrderFormValues, unknown, OrderFormValues>;
-  moduleIndex: number;
-  selectedItemIndex: number;
-  onSelectItem: (index: number) => void;
-}) {
-  const items = useFieldArray({
-    control: form.control,
-    name: `modules.${moduleIndex}.items`,
-  });
-
-  return (
-    <section className="space-y-5">
-      <StepTitle icon={<Package className="h-5 w-5" />} title="产品/柜体" description="录入三级产品对象，比如衣柜、地柜、门板或五金。" />
-      <div className="flex items-center justify-between">
-        <div className="text-sm text-muted-foreground">当前空间：{form.watch(`modules.${moduleIndex}.module_name`) || `空间 #${moduleIndex + 1}`}</div>
-        <Button type="button" variant="outline" onClick={() => {
-          items.append(defaultItem());
-          onSelectItem(items.fields.length);
-        }}>
-          <Plus className="mr-1 h-4 w-4" />新增产品
-        </Button>
-      </div>
-      <div className="space-y-4">
-        {items.fields.map((itemField, itemIndex) => (
-          <ProductFields
-            key={itemField.id}
-            form={form}
-            moduleIndex={moduleIndex}
-            itemIndex={itemIndex}
-            selected={selectedItemIndex === itemIndex}
-            canRemove={items.fields.length > 1}
-            onFocus={() => onSelectItem(itemIndex)}
-            onRemove={() => {
-              items.remove(itemIndex);
-              onSelectItem(0);
-            }}
-          />
-        ))}
-      </div>
-    </section>
-  );
-}
-
 function ProductFields({
   form,
   moduleIndex,
@@ -1737,54 +1611,6 @@ function ProductFields({
 
       <AttachmentControl form={form} moduleIndex={moduleIndex} itemIndex={itemIndex} />
     </div>
-  );
-}
-
-function TasksStep({
-  form,
-  moduleIndex,
-  itemIndex,
-}: {
-  form: UseFormReturn<OrderFormValues, unknown, OrderFormValues>;
-  moduleIndex: number;
-  itemIndex: number;
-}) {
-  const tasks = useFieldArray({
-    control: form.control,
-    name: `modules.${moduleIndex}.items.${itemIndex}.tasks`,
-  });
-  const itemName = form.watch(`modules.${moduleIndex}.items.${itemIndex}.product_name`);
-
-  return (
-    <section className="space-y-5">
-      <StepTitle icon={<Workflow className="h-5 w-5" />} title="拆单任务" description="经销商可手动录入板件、五金、工序等生产草稿，等待工厂确认。" />
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <div className="text-sm text-muted-foreground">当前产品：{itemName || `产品 #${itemIndex + 1}`}</div>
-        <div className="flex flex-wrap gap-2">
-          <Button type="button" variant="outline" onClick={() => tasks.append(defaultTask())}>
-            <Plus className="mr-1 h-4 w-4" />新增拆单任务
-          </Button>
-        </div>
-      </div>
-
-      <div className="space-y-4">
-        {tasks.fields.map((taskField, taskIndex) => (
-          <TaskFields
-            key={taskField.id}
-            form={form}
-            moduleIndex={moduleIndex}
-            itemIndex={itemIndex}
-            taskIndex={taskIndex}
-            onRemove={() => tasks.remove(taskIndex)}
-          />
-        ))}
-        {tasks.fields.length === 0 ? (
-          <div className="rounded-md border border-dashed p-8 text-center text-sm text-muted-foreground">
-            尚未录入拆单任务。可以手动新增后再调整。
-          </div>
-        ) : null}
-      </div>
-    </section>
   );
 }
 
@@ -2642,7 +2468,6 @@ function NodeEditorPanel({
   onAddProduct,
   onCopyProduct,
   onRemoveProduct,
-  onAddTask,
   onCopyTask,
   onRemoveTask,
 }: {
@@ -2661,7 +2486,6 @@ function NodeEditorPanel({
   onAddProduct: (moduleIndex: number) => void;
   onCopyProduct: (moduleIndex: number, itemIndex: number) => void;
   onRemoveProduct: (moduleIndex: number, itemIndex: number) => void;
-  onAddTask: (moduleIndex: number, itemIndex: number) => void;
   onCopyTask: (moduleIndex: number, itemIndex: number, taskIndex: number) => void;
   onRemoveTask: (moduleIndex: number, itemIndex: number, taskIndex: number) => void;
 }) {

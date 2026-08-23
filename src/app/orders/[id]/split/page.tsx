@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { CheckCircle2, Hammer, Layers3, Loader2, Package, Plus } from 'lucide-react';
 import { toast } from 'sonner';
 import { Badge } from '@/components/ui/badge';
@@ -91,21 +91,21 @@ export default function OrderSplitPage() {
   const [unit, setUnit] = useState('件');
   const [submitting, setSubmitting] = useState(false);
 
-  const refresh = async () => {
+  const refresh = useCallback(async () => {
     const res = await fetch(`/api/orders/${params.id}`);
     const json = await res.json();
     if (json.success) {
       const nextOrder = json.data as OrderTree;
       setOrder(nextOrder);
-      if (!selectedSpace && nextOrder.spaces?.[0]?.id) setSelectedSpace(nextOrder.spaces[0].id);
+      setSelectedSpace((current) => current || nextOrder.spaces?.[0]?.id || '');
     } else {
       toast.error(json.error || '获取订单失败');
     }
-  };
+  }, [params.id]);
 
   useEffect(() => {
     refresh().catch(() => null);
-  }, [params.id]);
+  }, [refresh]);
 
   const products = useMemo(() => {
     const space = (order?.spaces || []).find((item) => item.id === selectedSpace);

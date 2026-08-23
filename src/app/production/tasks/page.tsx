@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useEffectEvent, useMemo, useState } from 'react';
 import { toast } from 'sonner';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -121,7 +121,7 @@ export default function ProductionTasksPage() {
   const [auditAction, setAuditAction] = useState<'approve' | 'rework' | 'abnormal'>('approve');
   const [auditRemark, setAuditRemark] = useState('');
 
-  const loadTasks = async () => {
+  const loadTasks = useCallback(async () => {
     const params = new URLSearchParams({ pageSize: '100' });
     if (status !== 'all') params.set('status', status);
     if (taskType !== 'all') params.set('task_type', taskType);
@@ -132,7 +132,9 @@ export default function ProductionTasksPage() {
     const json = await res.json();
     if (json.success) setTasks(json.data || []);
     else toast.error(json.error || '获取生产任务失败');
-  };
+  }, [filterWorkerId, keyword, status, taskType, workstationId]);
+
+  const loadTasksAfterFilterChange = useEffectEvent(loadTasks);
 
   const loadWorkers = async (taskId?: string) => {
     const params = new URLSearchParams();
@@ -144,7 +146,7 @@ export default function ProductionTasksPage() {
   };
 
   useEffect(() => {
-    loadTasks().catch(() => null);
+    loadTasksAfterFilterChange().catch(() => null);
   }, [status, taskType, filterWorkerId, workstationId]);
 
   useEffect(() => {

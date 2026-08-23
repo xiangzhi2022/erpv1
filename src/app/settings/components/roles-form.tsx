@@ -128,9 +128,17 @@ export function RolesForm() {
     fetchUsers();
   }, [fetchRoles, fetchUsers]);
 
-  const roleOptions = accountRoles.length > 0 ? accountRoles : [{ value: 'employee', label: '员工', department: '员工', description: '员工账号' }];
+  const roleOptions = useMemo(
+    () => accountRoles.length > 0
+      ? accountRoles
+      : [{ value: 'employee', label: '员工', department: '员工', description: '员工账号' }],
+    [accountRoles],
+  );
 
-  const roleLabel = (role: string) => roleOptions.find((item) => item.value === role)?.label || role;
+  const roleLabel = useCallback(
+    (role: string) => roleOptions.find((item) => item.value === role)?.label || role,
+    [roleOptions],
+  );
   const permissionDescription = (permissionKeys: string[]) => {
     if (permissionKeys.length === 0) return '未分配员工权限';
     return permissionKeys
@@ -146,7 +154,7 @@ export function RolesForm() {
         .filter(Boolean)
         .some((value) => String(value).toLowerCase().includes(q));
     });
-  }, [keyword, users, roleOptions, permissions]);
+  }, [keyword, roleLabel, users]);
 
   const openEditor = (user: UserItem) => {
     setEditingUser(user);
