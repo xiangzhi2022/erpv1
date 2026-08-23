@@ -196,6 +196,7 @@ select throws_ok(
   $$select public.save_employee_with_relations('51000000-0000-4000-8000-000000000001','51000000-0000-4000-8000-000000000501','51000000-0000-4000-8000-000000000014','{"name":"Must Roll Back"}'::jsonb,array[]::uuid[],'51000000-0000-4000-8000-000000000401',array['51000000-0000-4000-8000-000000000202']::uuid[])$$,
   '22023', 'primary_position_not_assigned', 'invalid relation input aborts the entire employee transaction'
 );
+reset role;
 select results_eq(
   $$select name from public.employees where id = '51000000-0000-4000-8000-000000000501'$$,
   $$values ('Original Employee'::text)$$,
@@ -203,10 +204,12 @@ select results_eq(
 );
 insert into public.role_bindings(id,tenant_id,role_id,membership_id,scope_kind) values
   ('51000000-0000-4000-8000-000000000703','51000000-0000-4000-8000-000000000001','51000000-0000-4000-8000-000000000204','51000000-0000-4000-8000-000000000103','self');
+set local role authenticated;
 select lives_ok(
   $$select public.save_employee_with_relations('51000000-0000-4000-8000-000000000001','51000000-0000-4000-8000-000000000501','51000000-0000-4000-8000-000000000014','{}'::jsonb,array['51000000-0000-4000-8000-000000000401']::uuid[],'51000000-0000-4000-8000-000000000401',array['51000000-0000-4000-8000-000000000202']::uuid[])$$,
   'employee user and all relations change atomically'
 );
+reset role;
 select is(
   (select count(*) from public.role_bindings where tenant_id = '51000000-0000-4000-8000-000000000001' and membership_id = '51000000-0000-4000-8000-000000000102'),
   0::bigint,
@@ -221,16 +224,17 @@ select ok(
 );
 insert into public.role_bindings(tenant_id,role_id,membership_id,scope_kind) values
   ('51000000-0000-4000-8000-000000000001','51000000-0000-4000-8000-000000000202','51000000-0000-4000-8000-000000000103','self');
+set local role authenticated;
 select lives_ok(
   $$select public.delete_employee_with_access('51000000-0000-4000-8000-000000000001','51000000-0000-4000-8000-000000000501',false)$$,
   'soft-deactivating an employee uses the atomic access revocation path'
 );
+reset role;
 select ok(
   (select status = 'inactive' from public.employees where id = '51000000-0000-4000-8000-000000000501')
   and not exists (select 1 from public.role_bindings where membership_id = '51000000-0000-4000-8000-000000000103'),
   'deactivation removes enterprise and scoped bindings before returning'
 );
-reset role;
 select set_config('request.jwt.claim.sub', '51000000-0000-4000-8000-000000000016', true);
 set local role authenticated;
 select throws_ok(

@@ -300,7 +300,7 @@ select throws_ok(
 select lives_ok(
   $$select public.create_order_space(
     '51000000-0000-4000-8000-000000000001',
-    '51000000-0000-4000-8000-000000000401',
+    '51000000-0000-4000-8000-000000000404',
     '{"space_name":"Safe space"}'::jsonb
   )$$,
   'orders.update can create a space through the guarded RPC'
@@ -309,12 +309,12 @@ select lives_ok(
 select lives_ok(
   $$select public.create_order_product_with_pricing(
     '51000000-0000-4000-8000-000000000001',
-    '51000000-0000-4000-8000-000000000401',
+    '51000000-0000-4000-8000-000000000404',
     jsonb_build_object(
       'space_id', (
         select id::text from public.order_spaces
         where enterprise_id = '51000000-0000-4000-8000-000000000001'
-          and order_id = '51000000-0000-4000-8000-000000000401'
+          and order_id = '51000000-0000-4000-8000-000000000404'
           and space_name = 'Safe space'
       ),
       'product_no', 'P-SAFE',
@@ -331,12 +331,12 @@ select is(
    where status_log.target_id in (
      select id from public.order_spaces
      where enterprise_id = '51000000-0000-4000-8000-000000000001'
-       and order_id = '51000000-0000-4000-8000-000000000401'
+       and order_id = '51000000-0000-4000-8000-000000000404'
        and space_name = 'Safe space'
      union all
      select id from public.order_products
      where enterprise_id = '51000000-0000-4000-8000-000000000001'
-       and order_id = '51000000-0000-4000-8000-000000000401'
+       and order_id = '51000000-0000-4000-8000-000000000404'
        and product_name = 'Safe product'
    )),
   2::bigint,
