@@ -302,6 +302,7 @@ select lives_ok(
   $$select public.handle_enterprise_join_request('51000000-0000-4000-8000-000000000302','approve',null)$$,
   'reapproving a suspended member succeeds through the atomic worker path'
 );
+reset role;
 select ok(
   exists (select 1 from public.enterprise_memberships where id = '51000000-0000-4000-8000-000000000106' and status = 'active')
   and (select count(*) = 1 from public.role_bindings where membership_id = '51000000-0000-4000-8000-000000000106' and role_id = '51000000-0000-4000-8000-000000000202' and scope_kind = 'enterprise')
@@ -311,7 +312,6 @@ select ok(
   'reapproval removes stale site/workshop bindings and replaces employee roles with worker'
 );
 
-reset role;
 select ok(
   not exists (select 1 from public.enterprise_memberships where tenant_id = '51000000-0000-4000-8000-000000000001' and user_id = '51000000-0000-4000-8000-000000000013')
   and not exists (select 1 from public.employees where enterprise_id = '51000000-0000-4000-8000-000000000001' and user_id = '51000000-0000-4000-8000-000000000013')
@@ -368,6 +368,9 @@ select is(public.consume_recovery_proof(repeat('a', 64)), true, 'the owning acto
 select is(public.consume_recovery_proof(repeat('a', 64)), false, 'the nonce cannot be replayed');
 
 reset role;
+-- The recovery proof table is owned by the dedicated NOLOGIN function role.
+-- Inherit that role only inside this transaction to seed an expired fixture.
+alter group v2_function_owner add user postgres;
 insert into app_private.auth_recovery_proofs(user_id, nonce_hash, expires_at)
 values ('51000000-0000-4000-8000-000000000012', repeat('b', 64), now() - interval '1 second');
 select set_config('request.jwt.claim.sub', '51000000-0000-4000-8000-000000000012', true);
