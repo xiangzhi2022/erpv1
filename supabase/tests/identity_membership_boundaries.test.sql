@@ -156,17 +156,21 @@ select throws_ok(
   $$select public.save_employee_with_relations('51000000-0000-4000-8000-000000000001','51000000-0000-4000-8000-000000000502','51000000-0000-4000-8000-000000000016','{}'::jsonb,array[]::uuid[],null,array['51000000-0000-4000-8000-000000000202']::uuid[])$$,
   'P0001','owner_protected','employee role synchronization cannot downgrade an owner as a non-owner'
 );
+reset role;
 insert into public.employee_roles(enterprise_id,employee_id,role_id) values
   ('51000000-0000-4000-8000-000000000001','51000000-0000-4000-8000-000000000501','51000000-0000-4000-8000-000000000204');
+set local role authenticated;
 select lives_ok(
   $$select public.update_enterprise_member('51000000-0000-4000-8000-000000000001','51000000-0000-4000-8000-000000000012',null,'active','51000000-0000-4000-8000-000000000202')$$,
   'membership role replacement also synchronizes the linked employee role'
 );
+reset role;
 select ok(
   (select count(*) = 1 from public.employee_roles where employee_id = '51000000-0000-4000-8000-000000000501')
   and exists (select 1 from public.employee_roles where employee_id = '51000000-0000-4000-8000-000000000501' and role_id = '51000000-0000-4000-8000-000000000202'),
   'linked employee roles cannot retain stale access metadata after a settings role change'
 );
+set local role authenticated;
 select throws_ok(
   $$select public.save_employee_with_relations('51000000-0000-4000-8000-000000000001',null,null,'{"employee_no":"E-UNLINKED-POWER","name":"Unlinked power"}'::jsonb,array[]::uuid[],null,array['51000000-0000-4000-8000-000000000204']::uuid[])$$,
   'P0001','role_not_assignable','employee role rows cannot bypass the actor permission subset when no login user is linked'

@@ -60,11 +60,9 @@ select ok(
   'service role cannot bypass the public wrapper'
 );
 
--- Exercise the private primitive as its owner. The membership change is local
--- to this test transaction and rolls back with the fixture data.
+-- Exercise the private primitive through transaction-local membership in its
+-- owner role while retaining pgTAP functions on the test session search path.
 alter group v2_function_owner add user postgres;
-set local role v2_function_owner;
-set local search_path = public, extensions, app_private, pg_catalog;
 
 select throws_ok(
   $$ select * from app_private.consume_rate_limit('auth.login.ip', 'raw-ip', 10, 900) $$,
@@ -133,8 +131,6 @@ select results_eq(
   $$values (true, 1, 0)$$,
   'an expired fixed window rolls over atomically'
 );
-
-reset role;
 
 select * from finish();
 

@@ -134,6 +134,7 @@ select lives_ok(
   'a valid order and all of its children commit together'
 );
 
+reset role;
 select results_eq(
   $$
     select
@@ -149,6 +150,7 @@ select results_eq(
   'the committed order contains every expected tree layer'
 );
 
+set local role authenticated;
 select throws_ok(
   $$
     select public.save_order_tree(
@@ -183,12 +185,14 @@ select throws_ok(
   'a failure at the final attachment layer aborts the tree transaction'
 );
 
+reset role;
 select is(
   (select count(*) from public.orders where order_no = 'ATOMIC-ROLLBACK'),
   0::bigint,
   'a failed final child insert leaves no parent or intermediate order rows'
 );
 
+set local role authenticated;
 select throws_ok(
   $$
     select public.save_order_tree(
@@ -259,6 +263,7 @@ select throws_ok(
   'an empty-tree overwrite also rolls the parent update back when a child fails'
 );
 
+reset role;
 select results_eq(
   $$select order_no, customer_name, status, total_amount from public.orders where id = '71000000-0000-4000-8000-000000000301'$$,
   $$values ('ATOMIC-EMPTY-ORIGINAL'::text, 'Original customer'::text, 'returned'::text, 500::numeric)$$,

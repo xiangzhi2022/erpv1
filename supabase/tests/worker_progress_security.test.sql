@@ -96,9 +96,10 @@ select ok(
 
 select ok(
   has_table_privilege('v2_function_owner', 'public.progress_logs', 'INSERT')
+  and has_table_privilege('v2_function_owner', 'public.progress_logs', 'SELECT')
   and has_table_privilege('v2_function_owner', 'public.production_tasks', 'UPDATE')
   and has_table_privilege('v2_function_owner', 'public.work_orders', 'UPDATE'),
-  'RPC owner has only the write privileges required for atomic reporting'
+  'RPC owner can insert and return progress logs during atomic reporting'
 );
 
 select ok(

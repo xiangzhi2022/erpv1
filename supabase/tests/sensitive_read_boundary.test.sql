@@ -503,31 +503,35 @@ select throws_ok(
   'workshop-scoped customers.manage cannot insert enterprise customer data'
 );
 
-select is(
-  (
-    with updated as (
-      update public.customers set name = 'Scoped update'
-      where id = '71000000-0000-4000-8000-000000000321'
-      returning id
-    )
-    select count(*) from updated
-  ),
-  0::bigint,
+select lives_ok(
+  $$update public.customers set name = 'Scoped update'
+    where id = '71000000-0000-4000-8000-000000000321'$$,
   'workshop-scoped customers.manage cannot update enterprise customer data'
 );
 
-select is(
-  (
-    with deleted as (
-      delete from public.customers
-      where id = '71000000-0000-4000-8000-000000000321'
-      returning id
-    )
-    select count(*) from deleted
-  ),
-  0::bigint,
+reset role;
+select results_eq(
+  $$select name from public.customers
+    where id = '71000000-0000-4000-8000-000000000321'$$,
+  $$values ('Boundary customer record'::text)$$,
+  'a workshop-scoped update leaves enterprise customer data unchanged'
+);
+set local role authenticated;
+
+select lives_ok(
+  $$delete from public.customers
+    where id = '71000000-0000-4000-8000-000000000321'$$,
   'workshop-scoped customers.manage cannot delete enterprise customer data'
 );
+
+reset role;
+select is(
+  (select count(*) from public.customers
+   where id = '71000000-0000-4000-8000-000000000321'),
+  1::bigint,
+  'a workshop-scoped delete leaves enterprise customer data intact'
+);
+set local role authenticated;
 
 select throws_ok(
   $$
@@ -546,18 +550,20 @@ select throws_ok(
   'workshop-scoped wages.manage cannot write enterprise wage pricing rules'
 );
 
-select is(
-  (
-    with updated as (
-      update public.profiles set display_name = 'Scoped profile overwrite'
-      where id = '71000000-0000-4000-8000-000000000011'
-      returning id
-    )
-    select count(*) from updated
-  ),
-  0::bigint,
+select lives_ok(
+  $$update public.profiles set display_name = 'Scoped profile overwrite'
+    where id = '71000000-0000-4000-8000-000000000011'$$,
   'workshop-scoped members.manage cannot update another enterprise profile'
 );
+
+reset role;
+select results_eq(
+  $$select display_name from public.profiles
+    where id = '71000000-0000-4000-8000-000000000011'$$,
+  $$values ('Protected profile'::text)$$,
+  'a workshop-scoped update leaves the protected profile unchanged'
+);
+set local role authenticated;
 
 select throws_ok(
   $$

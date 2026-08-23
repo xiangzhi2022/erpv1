@@ -298,24 +298,52 @@ select throws_ok(
 );
 
 select lives_ok(
-  $$insert into public.order_spaces (id, enterprise_id, order_id, space_no, space_name) values ('51000000-0000-4000-8000-000000000412', '51000000-0000-4000-8000-000000000001', '51000000-0000-4000-8000-000000000401', 'S-SAFE', 'Safe space')$$,
-  'orders.update can create a space with the database default status'
+  $$select public.create_order_space(
+    '51000000-0000-4000-8000-000000000001',
+    '51000000-0000-4000-8000-000000000401',
+    '{"space_name":"Safe space"}'::jsonb
+  )$$,
+  'orders.update can create a space through the guarded RPC'
 );
 
 select lives_ok(
-  $$insert into public.order_products (id, enterprise_id, order_id, space_id, product_no, product_name) values ('51000000-0000-4000-8000-000000000422', '51000000-0000-4000-8000-000000000001', '51000000-0000-4000-8000-000000000401', '51000000-0000-4000-8000-000000000412', 'P-SAFE', 'Safe product')$$,
-  'orders.update can create a product with the database default status'
+  $$select public.create_order_product_with_pricing(
+    '51000000-0000-4000-8000-000000000001',
+    '51000000-0000-4000-8000-000000000401',
+    jsonb_build_object(
+      'space_id', (
+        select id::text from public.order_spaces
+        where enterprise_id = '51000000-0000-4000-8000-000000000001'
+          and order_id = '51000000-0000-4000-8000-000000000401'
+          and space_name = 'Safe space'
+      ),
+      'product_no', 'P-SAFE',
+      'product_name', 'Safe product'
+    )
+  )$$,
+  'orders.update can create a product through the guarded RPC'
 );
 
+reset role;
 select is(
-  (select count(*) from public.order_status_logs where target_id in (
-    '51000000-0000-4000-8000-000000000412',
-    '51000000-0000-4000-8000-000000000422'
-  )),
+  (select count(*)
+   from public.order_status_logs status_log
+   where status_log.target_id in (
+     select id from public.order_spaces
+     where enterprise_id = '51000000-0000-4000-8000-000000000001'
+       and order_id = '51000000-0000-4000-8000-000000000401'
+       and space_name = 'Safe space'
+     union all
+     select id from public.order_products
+     where enterprise_id = '51000000-0000-4000-8000-000000000001'
+       and order_id = '51000000-0000-4000-8000-000000000401'
+       and product_name = 'Safe product'
+   )),
   2::bigint,
-  'database-generated audit entries cover safe component creation'
+  'database-generated audit entries cover guarded component creation'
 );
 
+set local role authenticated;
 select lives_ok(
   $$select public.transition_order_component_status('51000000-0000-4000-8000-000000000001', 'space', '51000000-0000-4000-8000-000000000411', 'draft', 'pending', 'submit space')$$,
   'orders.update can perform an adjacent space transition through the guarded RPC'
