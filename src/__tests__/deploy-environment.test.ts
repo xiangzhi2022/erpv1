@@ -7,11 +7,13 @@ const repositoryRoot = resolve(import.meta.dirname, '../..');
 const guardPath = resolve(repositoryRoot, 'scripts/verify-deploy-environment.mjs');
 const productionRef = 'jfcsbwdawvsxnmovwlgl';
 const stagingRef = 'abcdefghijklmnopqrst';
+const publishableKey = `sb_publishable_${'a'.repeat(24)}`;
 
 interface GuardEnvironment {
   APP_URL?: string;
   CONTEXT?: string;
   DEPLOY_PRIME_URL?: string;
+  NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY?: string;
   NEXT_PUBLIC_SUPABASE_URL?: string;
   SUPABASE_SECRET_KEY?: string;
   RATE_LIMIT_PEPPER?: string;
@@ -27,6 +29,7 @@ function runGuard(environment: GuardEnvironment) {
       APP_URL: '',
       DEPLOY_PRIME_URL: '',
       NEXT_PUBLIC_SUPABASE_URL: '',
+      NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: publishableKey,
       ...environment,
     },
   });
@@ -77,6 +80,45 @@ describe('Netlify deploy environment guard', () => {
       }).status).not.toBe(0);
     }
   });
+
+  it.each(['production', 'deploy-preview', 'branch-deploy'])(
+    'requires %s to use a non-secret publishable key',
+    (context) => {
+      const deployEnvironment = context === 'production'
+        ? {
+          APP_URL: 'https://qingya-erp-163.netlify.app',
+          NEXT_PUBLIC_SUPABASE_URL: `https://${productionRef}.supabase.co`,
+        }
+        : {
+          DEPLOY_PRIME_URL: 'https://deploy-preview-42--qingya-erp-163.netlify.app',
+          NEXT_PUBLIC_SUPABASE_URL: `https://${stagingRef}.supabase.co`,
+        };
+      const jwt = (role: string) => [
+        Buffer.from(JSON.stringify({ alg: 'HS256', typ: 'JWT' })).toString('base64url'),
+        Buffer.from(JSON.stringify({ role })).toString('base64url'),
+        'signature',
+      ].join('.');
+
+      for (const candidate of [
+        '',
+        'not-a-key',
+        `sb_secret_${'b'.repeat(24)}`,
+        jwt('service_role'),
+      ]) {
+        expect(runGuard({
+          CONTEXT: context,
+          NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: candidate,
+          ...deployEnvironment,
+        }).status).not.toBe(0);
+      }
+
+      expect(runGuard({
+        CONTEXT: context,
+        NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: jwt('anon'),
+        ...deployEnvironment,
+      }).status).toBe(0);
+    },
+  );
 
   it.each(['deploy-preview', 'branch-deploy'])(
     'requires %s to use a valid non-production Supabase project origin',

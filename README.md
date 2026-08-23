@@ -66,7 +66,7 @@ Netlify 环境变量必须按 deploy context 分开配置：
 - Publishable Key 可用于浏览器，但仍必须与对应 context 的 Supabase 项目匹配。
 - 不得在 `netlify.toml`、GitHub Actions、README、`.env.example` 或构建日志中保存或输出真实密钥。
 
-仓库的部署环境 guard 会在 Netlify 构建期间验证 Supabase URL 和应用 origin。Production 未指向
+仓库的部署环境 guard 会在 Netlify 构建期间验证 Supabase URL、非 Secret 的 Publishable Key 和应用 origin。Production 未指向
 精确生产 project ref/站点 origin，或 Deploy Preview/Branch Deploy 指向生产 ref、缺少部署 origin、
 使用非 HTTPS/畸形 URL 时，构建会直接失败。普通本地命令和 CI 不设置 Netlify `CONTEXT`，因此
 不会要求生产凭据。

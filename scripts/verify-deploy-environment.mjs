@@ -49,19 +49,41 @@ function httpsOrigin(value, requiredHostnameSuffix) {
   }
 }
 
+function isPublishableKey(value, projectRef) {
+  const key = value?.trim();
+  if (!key) return false;
+  if (/^sb_publishable_[A-Za-z0-9_-]{20,}$/.test(key)) return true;
+
+  const parts = key.split('.');
+  if (parts.length !== 3 || parts.some((part) => !part)) return false;
+  try {
+    const payload = JSON.parse(Buffer.from(parts[1], 'base64url').toString('utf8'));
+    return payload?.role === 'anon'
+      && (typeof payload.ref !== 'string' || payload.ref === projectRef);
+  } catch {
+    return false;
+  }
+}
+
 const context = process.env.CONTEXT?.trim();
 if (!context || !GUARDED_CONTEXTS.has(context)) process.exit(0);
 
 const projectRef = projectRefFromUrl(process.env.NEXT_PUBLIC_SUPABASE_URL);
+const hasPublishableKey = isPublishableKey(
+  process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY,
+  projectRef,
+);
 let valid;
 
 if (context === 'production') {
-  valid = projectRef === PRODUCTION_PROJECT_REF
+  valid = hasPublishableKey
+    && projectRef === PRODUCTION_PROJECT_REF
     && httpsOrigin(process.env.APP_URL) === PRODUCTION_APP_ORIGIN;
 } else {
   const deployOrigin = httpsOrigin(process.env.DEPLOY_PRIME_URL, '.netlify.app');
   const applicationOrigin = httpsOrigin(process.env.APP_URL || process.env.DEPLOY_PRIME_URL);
-  valid = projectRef !== null
+  valid = hasPublishableKey
+    && projectRef !== null
     && projectRef !== PRODUCTION_PROJECT_REF
     && deployOrigin !== null
     && applicationOrigin === deployOrigin;
