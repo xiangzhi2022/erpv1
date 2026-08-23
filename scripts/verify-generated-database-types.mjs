@@ -35,6 +35,11 @@ const normalize = (value) => value.replaceAll('\r\n', '\n').trimEnd();
 const committed = readFileSync(committedTypesPath, 'utf8');
 
 if (normalize(generated.stdout) !== normalize(committed)) {
+  const artifactPath = process.env.DATABASE_TYPES_ARTIFACT_PATH;
+  if (artifactPath) {
+    writeFileSync(artifactPath, generated.stdout);
+  }
+
   const temporaryDirectory = mkdtempSync(join(tmpdir(), 'erp-db-types-'));
   const generatedTypesPath = join(temporaryDirectory, 'database.types.ts');
 
