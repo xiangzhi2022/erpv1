@@ -1,15 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getSupabaseClient } from '@/db/client';
-import { getUserFromRequest } from '@/lib/auth';
-import { isSuperAdmin } from '@/lib/role-access';
+import { getEnterpriseContext, requirePermission } from '@/lib/enterprise/context';
+import { createClient } from '@/lib/supabase/server';
 
 // GET - 获取供应商列表（支持搜索、分类筛选、评级筛选、分页）
 export async function GET(request: NextRequest) {
   try {
-    const user = await getUserFromRequest(request);
-    if (!user) {
-      return NextResponse.json({ success: false, error: '未登录' }, { status: 401 });
-    }
+    const context = await getEnterpriseContext();
+    requirePermission(context, 'partners.read');
 
     const { searchParams } = new URL(request.url);
     const keyword = searchParams.get('keyword') || '';
@@ -19,7 +16,7 @@ export async function GET(request: NextRequest) {
     const page = Math.max(1, parseInt(searchParams.get('page') || '1', 10));
     const pageSize = Math.min(100, Math.max(1, parseInt(searchParams.get('pageSize') || '50', 10)));
 
-    const supabase = getSupabaseClient();
+    const supabase = await createClient();
 
     // 计算分页偏移
     const from = (page - 1) * pageSize;
@@ -28,6 +25,7 @@ export async function GET(request: NextRequest) {
     let query = supabase
       .from('suppliers')
       .select('*', { count: 'exact' })
+      .eq('enterprise_id', context.enterpriseId)
       .order('created_at', { ascending: false })
       .range(from, to);
 
@@ -54,18 +52,11 @@ export async function GET(request: NextRequest) {
     if (status) {
       query = query.eq('status', status);
     }
-    if (!isSuperAdmin(user)) {
-      if (!user.tenant_id) {
-        return NextResponse.json({ success: false, error: '当前用户未关联企业' }, { status: 403 });
-      }
-      query = query.eq('tenant_id', user.tenant_id);
-    }
-
     const { data: suppliers, error, count } = await query;
 
     if (error) {
       console.error('获取供应商列表数据库错误:', error);
-      return NextResponse.json({ success: false, error: error.message }, { status: 500 });
+      return NextResponse.json({ success: false, error: '获取供应商列表失败' }, { status: 500 });
     }
 
     return NextResponse.json({

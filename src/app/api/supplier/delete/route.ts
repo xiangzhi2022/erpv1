@@ -1,15 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getSupabaseClient } from '@/db/client';
-import { getUserFromRequest } from '@/lib/auth';
-import { isSuperAdmin } from '@/lib/role-access';
+import { getEnterpriseContext, requirePermission } from '@/lib/enterprise/context';
+import { createClient } from '@/lib/supabase/server';
 
 // DELETE - 删除供应商
 export async function DELETE(request: NextRequest) {
   try {
-    const user = await getUserFromRequest(request);
-    if (!user) {
-      return NextResponse.json({ success: false, error: '未登录' }, { status: 401 });
-    }
+    const context = await getEnterpriseContext();
+    requirePermission(context, 'partners.manage');
 
     const { searchParams } = new URL(request.url);
     const id = searchParams.get('id');
@@ -18,30 +15,28 @@ export async function DELETE(request: NextRequest) {
       return NextResponse.json({ success: false, error: '缺少供应商ID' }, { status: 400 });
     }
 
-    const supabase = getSupabaseClient();
+    const supabase = await createClient();
 
     // 先验证供应商存在
     const { data: existing, error: fetchError } = await supabase
       .from('suppliers')
-      .select('id, name, supplier_code, tenant_id')
+      .select('id, name, supplier_code')
+      .eq('enterprise_id', context.enterpriseId)
       .eq('id', id)
       .single();
 
     if (fetchError || !existing) {
       return NextResponse.json({ success: false, error: '供应商不存在' }, { status: 404 });
     }
-    if (!isSuperAdmin(user) && (!user.tenant_id || existing.tenant_id !== user.tenant_id)) {
-      return NextResponse.json({ success: false, error: '无权限删除该供应商' }, { status: 403 });
-    }
-
     const { error } = await supabase
       .from('suppliers')
       .delete()
+      .eq('enterprise_id', context.enterpriseId)
       .eq('id', id);
 
     if (error) {
       console.error('删除供应商数据库错误:', error);
-      return NextResponse.json({ success: false, error: error.message }, { status: 500 });
+      return NextResponse.json({ success: false, error: '删除供应商失败' }, { status: 500 });
     }
 
     return NextResponse.json({

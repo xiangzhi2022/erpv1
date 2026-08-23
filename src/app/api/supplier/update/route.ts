@@ -1,9 +1,9 @@
 import { parseJson } from '@/lib/api/request';
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
-import { getSupabaseClient } from '@/db/client';
-import { getUserFromRequest } from '@/lib/auth';
-import { isSuperAdmin } from '@/lib/role-access';
+import type { Database } from '@/db/database.types';
+import { getEnterpriseContext, requirePermission } from '@/lib/enterprise/context';
+import { createClient } from '@/lib/supabase/server';
 
 const VALID_STATUSES = ['active', 'inspecting', 'blacklisted'] as const;
 const VALID_RATINGS = ['A', 'B', 'C', 'D'] as const;
@@ -30,10 +30,8 @@ function toNullIfEmpty(value: string | undefined | null): string | null {
 // PATCH - 更新供应商信息（支持全量编辑和快捷状态切换）
 export async function PATCH(request: NextRequest) {
   try {
-    const user = await getUserFromRequest(request);
-    if (!user) {
-      return NextResponse.json({ success: false, error: '未登录' }, { status: 401 });
-    }
+    const context = await getEnterpriseContext();
+    requirePermission(context, 'partners.manage');
 
     const body = await parseJson(request, supplierUpdateSchema);
     const { id, name, contactPerson, phone, email, category, rating, status, address, remark } = body;
@@ -42,22 +40,19 @@ export async function PATCH(request: NextRequest) {
       return NextResponse.json({ success: false, error: '缺少供应商ID' }, { status: 400 });
     }
 
-    const supabase = getSupabaseClient();
+    const supabase = await createClient();
 
     // 先验证供应商存在
     const { data: existing, error: fetchError } = await supabase
       .from('suppliers')
-      .select('id, name, tenant_id')
+      .select('id, name, enterprise_id')
+      .eq('enterprise_id', context.enterpriseId)
       .eq('id', id)
       .single();
 
     if (fetchError || !existing) {
       return NextResponse.json({ success: false, error: '供应商不存在' }, { status: 404 });
     }
-    if (!isSuperAdmin(user) && (!user.tenant_id || existing.tenant_id !== user.tenant_id)) {
-      return NextResponse.json({ success: false, error: '无权限更新该供应商' }, { status: 403 });
-    }
-
     // 如果更新名称，检查是否重复
     if (name !== undefined && name !== null) {
       const trimmedName = String(name).trim();
@@ -67,6 +62,7 @@ export async function PATCH(request: NextRequest) {
       const { data: duplicate } = await supabase
         .from('suppliers')
         .select('id')
+        .eq('enterprise_id', context.enterpriseId)
         .eq('name', trimmedName)
         .neq('id', id)
         .limit(1);
@@ -88,7 +84,9 @@ export async function PATCH(request: NextRequest) {
     }
 
     // 构建更新对象（只包含传入的字段，空字符串转 null）
-    const updateData: Record<string, unknown> = { updated_at: new Date().toISOString() };
+    const updateData: Database['public']['Tables']['suppliers']['Update'] = {
+      updated_at: new Date().toISOString(),
+    };
     if (name !== undefined) updateData.name = String(name).trim();
     if (contactPerson !== undefined) updateData.contact_person = toNullIfEmpty(contactPerson);
     if (phone !== undefined) updateData.phone = toNullIfEmpty(phone);
@@ -102,13 +100,14 @@ export async function PATCH(request: NextRequest) {
     const { data, error } = await supabase
       .from('suppliers')
       .update(updateData)
+      .eq('enterprise_id', context.enterpriseId)
       .eq('id', id)
       .select()
       .single();
 
     if (error) {
       console.error('更新供应商数据库错误:', error);
-      return NextResponse.json({ success: false, error: error.message }, { status: 500 });
+      return NextResponse.json({ success: false, error: '更新供应商失败' }, { status: 500 });
     }
 
     if (!data) {

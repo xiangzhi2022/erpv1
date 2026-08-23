@@ -123,4 +123,25 @@ describe('API route policy manifest', () => {
 
     expect(offenders).toEqual([]);
   });
+
+  it('uses request-scoped Supabase access for partner directory mutations', () => {
+    const files = [
+      resolve(API_ROOT, 'dealer/route.ts'),
+      resolve(API_ROOT, 'dealer/[id]/route.ts'),
+      resolve(API_ROOT, 'enterprise-directory/route.ts'),
+      resolve(API_ROOT, 'factories/route.ts'),
+      resolve(API_ROOT, 'order-exchanges/partners/route.ts'),
+      resolve(API_ROOT, 'order-partners/route.ts'),
+      resolve(API_ROOT, 'supplier/create/route.ts'),
+      resolve(API_ROOT, 'supplier/delete/route.ts'),
+      resolve(API_ROOT, 'supplier/list/route.ts'),
+      resolve(API_ROOT, 'supplier/update/route.ts'),
+    ];
+    const offenders = files.filter((file) => {
+      const source = readFileSync(file, 'utf8');
+      return /@\/db\/client|getSupabaseClient\s*\(|\btenant_id\b/.test(source);
+    }).map((file) => relative(process.cwd(), file));
+
+    expect(offenders).toEqual([]);
+  });
 });

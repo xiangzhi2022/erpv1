@@ -1,12 +1,16 @@
 import { parseJson } from '@/lib/api/request';
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
-import { getSupabaseClient } from '@/db/client';
-import { getUserFromRequest } from '@/lib/auth';
+import type { SupabaseClient } from '@supabase/supabase-js';
+import type { Database } from '@/db/database.types';
+import { getEnterpriseContext, requirePermission } from '@/lib/enterprise/context';
+import { createClient } from '@/lib/supabase/server';
 
 // 生成供应商编号: SUP-YYYYMMDD-NNN
-async function generateSupplierCode(): Promise<string> {
-  const supabase = getSupabaseClient();
+async function generateSupplierCode(
+  supabase: SupabaseClient<Database>,
+  enterpriseId: string,
+): Promise<string> {
   const today = new Date();
   const dateStr =
     today.getFullYear().toString() +
@@ -18,6 +22,7 @@ async function generateSupplierCode(): Promise<string> {
   const { data: existing } = await supabase
     .from('suppliers')
     .select('supplier_code')
+    .eq('enterprise_id', enterpriseId)
     .like('supplier_code', `${prefix}%`)
     .order('supplier_code', { ascending: false })
     .limit(1);
@@ -56,10 +61,8 @@ const supplierCreateSchema = z.object({
 // POST - 创建供应商
 export async function POST(request: NextRequest) {
   try {
-    const user = await getUserFromRequest(request);
-    if (!user) {
-      return NextResponse.json({ success: false, error: '未登录' }, { status: 401 });
-    }
+    const context = await getEnterpriseContext();
+    requirePermission(context, 'partners.manage');
 
     const body = await parseJson(request, supplierCreateSchema);
     const { name, contactPerson, phone, email, category, rating, status, address, remark } = body;
@@ -80,12 +83,13 @@ export async function POST(request: NextRequest) {
     // 校验 status 值
     const safeStatus = status && VALID_STATUSES.includes(status) ? status : 'active';
 
-    const supabase = getSupabaseClient();
+    const supabase = await createClient();
 
     // 检查名称是否重复
     const { data: existing } = await supabase
       .from('suppliers')
       .select('id')
+      .eq('enterprise_id', context.enterpriseId)
       .eq('name', name.trim())
       .limit(1);
 
@@ -94,7 +98,7 @@ export async function POST(request: NextRequest) {
     }
 
     // 自动生成编号
-    const supplierCode = await generateSupplierCode();
+    const supplierCode = await generateSupplierCode(supabase, context.enterpriseId);
 
     const { data, error } = await supabase
       .from('suppliers')
@@ -109,15 +113,15 @@ export async function POST(request: NextRequest) {
         status: safeStatus,
         address: toNullIfEmpty(address),
         remark: toNullIfEmpty(remark),
-        created_by: user.id || null,
-        tenant_id: user.tenant_id || null,
+        created_by: context.userId,
+        enterprise_id: context.enterpriseId,
       })
       .select()
       .single();
 
     if (error) {
       console.error('创建供应商数据库错误:', error);
-      return NextResponse.json({ success: false, error: error.message }, { status: 500 });
+      return NextResponse.json({ success: false, error: '创建供应商失败' }, { status: 500 });
     }
 
     return NextResponse.json({ success: true, data });

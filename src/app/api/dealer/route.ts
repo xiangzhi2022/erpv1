@@ -1,69 +1,61 @@
-import { parseJsonObject } from '@/lib/api/request';
-import { getSupabaseClient } from '@/db/client';
-import { getUserFromRequest } from '@/lib/auth';
-import { isSuperAdmin } from '@/lib/role-access';
+import { NextResponse, type NextRequest } from 'next/server';
+import { z } from 'zod';
+import { parseJson } from '@/lib/api/request';
+import { getEnterpriseContext, requirePermission } from '@/lib/enterprise/context';
+import { createClient } from '@/lib/supabase/server';
 
-const getClient = () => getSupabaseClient();
+const dealerInputSchema = z.object({
+  name: z.string().trim().min(2, '经销商名称至少2个字符'),
+  contactName: z.string().nullable().optional(),
+  phone: z.string().nullable().optional(),
+  region: z.string().nullable().optional(),
+  status: z.enum(['active', 'inactive']).optional(),
+  remark: z.string().nullable().optional(),
+});
 
-// 获取经销商列表（支持分页和过滤）
-export async function GET(request: Request) {
+function nullableText(value: string | null | undefined): string | null {
+  const normalized = value?.trim();
+  return normalized || null;
+}
+
+function positiveInteger(value: string | null, fallback: number, maximum?: number): number {
+  const parsed = Number.parseInt(value || '', 10);
+  const positive = Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+  return maximum ? Math.min(maximum, positive) : positive;
+}
+
+export async function GET(request: NextRequest) {
   try {
-    const user = await getUserFromRequest(request);
-    if (!user) {
-      return Response.json({ success: false, error: '请先登录' }, { status: 401 });
-    }
-
-    if (!isSuperAdmin(user)) {
-      return Response.json({ success: false, error: '无权限访问经销商管理' }, { status: 403 });
-    }
-
-    const supabase = getClient();
-    const { searchParams } = new URL(request.url);
-    const keyword = searchParams.get('keyword') || '';
-    const region = searchParams.get('region') || '';
-    const status = searchParams.get('status') || '';
-    const page = Math.max(1, parseInt(searchParams.get('page') || '1', 10));
-    const pageSize = Math.min(100, Math.max(1, parseInt(searchParams.get('pageSize') || '10', 10)));
+    const context = await getEnterpriseContext();
+    requirePermission(context, 'partners.read');
+    const supabase = await createClient();
+    const keyword = request.nextUrl.searchParams.get('keyword')?.trim() || '';
+    const region = request.nextUrl.searchParams.get('region')?.trim() || '';
+    const status = request.nextUrl.searchParams.get('status')?.trim() || '';
+    const page = positiveInteger(request.nextUrl.searchParams.get('page'), 1);
+    const pageSize = positiveInteger(request.nextUrl.searchParams.get('pageSize'), 10, 100);
 
     let query = supabase
       .from('dealers')
       .select('*', { count: 'exact' })
+      .eq('enterprise_id', context.enterpriseId)
       .order('created_at', { ascending: false });
 
-    // 关键字搜索（名称、联系人或电话）— 转义特殊字符防注入
     if (keyword) {
       const safe = keyword.replace(/[%_\\]/g, '\\$&');
       query = query.or(`name.ilike.%${safe}%,contact_name.ilike.%${safe}%,phone.ilike.%${safe}%`);
     }
+    if (region) query = query.eq('region', region);
+    if (status) query = query.eq('status', status);
 
-    // 地区过滤
-    if (region) {
-      query = query.eq('region', region);
-    }
-
-    // 状态过滤
-    if (status) {
-      query = query.eq('status', status);
-    }
-
-    // 权限过滤：非管理员只能看自己创建的
-    if (!isSuperAdmin(user)) {
-      if (!user.tenant_id) return Response.json({ success: false, error: '当前用户未关联企业' }, { status: 403 });
-      query = query.eq('tenant_id', user.tenant_id);
-    }
-
-    // 分页
     const from = (page - 1) * pageSize;
-    const to = from + pageSize - 1;
-    query = query.range(from, to);
-
-    const { data, error, count } = await query;
-
+    const { data, error, count } = await query.range(from, from + pageSize - 1);
     if (error) {
-      return Response.json({ success: false, error: error.message }, { status: 500 });
+      console.error('dealer.list_failed', { code: error.code });
+      return NextResponse.json({ success: false, error: '查询经销商失败' }, { status: 500 });
     }
 
-    return Response.json({
+    return NextResponse.json({
       success: true,
       data: data || [],
       pagination: {
@@ -73,59 +65,40 @@ export async function GET(request: Request) {
         totalPages: Math.ceil((count || 0) / pageSize),
       },
     });
-  } catch (err) {
-    console.error('Get dealers error:', err);
-    return Response.json({ success: false, error: '服务器错误' }, { status: 500 });
+  } catch (error) {
+    console.error('dealer.list_failed', { error });
+    return NextResponse.json({ success: false, error: '服务器错误' }, { status: 500 });
   }
 }
 
-// 新增经销商
-export async function POST(request: Request) {
+export async function POST(request: NextRequest) {
   try {
-    const user = await getUserFromRequest(request);
-    if (!user) {
-      return Response.json({ success: false, error: '请先登录' }, { status: 401 });
-    }
-
-    if (!isSuperAdmin(user)) {
-      return Response.json({ success: false, error: '无权限新增经销商' }, { status: 403 });
-    }
-
-    const body = await parseJsonObject(request);
-    const { name, contactName, phone, region, status, remark } = body;
-
-    if (typeof name !== 'string' || name.trim().length < 2) {
-      return Response.json({ success: false, error: '经销商名称至少2个字符' }, { status: 400 });
-    }
-
-    const validStatuses = ['active', 'inactive'] as const;
-    if (typeof status === 'string' && !validStatuses.includes(status as typeof validStatuses[number])) {
-      return Response.json({ success: false, error: '状态值无效，仅支持 active/inactive' }, { status: 400 });
-    }
-
-    const supabase = getClient();
+    const context = await getEnterpriseContext();
+    requirePermission(context, 'partners.manage');
+    const input = await parseJson(request, dealerInputSchema);
+    const supabase = await createClient();
     const { data, error } = await supabase
       .from('dealers')
       .insert({
-        name: name.trim(),
-        contact_name: typeof contactName === 'string' ? contactName.trim() || null : null,
-        phone: typeof phone === 'string' ? phone.trim() || null : null,
-        region: typeof region === 'string' ? region.trim() || null : null,
-        status: typeof status === 'string' && validStatuses.includes(status as typeof validStatuses[number]) ? status : 'active',
-        remark: typeof remark === 'string' ? remark.trim() || null : null,
-        created_by: user.id,
-        tenant_id: user.tenant_id || null,
+        enterprise_id: context.enterpriseId,
+        name: input.name,
+        contact_name: nullableText(input.contactName),
+        phone: nullableText(input.phone),
+        region: nullableText(input.region),
+        status: input.status ?? 'active',
+        remark: nullableText(input.remark),
+        created_by: context.userId,
       })
       .select()
       .single();
 
     if (error) {
-      return Response.json({ success: false, error: error.message }, { status: 500 });
+      console.error('dealer.create_failed', { code: error.code });
+      return NextResponse.json({ success: false, error: '创建经销商失败' }, { status: 500 });
     }
-
-    return Response.json({ success: true, data });
-  } catch (err) {
-    console.error('Create dealer error:', err);
-    return Response.json({ success: false, error: '服务器错误' }, { status: 500 });
+    return NextResponse.json({ success: true, data });
+  } catch (error) {
+    console.error('dealer.create_failed', { error });
+    return NextResponse.json({ success: false, error: '创建经销商失败' }, { status: 500 });
   }
 }

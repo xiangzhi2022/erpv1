@@ -1,110 +1,75 @@
-import { getSupabaseClient } from '@/db/client';
-import { getUserFromRequest } from '@/lib/auth';
-import {
-  getPermissionTemplate,
-  getUserPermissionKeys,
-  isSuperAdmin,
-  normalizeAccountRole,
-  tenantTypeToBusinessType,
-  type AccessUser,
-} from '@/lib/role-access';
-
-type DirectoryScope = {
-  mode: 'dealer_management' | 'readonly';
-  title: string;
-  description: string;
-  targetTenantType?: 'manufacturer' | 'material_supplier';
-};
-
-function resolveDirectoryScope(user: AccessUser): DirectoryScope | null {
-  if (isSuperAdmin(user)) {
-    return {
-      mode: 'dealer_management',
-      title: '经销商管理',
-      description: '超级管理员可维护经销商档案。',
-    };
-  }
-
-  const role = normalizeAccountRole(user.role);
-  const tenantBusinessType = tenantTypeToBusinessType(user.tenant_type);
-  const permissions = getUserPermissionKeys(user);
-  const hasDealerPermission = permissions.some((key) => getPermissionTemplate(key)?.businessType === 'dealer');
-  const hasFactoryPermission = permissions.some((key) => getPermissionTemplate(key)?.businessType === 'factory');
-
-  if (role === 'dealer_admin' || tenantBusinessType === 'dealer' || hasDealerPermission) {
-    return {
-      mode: 'readonly',
-      title: '工厂企业',
-      description: '经销商只能查看已注册工厂企业信息，用于下单协作，不提供新增、编辑或删除。',
-      targetTenantType: 'manufacturer',
-    };
-  }
-
-  if (role === 'factory_admin' || tenantBusinessType === 'factory' || hasFactoryPermission) {
-    return {
-      mode: 'readonly',
-      title: '材料供应商',
-      description: '工厂企业只能查看已注册材料供应商信息，用于材料采购协作，不提供新增、编辑或删除。',
-      targetTenantType: 'material_supplier',
-    };
-  }
-
-  return null;
-}
+import { NextResponse, type NextRequest } from 'next/server';
+import { getEnterpriseContext, requirePermission } from '@/lib/enterprise/context';
+import { createClient } from '@/lib/supabase/server';
 
 function escapeLike(value: string): string {
   return value.replace(/[%_\\]/g, '\\$&');
 }
 
-export async function GET(request: Request) {
+function positiveInteger(value: string | null, fallback: number, maximum?: number): number {
+  const parsed = Number.parseInt(value || '', 10);
+  const positive = Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+  return maximum ? Math.min(maximum, positive) : positive;
+}
+
+export async function GET(request: NextRequest) {
   try {
-    const user = await getUserFromRequest(request);
-    if (!user) {
-      return Response.json({ success: false, error: '请先登录' }, { status: 401 });
+    const context = await getEnterpriseContext();
+    requirePermission(context, 'partners.read');
+    const targetType = context.enterpriseType === 'dealer'
+      ? 'manufacturer'
+      : context.enterpriseType === 'manufacturer'
+        ? 'supplier'
+        : null;
+    if (!targetType) {
+      return NextResponse.json({ success: false, error: '当前企业无企业库访问权限' }, { status: 403 });
     }
 
-    const scope = resolveDirectoryScope(user);
-    if (!scope) {
-      return Response.json({ success: false, error: '当前账号无企业库访问权限' }, { status: 403 });
-    }
-
-    if (scope.mode === 'dealer_management') {
-      return Response.json({ success: true, ...scope, data: [], pagination: { page: 1, pageSize: 10, total: 0, totalPages: 0 } });
-    }
-
-    const { searchParams } = new URL(request.url);
-    const keyword = searchParams.get('keyword')?.trim() || '';
-    const status = searchParams.get('status')?.trim() || '';
-    const page = Math.max(1, Number.parseInt(searchParams.get('page') || '1', 10));
-    const pageSize = Math.min(100, Math.max(1, Number.parseInt(searchParams.get('pageSize') || '10', 10)));
+    const keyword = request.nextUrl.searchParams.get('keyword')?.trim() || '';
+    const status = request.nextUrl.searchParams.get('status')?.trim() || '';
+    const page = positiveInteger(request.nextUrl.searchParams.get('page'), 1);
+    const pageSize = positiveInteger(request.nextUrl.searchParams.get('pageSize'), 10, 100);
     const from = (page - 1) * pageSize;
-    const to = from + pageSize - 1;
-
-    let query = getSupabaseClient()
-      .from('tenants')
-      .select('id, name, company_name, tenant_type, contact_person, contact_phone, address, status, created_at, updated_at', { count: 'exact' })
-      .eq('tenant_type', scope.targetTenantType)
+    const supabase = await createClient();
+    let query = supabase
+      .from('enterprises')
+      .select('id,name,code,enterprise_type,status,created_at,updated_at', { count: 'exact' })
+      .eq('enterprise_type', targetType)
+      .neq('id', context.enterpriseId)
       .order('created_at', { ascending: false });
 
     if (keyword) {
-      const safeKeyword = escapeLike(keyword);
-      query = query.or(`name.ilike.%${safeKeyword}%,company_name.ilike.%${safeKeyword}%,contact_person.ilike.%${safeKeyword}%,contact_phone.ilike.%${safeKeyword}%`);
+      const safe = escapeLike(keyword);
+      query = query.or(`name.ilike.%${safe}%,code.ilike.%${safe}%`);
     }
-
-    if (status && status !== 'all') {
-      query = query.eq('status', status);
-    }
-
-    const { data, error, count } = await query.range(from, to);
+    if (status && status !== 'all') query = query.eq('status', status);
+    const { data, error, count } = await query.range(from, from + pageSize - 1);
     if (error) {
-      return Response.json({ success: false, error: error.message }, { status: 500 });
+      console.error('enterprise_directory.list_failed', { code: error.code });
+      return NextResponse.json({ success: false, error: '获取企业目录失败' }, { status: 500 });
     }
 
-    return Response.json({
+    const rows = (data || []).map((enterprise) => ({
+      id: enterprise.id,
+      name: enterprise.name,
+      company_name: enterprise.name,
+      code: enterprise.code,
+      tenant_type: enterprise.enterprise_type,
+      status: enterprise.status,
+      created_at: enterprise.created_at,
+      updated_at: enterprise.updated_at,
+      contact_person: null,
+      contact_phone: null,
+      address: null,
+    }));
+    return NextResponse.json({
       success: true,
-      ...scope,
+      mode: 'readonly',
       readonly: true,
-      data: data || [],
+      title: targetType === 'manufacturer' ? '工厂企业' : '材料供应商',
+      description: '只显示可协作企业的公开目录信息。',
+      targetTenantType: targetType,
+      data: rows,
       pagination: {
         page,
         pageSize,
@@ -113,7 +78,7 @@ export async function GET(request: Request) {
       },
     });
   } catch (error) {
-    console.error('enterprise directory error:', error);
-    return Response.json({ success: false, error: '服务端错误' }, { status: 500 });
+    console.error('enterprise_directory.list_failed', { error });
+    return NextResponse.json({ success: false, error: '服务端错误' }, { status: 500 });
   }
 }

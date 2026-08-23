@@ -168,6 +168,7 @@ insert into public.roles (id, tenant_id, code, name, is_system) values
 insert into public.role_permissions (tenant_id, role_id, permission_code) values
   ('10000000-0000-4000-8000-000000000001', 'a2000000-0000-4000-8000-000000000001', 'customers.read'),
   ('10000000-0000-4000-8000-000000000001', 'a2000000-0000-4000-8000-000000000001', 'customers.manage'),
+  ('10000000-0000-4000-8000-000000000001', 'a2000000-0000-4000-8000-000000000001', 'partners.read'),
   ('20000000-0000-4000-8000-000000000002', 'b2000000-0000-4000-8000-000000000002', 'customers.read'),
   ('20000000-0000-4000-8000-000000000002', 'b2000000-0000-4000-8000-000000000002', 'customers.manage');
 
@@ -192,6 +193,12 @@ select results_eq(
   $$select name from public.customers order by name$$,
   $$values ('Customer A'::text)$$,
   'enterprise A cannot select enterprise B customers'
+);
+
+select results_eq(
+  $$select name from public.enterprises where status = 'active' order by name$$,
+  $$values ('RLS enterprise A'::text), ('RLS enterprise B'::text)$$,
+  'a partner reader can list active collaboration enterprises'
 );
 
 select throws_ok(

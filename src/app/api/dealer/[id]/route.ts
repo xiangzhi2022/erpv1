@@ -1,133 +1,86 @@
-import { parseJsonObject } from '@/lib/api/request';
-import { getSupabaseClient } from '@/db/client';
-import { getUserFromRequest } from '@/lib/auth';
-import { isSuperAdmin } from '@/lib/role-access';
+import { NextResponse, type NextRequest } from 'next/server';
+import { z } from 'zod';
+import { parseJson } from '@/lib/api/request';
+import { getEnterpriseContext, requirePermission } from '@/lib/enterprise/context';
+import { createClient } from '@/lib/supabase/server';
 
-const getClient = () => getSupabaseClient();
+const dealerUpdateSchema = z.object({
+  name: z.string().trim().min(2, '经销商名称至少2个字符'),
+  contactName: z.string().nullable().optional(),
+  phone: z.string().nullable().optional(),
+  region: z.string().nullable().optional(),
+  status: z.enum(['active', 'inactive']).optional(),
+  remark: z.string().nullable().optional(),
+});
 
-// 更新经销商
+function nullableText(value: string | null | undefined): string | null {
+  const normalized = value?.trim();
+  return normalized || null;
+}
+
 export async function PUT(
-  request: Request,
-  { params }: { params: Promise<{ id: string }> }
+  request: NextRequest,
+  { params }: { params: Promise<{ id: string }> },
 ) {
   try {
-    const user = await getUserFromRequest(request);
-    if (!user) {
-      return Response.json({ success: false, error: '请先登录' }, { status: 401 });
-    }
-
-    if (!isSuperAdmin(user)) {
-      return Response.json({ success: false, error: '无权限编辑经销商' }, { status: 403 });
-    }
-
+    const context = await getEnterpriseContext();
+    requirePermission(context, 'partners.manage');
     const { id } = await params;
-    const body = await parseJsonObject(request);
-    const { name, contactName, phone, region, status, remark } = body;
-
-    if (typeof name !== 'string' || name.trim().length < 2) {
-      return Response.json({ success: false, error: '经销商名称至少2个字符' }, { status: 400 });
-    }
-
-    const validStatuses = ['active', 'inactive'] as const;
-    if (typeof status === 'string' && !validStatuses.includes(status as typeof validStatuses[number])) {
-      return Response.json({ success: false, error: '状态值无效，仅支持 active/inactive' }, { status: 400 });
-    }
-
-    const supabase = getClient();
-
-    // 权限检查：非管理员只能编辑自己创建的
-    if (!isSuperAdmin(user)) {
-      const { data: existing } = await supabase
-        .from('dealers')
-        .select('tenant_id')
-        .eq('id', id)
-        .single();
-      if (!existing) {
-        return Response.json({ success: false, error: '经销商不存在' }, { status: 404 });
-      }
-      if (!user.tenant_id || existing.tenant_id !== user.tenant_id) {
-        return Response.json({ success: false, error: '无权限编辑此经销商' }, { status: 403 });
-      }
-    }
-
+    const input = await parseJson(request, dealerUpdateSchema);
+    const supabase = await createClient();
     const { data, error } = await supabase
       .from('dealers')
       .update({
-        name: name.trim(),
-        contact_name: typeof contactName === 'string' ? contactName.trim() || null : null,
-        phone: typeof phone === 'string' ? phone.trim() || null : null,
-        region: typeof region === 'string' ? region.trim() || null : null,
-        status: typeof status === 'string' && validStatuses.includes(status as typeof validStatuses[number]) ? status : 'active',
-        remark: typeof remark === 'string' ? remark.trim() || null : null,
+        name: input.name,
+        contact_name: nullableText(input.contactName),
+        phone: nullableText(input.phone),
+        region: nullableText(input.region),
+        status: input.status ?? 'active',
+        remark: nullableText(input.remark),
         updated_at: new Date().toISOString(),
       })
+      .eq('enterprise_id', context.enterpriseId)
       .eq('id', id)
       .select()
-      .single();
+      .maybeSingle();
 
     if (error) {
-      return Response.json({ success: false, error: error.message }, { status: 500 });
+      console.error('dealer.update_failed', { code: error.code });
+      return NextResponse.json({ success: false, error: '更新经销商失败' }, { status: 500 });
     }
-
-    if (!data) {
-      return Response.json({ success: false, error: '经销商不存在' }, { status: 404 });
-    }
-
-    return Response.json({ success: true, data });
-  } catch (err) {
-    console.error('Update dealer error:', err);
-    return Response.json({ success: false, error: '服务器错误' }, { status: 500 });
+    if (!data) return NextResponse.json({ success: false, error: '经销商不存在' }, { status: 404 });
+    return NextResponse.json({ success: true, data });
+  } catch (error) {
+    console.error('dealer.update_failed', { error });
+    return NextResponse.json({ success: false, error: '更新经销商失败' }, { status: 500 });
   }
 }
 
-// 删除经销商
 export async function DELETE(
-  request: Request,
-  { params }: { params: Promise<{ id: string }> }
+  _request: NextRequest,
+  { params }: { params: Promise<{ id: string }> },
 ) {
   try {
-    const user = await getUserFromRequest(request);
-    if (!user) {
-      return Response.json({ success: false, error: '请先登录' }, { status: 401 });
-    }
-
-    if (!isSuperAdmin(user)) {
-      return Response.json({ success: false, error: '无权限删除经销商' }, { status: 403 });
-    }
-
+    const context = await getEnterpriseContext();
+    requirePermission(context, 'partners.manage');
     const { id } = await params;
-    const supabase = getClient();
-
-    // 先检查经销商是否存在
-    const { data: existing } = await supabase
-      .from('dealers')
-      .select('id, tenant_id')
-      .eq('id', id)
-      .single();
-
-    if (!existing) {
-      return Response.json({ success: false, error: '经销商不存在' }, { status: 404 });
-    }
-
-    // 权限检查：非管理员只能删除自己创建的
-    if (!isSuperAdmin(user)) {
-      if (!user.tenant_id || existing.tenant_id !== user.tenant_id) {
-        return Response.json({ success: false, error: '无权限删除此经销商' }, { status: 403 });
-      }
-    }
-
-    const { error } = await supabase
+    const supabase = await createClient();
+    const { data, error } = await supabase
       .from('dealers')
       .delete()
-      .eq('id', id);
+      .eq('enterprise_id', context.enterpriseId)
+      .eq('id', id)
+      .select('id')
+      .maybeSingle();
 
     if (error) {
-      return Response.json({ success: false, error: error.message }, { status: 500 });
+      console.error('dealer.delete_failed', { code: error.code });
+      return NextResponse.json({ success: false, error: '删除经销商失败' }, { status: 500 });
     }
-
-    return Response.json({ success: true });
-  } catch (err) {
-    console.error('Delete dealer error:', err);
-    return Response.json({ success: false, error: '服务器错误' }, { status: 500 });
+    if (!data) return NextResponse.json({ success: false, error: '经销商不存在' }, { status: 404 });
+    return NextResponse.json({ success: true });
+  } catch (error) {
+    console.error('dealer.delete_failed', { error });
+    return NextResponse.json({ success: false, error: '删除经销商失败' }, { status: 500 });
   }
 }
