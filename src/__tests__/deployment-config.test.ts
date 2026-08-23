@@ -74,11 +74,4 @@ describe("deployment entrypoints", () => {
     expect(startAll).not.toMatch(/\$\{WHITE\}|超级管理员登录|手机号:|密\s*码:/);
   });
 
-  it("does not seed password credentials from repository scripts", () => {
-    const legacyInitializer = readProjectFile("scripts/init-supabase.sql");
-
-    expect(legacyInitializer).not.toMatch(
-      /INSERT\s+INTO\s+(?:users|tenant_users)\s*\([^)]*password/is,
-    );
-  });
 });

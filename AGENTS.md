@@ -170,15 +170,16 @@
 | NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY | Publishable Key |
 | SUPABASE_SECRET_KEY | 服务端 Secret Key |
 | APP_URL | 应用对外访问地址 |
-| PORT | 服务端口（默认 5000） |
+| PORT | 服务端口（Next.js 默认 3000；`start-all.sh` 默认 5000） |
 
-### 数据库工具
+### 数据库验证
 
 ```bash
-node scripts/db-tool.js list                          # 列出所有表
-node scripts/db-tool.js select <table>                # 查询表数据
-node scripts/db-tool.js query "SELECT * FROM ..."     # 执行SQL查询
-node scripts/seed-sandbox.js                          # 填充种子数据
+pnpm db:start          # 启动本地 Supabase
+pnpm db:reset          # 仅重置本地数据库并应用 migrations
+pnpm db:test           # 运行本地 pgTAP 测试
+pnpm db:lint           # 检查本地数据库
+pnpm db:types:check    # 校验生成类型与 migrations 一致
 ```
 
 ## 测试体系

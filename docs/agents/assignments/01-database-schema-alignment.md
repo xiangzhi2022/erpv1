@@ -1,4 +1,4 @@
-# Task 01: 数据库 Schema 对齐
+# Task 01: 数据库 Schema 对齐（历史任务，已由 Supabase migrations 取代）
 
 建议分支: `codex/db-schema-alignment`
 
@@ -12,7 +12,7 @@
 
 - `src/db/schema.ts`
 - `src/db/relations.ts`
-- `scripts/init-database.js`
+- `supabase/migrations/**`
 - `DATABASE.md`
 
 ## 禁止修改文件
@@ -31,7 +31,7 @@
 - 不删除已有字段。
 - 字段命名必须和 API 中实际使用的 snake_case 字段一致。
 - `relations.ts` 只补充真实可用关系，不要为了完整性虚构关系。
-- `scripts/init-database.js` 要和 schema 的核心字段保持一致。
+- migrations、生成的数据库类型和 schema 的核心字段必须一致。
 - `DATABASE.md` 记录云 Supabase 约束和表结构原则。
 
 ## 验收标准
@@ -47,4 +47,3 @@
 pnpm ts-check
 pnpm test
 ```
-

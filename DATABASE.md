@@ -9,7 +9,7 @@
 3. **时间字段**: 统一 `TIMESTAMPTZ`，带 `DEFAULT NOW()`。`created_at` 必填（`NOT NULL`），`updated_at` 可选。
 4. **外键**: 使用 `ON DELETE CASCADE`（子表）或 `ON DELETE SET NULL`（弱关联）。
 5. **索引**: 所有外键、过滤字段（status/category 等）、排序字段（created_at）必须有索引。
-6. **RLS**: 所有业务表启用 RLS，后端使用 `service_role_key` 绕过。
+6. **RLS**: 所有业务表启用 RLS，服务端默认使用请求用户 JWT，不得以 Secret Key 代替租户授权。
 7. **禁止删除**: `health_check` 表为系统表，禁止删除。
 
 ## 数据库架构
@@ -113,9 +113,9 @@
 
 ## Schema 对齐原则
 
-1. **Schema 是唯一真相源**: `src/db/schema.ts` 定义表结构，`scripts/init-database.js` 必须与其保持一致。
-2. **只增不删**: 不删除已有字段，只补充缺失的字段和表。
-3. **API 字段对齐**: API 中使用的 snake_case 字段必须在 schema 或初始化脚本中有对应定义。
+1. **迁移是唯一部署真相源**: `supabase/migrations/` 按时间顺序定义线上表结构；禁止使用仓库外 SQL 或旧初始化脚本绕过迁移历史。
+2. **类型必须可重现**: `src/db/database.types.ts` 必须能从本地迁移数据库重新生成并通过 `pnpm db:types:check`。
+3. **API 字段对齐**: API 中使用的 snake_case 字段必须在迁移、生成类型和需要保留的 Drizzle schema 中一致。
 4. **Relations 只补充真实关系**: 不虚构完整性关系，只添加代码中实际使用的关联。
 5. **避免 as any**: Schema 类型推断应能覆盖所有业务需求，不需要 `as any` 逃逸。
 
@@ -126,45 +126,26 @@
 src/app/actions/*.ts  src/app/api/**/route.ts
         |
         v
-src/db/client.ts              src/lib/db.ts
-Supabase Client               REST API 直接操作
-getSupabaseServiceClient()    execSql()
-getSupabaseClient()           insertData() / selectData() / deleteData()
+src/lib/supabase/server.ts    src/db/client.ts
+请求级 SSR 用户客户端          受审计的窄范围服务端客户端
+用户 JWT + RLS                仅允许显式批准的内部边界
         |
         v
 getSupabaseCredentials()
-环境变量: NEXT_PUBLIC_SUPABASE_URL、NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY、SUPABASE_SECRET_KEY
-拒绝 localhost / 127.0.0.1 / ::1 / *.local
+环境变量: NEXT_PUBLIC_SUPABASE_URL、NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY；仅受审计边界使用 SUPABASE_SECRET_KEY
+本地 Supabase 只用于 migrations、pgTAP、lint 和类型生成，不作为生产配置
 ```
 
-### 服务端管理操作（绕过 RLS）
+### 用户级操作
 
 ```typescript
-import { getSupabaseServiceClient } from '@/db/client';
+import { createClient } from '@/lib/supabase/server';
 
-const supabase = getSupabaseServiceClient();
-const { data, error } = await supabase.from('users').select('*');
+const supabase = await createClient();
 ```
 
-### 匿名/用户级操作
-
-```typescript
-import { getSupabaseClient } from '@/db/client';
-
-const supabase = getSupabaseClient();
-const supabaseWithToken = getSupabaseClient(userToken);
-```
-
-### REST API 直接操作（src/lib/db.ts）
-
-```typescript
-import { execSql, insertData, selectData, deleteData } from '@/lib/db';
-
-const result = await execSql({ sql: 'SELECT * FROM users LIMIT 10' });
-await insertData('users', { name: 'test', phone: '123' });
-const rows = await selectData('users', { status: 'active' }, 'id,name');
-await deleteData('users', { id: '123' });
-```
+服务端 API 默认使用请求用户的 JWT 和数据库 RLS。Secret Key 客户端仅允许出现在安全测试明确批准的内部边界，
+不得提供任意 SQL、任意表名或通用增删改查接口。
 
 ## 环境变量
 
@@ -174,48 +155,32 @@ await deleteData('users', { id: '123' });
 | `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` | 是 | 浏览器和用户级请求使用的 Publishable Key |
 | `SUPABASE_SECRET_KEY` | 是* | 仅服务端使用的 Secret Key（绕过 RLS） |
 
-* 服务端管理操作必须设置，否则 `getSupabaseServiceClient()` 和 `src/lib/db.ts` 的函数会抛出明确错误。
+* 只有显式使用受审计 Secret Key 边界的服务端操作需要设置。
 
 旧环境变量别名不再兼容，请按 `.env.example` 配置官方变量名。`SUPABASE_SECRET_KEY` 严禁暴露到浏览器或提交到仓库。
 
-### 本地 URL 拒绝
-
-以下 URL 会被明确拒绝，项目不支持本地 Supabase：
-
-- `http://localhost:*`
-- `http://127.0.0.1:*`
-- `http://[::1]:*`
-- `*.local`
-
-## 初始化脚本
+## 本地数据库与迁移
 
 ```bash
-node scripts/init-database.js
+pnpm db:start
+pnpm db:reset
+pnpm db:test
+pnpm db:lint
+pnpm db:types:check
 ```
 
-脚本行为:
-- 检测表是否存在，不存在才创建（幂等）
-- 创建索引（IF NOT EXISTS）
-- 创建 `updated_at` 自动更新触发器
-- 使用 `supabase.rpc('exec', { sql })` 执行 DDL
-
-## 环境检查工具
-
-```bash
-node scripts/supabase-env.js check
-node scripts/supabase-env.js print
-node scripts/supabase-env.js export
-```
+所有 schema、函数、权限和 RLS 变化都必须新增迁移并先在本地数据库通过 pgTAP 与 lint。
+不得用 Secret Key 对远程项目执行任意 SQL，也不得从工具输出或 shell export 明文密钥。
 
 ## RLS 策略
 
-- RLS 已启用，后端使用 `service_role_key` 绕过
-- 无需创建额外的 RLS policy
-- 业务代码中所有写操作通过 `getSupabaseServiceClient()` 执行
+- 业务表必须启用 RLS，并以请求用户 JWT 校验企业成员身份和权限。
+- Secret Key 不替代租户授权；只有狭窄、受测试保护的基础设施操作可以绕过 RLS。
+- 函数权限默认撤销，仅向确需的角色授予 `EXECUTE`。
 
 ## 注意事项
 
-- 云 Supabase 不支持直接 DDL，需要通过 `exec` RPC 函数或 Dashboard 执行。
-- `supabase.rpc('exec')` 函数需要 `SECURITY DEFINER` 权限创建。
+- 生产迁移只能通过已审查的 `supabase/migrations/` 和受控发布流程应用。
+- 禁止创建通用 `exec(sql)` RPC 或从应用代码执行任意 DDL。
 - 所有金额字段使用 `DECIMAL(12, 2)` 或 `numeric`，避免浮点精度问题。
 - `skill_tags` 等灵活字段使用 `JSONB` 类型。

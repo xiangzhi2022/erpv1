@@ -1,4 +1,4 @@
-# Task 02: 数据访问层统一
+# Task 02: 数据访问层统一（历史任务，当前以 SSR 用户客户端和 RLS 为准）
 
 建议分支: `codex/db-client-cleanup`
 
@@ -6,13 +6,14 @@
 
 ## 任务目标
 
-统一 Supabase 客户端创建、环境变量加载和服务端数据库访问方式。项目运行时必须只使用云 Supabase，不支持 localhost 或本地 Supabase。
+此文件仅保留历史背景，不得作为当前实现指令。当前运行时使用官方 Supabase 变量、SSR 用户客户端与 RLS；
+本地 Supabase 用于迁移、pgTAP、lint 和类型生成。
 
 ## 允许修改文件
 
 - `src/db/client.ts`
 - `src/lib/db.ts`
-- `scripts/supabase-env.js`
+- `src/lib/supabase/**`
 - `.env.example`
 - `DATABASE.md`
 
@@ -26,11 +27,10 @@
 
 ## 具体要求
 
-- 服务端管理权限统一使用 `getSupabaseServiceClient()`。
-- 匿名客户端统一使用 `getSupabaseClient(token?)`。
-- 环境变量优先使用 `COZE_SUPABASE_URL`、`COZE_SUPABASE_ANON_KEY`、`COZE_SUPABASE_SERVICE_ROLE_KEY`。
-- 可兼容 legacy `SUPABASE_*`，但要映射到 `COZE_*`。
-- 明确拒绝 localhost、127.0.0.1、::1、`.local` 的 Supabase URL。
+- 请求处理默认使用 `src/lib/supabase/server.ts` 的用户客户端与 JWT。
+- 环境变量只使用 `NEXT_PUBLIC_SUPABASE_URL`、`NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` 和服务端专用 `SUPABASE_SECRET_KEY`。
+- Secret Key 仅限受审计的窄范围内部操作，不得提供任意 SQL 或通用数据工具。
+- 本地 URL 只能用于本地数据库验证，生产/预览部署由环境 guard 校验。
 - 不要硬编码 URL 或 key。
 
 ## 验收标准
@@ -46,4 +46,3 @@
 pnpm ts-check
 pnpm test
 ```
-
