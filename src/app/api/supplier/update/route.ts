@@ -1,4 +1,6 @@
+import { parseJson } from '@/lib/api/request';
 import { NextRequest, NextResponse } from 'next/server';
+import { z } from 'zod';
 import { getSupabaseClient } from '@/db/client';
 import { getUserFromRequest } from '@/lib/auth';
 import { isSuperAdmin } from '@/lib/role-access';
@@ -6,6 +8,18 @@ import { isSuperAdmin } from '@/lib/role-access';
 const VALID_STATUSES = ['active', 'inspecting', 'blacklisted'] as const;
 const VALID_RATINGS = ['A', 'B', 'C', 'D'] as const;
 const VALID_CATEGORIES = ['原材料', '包装耗材', '外协加工', '办公设备'] as const;
+const supplierUpdateSchema = z.object({
+  id: z.string(),
+  name: z.string().nullable().optional(),
+  contactPerson: z.string().nullable().optional(),
+  phone: z.string().nullable().optional(),
+  email: z.string().nullable().optional(),
+  category: z.union([z.enum(VALID_CATEGORIES), z.literal('')]).optional(),
+  rating: z.enum(VALID_RATINGS).optional(),
+  status: z.enum(VALID_STATUSES).optional(),
+  address: z.string().nullable().optional(),
+  remark: z.string().nullable().optional(),
+});
 
 // 将空字符串转为 null，确保数据库写入一致性
 function toNullIfEmpty(value: string | undefined | null): string | null {
@@ -21,7 +35,7 @@ export async function PATCH(request: NextRequest) {
       return NextResponse.json({ success: false, error: '未登录' }, { status: 401 });
     }
 
-    const body = await request.json();
+    const body = await parseJson(request, supplierUpdateSchema);
     const { id, name, contactPerson, phone, email, category, rating, status, address, remark } = body;
 
     if (!id || typeof id !== 'string') {

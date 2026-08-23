@@ -1,3 +1,4 @@
+import { parseJsonObject } from '@/lib/api/request';
 import { getSupabaseClient } from '@/db/client';
 import { getUserFromRequest } from '@/lib/auth';
 import { canEditOrderContent } from '@/lib/four-level-order';
@@ -25,7 +26,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
     if (!space || !tree) return jsonError('空间不存在', 404);
     if (!canSeeOrder(user, tree)) return jsonError('无权操作该空间', 403);
 
-    const body = (await request.json()) as Record<string, unknown>;
+    const body = (await parseJsonObject(request)) as Record<string, unknown>;
     const updateData: Record<string, unknown> = { updated_at: new Date().toISOString() };
     ['space_name', 'space_type', 'sort_order', 'status', 'remark'].forEach((key) => {
       if (body[key] !== undefined) updateData[key] = body[key];

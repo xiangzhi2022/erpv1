@@ -1,3 +1,4 @@
+import { parseJsonObject } from '@/lib/api/request';
 import { getSupabaseClient } from '@/db/client';
 import { getUserFromRequest } from '@/lib/auth';
 import { ORDER_STATUS_VALUES, canEditFinancialFields, canEditOrderContent } from '@/lib/four-level-order';
@@ -65,7 +66,7 @@ export async function PATCH(
     if (!user) return jsonError('请先登录', 401);
 
     const { id } = await params;
-    const body = (await request.json()) as Record<string, unknown>;
+    const body = (await parseJsonObject(request)) as Record<string, unknown>;
     const supabase = getSupabaseClient();
     const tree = await loadOrderTree(supabase, id);
     if (!tree) return jsonError('订单不存在', 404);

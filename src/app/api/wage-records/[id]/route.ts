@@ -1,3 +1,4 @@
+import { parseJsonObject } from '@/lib/api/request';
 import { getSupabaseClient } from '@/db/client';
 import { getUserFromRequest } from '@/lib/auth';
 import { canViewWageSummary } from '@/lib/four-level-order';
@@ -12,7 +13,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
     if (!user) return jsonError('请先登录', 401);
     if (!canViewWageSummary(user)) return jsonError('无权修改工资记录', 403);
     const { id } = await params;
-    const body = (await request.json()) as Record<string, unknown>;
+    const body = (await parseJsonObject(request)) as Record<string, unknown>;
     const updateData: Record<string, unknown> = { updated_at: new Date().toISOString() };
     for (const key of ['status', 'wage_amount', 'quantity', 'unit_price', 'approved_by', 'approved_at', 'paid_at']) {
       if (body[key] !== undefined) updateData[key] = body[key];

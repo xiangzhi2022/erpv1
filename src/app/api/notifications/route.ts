@@ -1,3 +1,4 @@
+import { parseJsonObject } from '@/lib/api/request';
 import { NextResponse } from "next/server";
 import {
   getNotifications,
@@ -35,7 +36,7 @@ export async function GET(request: Request) {
 // POST /api/notifications - 标记所有通知为已读 / 触发过期检查
 export async function POST(request: Request) {
   try {
-    const body = await request.json();
+    const body = await parseJsonObject(request);
 
     if (body.action === "markAllRead") {
       const count = await markAllNotificationsRead();

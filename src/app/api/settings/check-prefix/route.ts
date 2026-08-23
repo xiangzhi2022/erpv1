@@ -1,3 +1,4 @@
+import { parseJsonObject } from '@/lib/api/request';
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseClient } from '@/db/client';
 import { authFailed, requireSettingsUser } from '../_utils';
@@ -7,8 +8,8 @@ export async function POST(request: NextRequest) {
     const auth = await requireSettingsUser(request);
     if (authFailed(auth)) return auth.response;
 
-    const { prefix } = await request.json();
-    if (!prefix || prefix.length < 1) {
+    const { prefix } = await parseJsonObject(request);
+    if (typeof prefix !== 'string' || prefix.length < 1) {
       return NextResponse.json({ success: false, error: '??????' }, { status: 400 });
     }
 

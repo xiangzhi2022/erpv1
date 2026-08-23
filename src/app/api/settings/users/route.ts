@@ -1,6 +1,11 @@
+import { parseJsonObject } from '@/lib/api/request';
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseClient } from '@/db/client';
-import { createAdminClient } from '@/lib/supabase/admin';
+import {
+  createManagedIdentity,
+  deleteManagedIdentity,
+  updateManagedIdentityPassword,
+} from '@/lib/admin/user-identities';
 import {
   getAccountRoleTemplate,
   getDepartmentForPermissions,
@@ -163,7 +168,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ success: false, error: '无权限创建用户' }, { status: 403 });
     }
 
-    const body = (await request.json()) as Record<string, unknown>;
+    const body = (await parseJsonObject(request)) as Record<string, unknown>;
     const phone = typeof body.phone === 'string' ? body.phone.trim() : '';
     const password = typeof body.password === 'string' ? body.password : '';
     const realName = typeof body.real_name === 'string' ? body.real_name.trim() : '';
@@ -206,12 +211,10 @@ export async function POST(request: NextRequest) {
       ? body.department.trim()
       : getDepartmentForPermissions(permissionKeys) || getAccountRoleTemplate(requestedRole)?.department || null;
 
-    const admin = createAdminClient();
-    const { data: authIdentity, error: authError } = await admin.auth.admin.createUser({
+    const { data: authIdentity, error: authError } = await createManagedIdentity({
       phone,
       password,
-      phone_confirm: true,
-      user_metadata: { display_name: realName || phone },
+      displayName: realName || phone,
     });
     if (authError || !authIdentity.user) {
       const conflict = authError?.code === 'phone_exists' || authError?.code === 'user_already_exists';
@@ -238,7 +241,7 @@ export async function POST(request: NextRequest) {
       .single();
 
     if (error || !data) {
-      await admin.auth.admin.deleteUser(authIdentity.user.id);
+      await deleteManagedIdentity(authIdentity.user.id);
       return NextResponse.json({ success: false, error: error?.message || '创建用户失败' }, { status: 500 });
     }
 
@@ -283,7 +286,7 @@ export async function PUT(request: NextRequest) {
       return NextResponse.json({ success: false, error: '无权管理该用户' }, { status: 403 });
     }
 
-    const body = (await request.json()) as Record<string, unknown>;
+    const body = (await parseJsonObject(request)) as Record<string, unknown>;
     const updateData: Record<string, unknown> = { updated_at: new Date().toISOString() };
     const requestedRole = body.role !== undefined ? normalizeBodyRole(body.role) : normalizeBodyRole(existing.role);
     const permissionKeys = body.permissions !== undefined && requestedRole === 'employee'
@@ -328,9 +331,7 @@ export async function PUT(request: NextRequest) {
     }
 
     if (nextPassword) {
-      const { error: passwordError } = await createAdminClient().auth.admin.updateUserById(id, {
-        password: nextPassword,
-      });
+      const { error: passwordError } = await updateManagedIdentityPassword(id, nextPassword);
       if (passwordError) {
         return NextResponse.json({ success: false, error: '更新认证密码失败' }, { status: 503 });
       }

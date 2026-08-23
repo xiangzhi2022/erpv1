@@ -1,3 +1,4 @@
+import { parseJsonObject } from '@/lib/api/request';
 import { getSupabaseClient } from '@/db/client';
 import { getUserFromRequest } from '@/lib/auth';
 import { canManageProduction } from '@/lib/four-level-order';
@@ -18,7 +19,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     if (!canManageProduction(user)) return jsonError('无权确认拆单', 403);
 
     const { id } = await params;
-    const body = (await request.json().catch(() => ({}))) as Record<string, unknown>;
+    const body = (await parseJsonObject(request).catch(() => ({}))) as Record<string, unknown>;
     const supabase = getSupabaseClient();
     const tree = await loadOrderTree(supabase, id);
     if (!tree) return jsonError('订单不存在', 404);

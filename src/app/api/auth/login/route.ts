@@ -1,3 +1,4 @@
+import { parseJsonObject } from '@/lib/api/request';
 import { NextRequest, NextResponse } from 'next/server';
 import { loginSchema } from '@/lib/auth/schemas';
 import { createAuthService } from '@/lib/auth/service';
@@ -5,7 +6,7 @@ import { authRouteError, authValidationError } from '@/lib/auth/route-response';
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
   try {
-    const parsed = loginSchema.safeParse(await request.json());
+    const parsed = loginSchema.safeParse(await parseJsonObject(request));
     if (!parsed.success) {
       return authValidationError(parsed.error.issues[0]?.message || '登录参数不正确');
     }

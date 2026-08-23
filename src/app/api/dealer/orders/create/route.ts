@@ -1,3 +1,5 @@
+import { parseJson } from '@/lib/api/request';
+import { z } from 'zod';
 import { NextResponse } from "next/server";
 import { getSupabaseClient } from "@/db/client";
 import { getUserFromRequest } from "@/lib/auth";
@@ -10,14 +12,19 @@ interface OrderItemInput {
   unitPrice: number;
 }
 
-interface RequestBody {
-  customerName: string;
-  customerPhone: string;
-  deliveryDate?: string;
-  targetFactoryId: string;
-  items: OrderItemInput[];
-  remark?: string;
-}
+const requestBodySchema = z.object({
+  customerName: z.string(),
+  customerPhone: z.string(),
+  deliveryDate: z.string().optional(),
+  targetFactoryId: z.string(),
+  items: z.array(z.object({
+    productName: z.string(),
+    specification: z.string().optional(),
+    quantity: z.number(),
+    unitPrice: z.number(),
+  })),
+  remark: z.string().optional(),
+});
 
 export async function POST(request: Request) {
   try {
@@ -32,7 +39,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ success: false, error: "无权限创建订单" }, { status: 403 });
     }
 
-    const body: RequestBody = await request.json();
+    const body = await parseJson(request, requestBodySchema);
     const { customerName, customerPhone, deliveryDate, targetFactoryId, items, remark } = body;
 
     // 必填字段校验

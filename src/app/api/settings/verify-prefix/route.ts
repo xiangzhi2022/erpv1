@@ -1,3 +1,4 @@
+import { parseJsonObject } from '@/lib/api/request';
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseClient } from '@/db/client';
 import { authFailed, isSettingsAdmin, requireSettingsUser } from '../_utils';
@@ -41,8 +42,8 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ success: false, error: '?????????????' }, { status: 403 });
     }
 
-    const { prefix, companyName, phone, address } = await request.json();
-    if (!prefix) return NextResponse.json({ success: false, error: '?????' }, { status: 400 });
+    const { prefix, companyName, phone, address } = await parseJsonObject(request);
+    if (typeof prefix !== 'string' || !prefix) return NextResponse.json({ success: false, error: '?????' }, { status: 400 });
 
     const supabase = getSupabaseClient();
     const upperPrefix = prefix.toUpperCase();
@@ -52,7 +53,11 @@ export async function POST(request: NextRequest) {
       .eq('prefix', upperPrefix)
       .maybeSingle();
 
-    const payload = { company_name: companyName || null, phone: phone || null, address: address || null };
+    const payload = {
+      company_name: typeof companyName === 'string' ? companyName : null,
+      phone: typeof phone === 'string' ? phone : null,
+      address: typeof address === 'string' ? address : null,
+    };
     const result = existing
       ? await supabase.from('order_prefixes').update(payload).eq('prefix', upperPrefix)
       : await supabase.from('order_prefixes').insert({ prefix: upperPrefix, ...payload });

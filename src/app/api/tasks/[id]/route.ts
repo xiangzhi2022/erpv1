@@ -1,3 +1,4 @@
+import { parseJsonObject } from '@/lib/api/request';
 import { NextResponse } from "next/server";
 import {
   getTaskById,
@@ -34,7 +35,7 @@ export async function PATCH(
 ) {
   try {
     const { id } = await params;
-    const body = await request.json();
+    const body = await parseJsonObject(request);
 
     // 特殊操作：切换完成状态
     if (body.action === "toggle") {
@@ -86,7 +87,7 @@ export async function PUT(
 ) {
   try {
     const { id } = await params;
-    const body = await request.json();
+    const body = await parseJsonObject(request);
 
     // 特殊操作：切换完成状态
     if (body.action === "toggle") {

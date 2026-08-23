@@ -1,3 +1,4 @@
+import { parseJsonObject } from '@/lib/api/request';
 import { getSupabaseClient } from '@/db/client';
 import { getUserFromRequest } from '@/lib/auth';
 import { DEFAULT_POSITIONS } from '@/lib/organization';
@@ -45,7 +46,7 @@ export async function POST(request: Request) {
     const user = await getUserFromRequest(request);
     if (!user) return jsonError('请先登录', 401);
     if (!canManageOrganization(user)) return jsonError('无权创建岗位', 403);
-    const body = (await request.json()) as Record<string, unknown>;
+    const body = (await parseJsonObject(request)) as Record<string, unknown>;
     const name = text(body.name);
     const code = text(body.code);
     if (!name || !code) return jsonError('岗位名称和编码不能为空', 400);

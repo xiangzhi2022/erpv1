@@ -1,3 +1,4 @@
+import { parseJsonObject } from '@/lib/api/request';
 import { getSupabaseClient } from '@/db/client';
 import { getUserFromRequest } from '@/lib/auth';
 import {
@@ -41,7 +42,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     if (!tree) return jsonError('订单不存在', 404);
     if (!canSeeOrder(user, tree)) return jsonError('无权操作该订单', 403);
 
-    const body = (await request.json()) as Record<string, unknown>;
+    const body = (await parseJsonObject(request)) as Record<string, unknown>;
     const taskName = text(body.task_name);
     if (!taskName) return jsonError('任务名称不能为空', 400);
     const taskType = text(body.task_type) || 'process';

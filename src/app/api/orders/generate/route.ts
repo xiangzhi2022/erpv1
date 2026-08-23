@@ -1,3 +1,4 @@
+import { parseJsonObject } from '@/lib/api/request';
 import { getSupabaseClient } from '@/db/client';
 import { getUserFromRequest } from '@/lib/auth';
 import { isSuperAdmin } from '@/lib/role-access';
@@ -12,7 +13,7 @@ export async function POST(request: Request) {
       return Response.json({ success: false, error: '请先登录' }, { status: 401 });
     }
 
-    const body = await request.json().catch(() => ({}));
+    const body: Record<string, unknown> = await parseJsonObject(request).catch(() => ({}));
     const prefix = typeof body.prefix === 'string' && body.prefix.trim() ? body.prefix.trim() : 'ORD';
 
     if (!prefix) {

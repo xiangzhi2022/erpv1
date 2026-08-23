@@ -1,3 +1,4 @@
+import { parseJsonObject } from '@/lib/api/request';
 import { NextResponse } from 'next/server';
 import { getSupabaseClient } from '@/db/client';
 import { getUserFromRequest } from '@/lib/auth';
@@ -30,7 +31,7 @@ export async function POST(request: Request) {
     if (!user) return jsonError('请先登录', 401);
     if (!user.tenant_id) return jsonError('当前用户未关联企业', 403);
 
-    const body = (await request.json()) as BasicOrderBody;
+    const body = (await parseJsonObject(request)) as BasicOrderBody;
     const orderNo = stringValue(body.order_no);
     const orderName = stringValue(body.customer_name);
     const orderFlow = body.order_flow === 'factory_to_supplier' ? 'factory_to_supplier' : 'dealer_to_factory';

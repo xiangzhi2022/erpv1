@@ -12,6 +12,5 @@ export async function GET() {
   return NextResponse.json({
     hasSupabaseUrl: !!process.env.NEXT_PUBLIC_SUPABASE_URL,
     hasPublishableKey: !!process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY,
-    hasSecretKey: !!process.env.SUPABASE_SECRET_KEY,
   });
 }

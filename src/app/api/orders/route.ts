@@ -1,3 +1,4 @@
+import { parseJsonObject } from '@/lib/api/request';
 import { NextResponse } from 'next/server';
 import { getSupabaseClient } from '@/db/client';
 import { getUserFromRequest, type AuthUser } from '@/lib/auth';
@@ -333,7 +334,7 @@ export async function POST(request: Request) {
     if (!user) return jsonError('请先登录', 401);
     if (!user.tenant_id) return jsonError('当前用户未关联企业', 403);
 
-    const parsed = orderFormSchema.safeParse(await request.json());
+    const parsed = orderFormSchema.safeParse(await parseJsonObject(request));
     if (!parsed.success) {
       return jsonError(parsed.error.issues[0]?.message || '订单数据无效', 400);
     }

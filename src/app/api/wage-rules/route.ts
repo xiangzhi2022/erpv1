@@ -1,3 +1,4 @@
+import { parseJsonObject } from '@/lib/api/request';
 import { getSupabaseClient } from '@/db/client';
 import { getUserFromRequest } from '@/lib/auth';
 import {
@@ -77,7 +78,7 @@ export async function POST(request: Request) {
     if (!user) return jsonError('请先登录', 401);
     if (!canManageWageRules(user)) return jsonError('无权创建工资管理规则', 403);
 
-    const body = (await request.json()) as Record<string, unknown>;
+    const body = (await parseJsonObject(request)) as Record<string, unknown>;
     const ruleName = text(body.rule_name);
     const taskType = text(body.task_type);
     const productType = text(body.product_type);

@@ -1,21 +1,15 @@
 import { NextResponse } from 'next/server';
-import { createAdminClient } from '@/lib/supabase/admin';
-import { getSession } from '@/lib/auth';
-
-function getSupabaseAdmin() {
-  return createAdminClient();
-}
+import { createClient } from '@/lib/supabase/server';
+import { getEnterpriseContext, requirePermission } from '@/lib/enterprise/context';
 
 async function getAuthUser() {
   try {
-    const session = await getSession();
-    if (session?.user) {
-      return { id: session.user.id, role: 'admin', name: session.user.name };
-    }
+    const context = await getEnterpriseContext();
+    requirePermission(context, 'members.read');
+    return { id: context.userId, enterpriseId: context.enterpriseId };
   } catch {
-    // ignore
+    return null;
   }
-  return null;
 }
 
 // GET - 工人统计
@@ -23,7 +17,7 @@ export async function GET() {
   try {
     const user = await getAuthUser();
     if (!user) return NextResponse.json({ success: false, error: '请先登录' }, { status: 401 });
-    const supabase = getSupabaseAdmin();
+    const supabase = await createClient();
 
     const { data: allWorkers, error: workerError } = await supabase.from('workers').select('status, craft_type');
     if (workerError) {

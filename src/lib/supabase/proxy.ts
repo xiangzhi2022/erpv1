@@ -1,4 +1,5 @@
 import { createServerClient } from '@supabase/ssr';
+import type { SupabaseClient } from '@supabase/supabase-js';
 import { NextResponse, type NextRequest } from 'next/server';
 import type { Database } from '@/db/database.types';
 import { getSupabasePublicCredentials } from '@/db/client';
@@ -8,6 +9,7 @@ type VerifiedClaims = Record<string, unknown> & { sub?: string };
 export interface SessionUpdateResult {
   response: NextResponse;
   claims: VerifiedClaims | null;
+  client: SupabaseClient<Database>;
 }
 
 export async function updateSession(request: NextRequest): Promise<SessionUpdateResult> {
@@ -43,5 +45,6 @@ export async function updateSession(request: NextRequest): Promise<SessionUpdate
   return {
     response,
     claims: (data?.claims as VerifiedClaims | undefined) ?? null,
+    client: supabase,
   };
 }

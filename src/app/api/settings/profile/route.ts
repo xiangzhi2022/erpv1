@@ -1,3 +1,4 @@
+import { parseJsonObject } from '@/lib/api/request';
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseClient } from '@/db/client';
 import { profileSchema } from '@/app/settings/schemas';
@@ -63,7 +64,7 @@ export async function PUT(request: NextRequest) {
     const auth = await requireSettingsUser(request);
     if (authFailed(auth)) return auth.response;
 
-    const parsed = profileSchema.safeParse(await request.json());
+    const parsed = profileSchema.safeParse(await parseJsonObject(request));
     if (!parsed.success) {
       return NextResponse.json(
         { success: false, error: parsed.error.issues[0]?.message || '??????' },

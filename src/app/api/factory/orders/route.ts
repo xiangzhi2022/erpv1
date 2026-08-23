@@ -1,3 +1,4 @@
+import { parseJsonObject } from '@/lib/api/request';
 import { NextResponse } from "next/server";
 import { getSupabaseClient } from "@/db/client";
 import { getUserFromRequest } from "@/lib/auth";
@@ -167,7 +168,7 @@ export async function POST(request: Request) {
     }
 
     const supabase = getSupabaseClient();
-    const body = await request.json();
+    const body = await parseJsonObject(request);
     const { order_id } = body;
 
     if (!order_id) {

@@ -1,3 +1,4 @@
+import { parseJsonObject } from '@/lib/api/request';
 import { getSupabaseClient } from '@/db/client';
 import { getUserFromRequest } from '@/lib/auth';
 import { canEditFinancialFields, canEditOrderContent } from '@/lib/four-level-order';
@@ -25,7 +26,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     if (!tree) return jsonError('订单不存在', 404);
     if (!canSeeOrder(user, tree)) return jsonError('无权操作该订单', 403);
 
-    const body = (await request.json()) as Record<string, unknown>;
+    const body = (await parseJsonObject(request)) as Record<string, unknown>;
     const productName = optionalText(body.product_name);
     if (!productName) return jsonError('产品名称不能为空', 400);
 

@@ -1,3 +1,4 @@
+import { parseJsonObject } from '@/lib/api/request';
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseClient } from '@/db/client';
 import { authFailed, loadUserSettings, requireSettingsUser, stringifySettingValue } from '../_utils';
@@ -20,7 +21,7 @@ export async function PUT(request: NextRequest) {
     const auth = await requireSettingsUser(request);
     if (authFailed(auth)) return auth.response;
 
-    const { key, value } = await request.json();
+    const { key, value } = await parseJsonObject(request);
     if (!key || value === undefined) {
       return NextResponse.json({ success: false, error: '?????' }, { status: 400 });
     }

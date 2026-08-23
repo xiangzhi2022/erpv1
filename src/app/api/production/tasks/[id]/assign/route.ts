@@ -1,3 +1,4 @@
+import { parseJsonObject } from '@/lib/api/request';
 import { getSupabaseClient } from '@/db/client';
 import { getUserFromRequest } from '@/lib/auth';
 import { calculateTaskWage, canManageProduction } from '@/lib/four-level-order';
@@ -17,7 +18,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
     if (!user) return jsonError('请先登录', 401);
     if (!canManageProduction(user)) return jsonError('无权分配任务', 403);
     const { id } = await params;
-    const body = (await request.json()) as { assigned_worker_id?: string; workshop_id?: string; workstation_id?: string };
+    const body = (await parseJsonObject(request)) as { assigned_worker_id?: string; workshop_id?: string; workstation_id?: string };
     if (!body.assigned_worker_id) return jsonError('请选择工人', 400);
     const supabase = getSupabaseClient();
     const { data: task } = await supabase.from('production_tasks').select('*').eq('id', id).maybeSingle();

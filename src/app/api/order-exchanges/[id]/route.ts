@@ -1,3 +1,4 @@
+import { parseJsonObject } from '@/lib/api/request';
 import { NextResponse } from 'next/server';
 import { getSupabaseClient } from '@/db/client';
 import { getUserFromRequest } from '@/lib/auth';
@@ -37,7 +38,7 @@ export async function PATCH(
     if (!user) return jsonError('请先登录', 401);
 
     const { id } = await params;
-    const body = (await request.json()) as Record<string, unknown>;
+    const body = (await parseJsonObject(request)) as Record<string, unknown>;
     if (!isAction(body.action)) return jsonError('动作无效', 400);
 
     const supabase = getSupabaseClient();

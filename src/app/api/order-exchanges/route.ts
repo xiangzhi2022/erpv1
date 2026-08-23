@@ -1,3 +1,4 @@
+import { parseJsonObject } from '@/lib/api/request';
 import { NextResponse } from 'next/server';
 import { getSupabaseClient } from '@/db/client';
 import { getUserFromRequest } from '@/lib/auth';
@@ -108,7 +109,7 @@ export async function POST(request: Request) {
     const user = await getUserFromRequest(request);
     if (!user) return jsonError('请先登录', 401);
 
-    const body = (await request.json()) as Record<string, unknown>;
+    const body = (await parseJsonObject(request)) as Record<string, unknown>;
     const orderId = typeof body.order_id === 'string' ? body.order_id : '';
     const toTenantId = typeof body.to_tenant_id === 'string' ? body.to_tenant_id : '';
     const message = typeof body.message === 'string' ? body.message.trim() : '';

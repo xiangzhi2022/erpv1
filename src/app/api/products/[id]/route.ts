@@ -1,3 +1,4 @@
+import { parseJsonObject } from '@/lib/api/request';
 import { getSupabaseClient } from '@/db/client';
 import { getUserFromRequest } from '@/lib/auth';
 import { canEditFinancialFields, canEditOrderContent } from '@/lib/four-level-order';
@@ -27,7 +28,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
     if (!product || !tree) return jsonError('产品不存在', 404);
     if (!canSeeOrder(user, tree)) return jsonError('无权操作该产品', 403);
 
-    const body = (await request.json()) as Record<string, unknown>;
+    const body = (await parseJsonObject(request)) as Record<string, unknown>;
     const updateData: Record<string, unknown> = { updated_at: new Date().toISOString() };
     if (canEditOrderContent(user)) {
       BASIC_FIELDS.forEach((key) => {

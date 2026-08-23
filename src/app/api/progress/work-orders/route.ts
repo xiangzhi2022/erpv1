@@ -1,3 +1,4 @@
+import { parseJsonObject } from '@/lib/api/request';
 import { NextResponse } from 'next/server';
 import { getSupabaseClient } from '@/db/client';
 import { getUserFromRequest } from '@/lib/auth';
@@ -129,7 +130,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ success: false, error: '请先登录' }, { status: 401 });
     }
 
-    const body = await request.json();
+    const body = await parseJsonObject(request);
     const { order_id, workshop_id, product_name, target_quantity, priority, expected_end_date, remark } = body;
 
     if (!product_name || target_quantity === undefined) {
@@ -139,7 +140,8 @@ export async function POST(request: Request) {
       );
     }
 
-    if (target_quantity <= 0) {
+    const targetQuantity = Number(target_quantity);
+    if (!Number.isFinite(targetQuantity) || targetQuantity <= 0) {
       return NextResponse.json(
         { success: false, error: '目标数量必须大于0' },
         { status: 400 }
@@ -152,7 +154,7 @@ export async function POST(request: Request) {
     const insertData: Record<string, unknown> = {
       workshop_id: workshop_id || null,
       product_name,
-      target_quantity,
+      target_quantity: targetQuantity,
       completed_quantity: 0,
       status: WorkOrderStatus.PENDING,
       priority: priority || 'normal',

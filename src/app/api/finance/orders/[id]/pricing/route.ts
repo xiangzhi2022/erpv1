@@ -1,3 +1,4 @@
+import { parseJsonObject } from '@/lib/api/request';
 import { getSupabaseClient } from '@/db/client';
 import { getUserFromRequest } from '@/lib/auth';
 import { canEditFinancialFields } from '@/lib/four-level-order';
@@ -24,7 +25,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
     if (!user) return jsonError('请先登录', 401);
     if (!canEditFinancialFields(user)) return jsonError('无权编辑财务字段', 403);
     const { id } = await params;
-    const body = (await request.json()) as Record<string, unknown>;
+    const body = (await parseJsonObject(request)) as Record<string, unknown>;
     const updateData: Record<string, unknown> = { updated_at: new Date().toISOString() };
     for (const key of PATCH_FIELDS) {
       if (body[key] !== undefined) updateData[key] = body[key];

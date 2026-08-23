@@ -1,3 +1,4 @@
+import { parseJsonObject } from '@/lib/api/request';
 import { getSupabaseClient } from '@/db/client';
 import { getUserFromRequest } from '@/lib/auth';
 import {
@@ -58,7 +59,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
     if (!user) return jsonError('请先登录', 401);
     if (!canManageOrganization(user)) return jsonError('无权修改员工', 403);
     const { id } = await params;
-    const body = (await request.json()) as Record<string, unknown>;
+    const body = (await parseJsonObject(request)) as Record<string, unknown>;
     const updateData: Record<string, unknown> = { updated_at: new Date().toISOString() };
 
     for (const key of ['employee_no', 'name', 'phone', 'email', 'avatar_url', 'employee_type', 'status', 'hire_date', 'leave_date', 'base_salary', 'remark']) {

@@ -1,3 +1,4 @@
+import { parseJsonObject } from '@/lib/api/request';
 import { NextResponse } from "next/server";
 import { getTasks, createTask, getTaskStats } from "@/app/actions/tasks";
 
@@ -37,7 +38,7 @@ export async function GET(request: Request) {
 // POST /api/tasks - 创建任务
 export async function POST(request: Request) {
   try {
-    const body = await request.json();
+    const body = await parseJsonObject(request);
     const {
       title,
       description,
@@ -58,19 +59,19 @@ export async function POST(request: Request) {
     }
     const task = await createTask({
       title: title.trim(),
-      description: description ?? null,
-      status: status ?? "pending",
-      priority: priority ?? 0,
-      category_id: category_id ?? undefined,
-      assignee_id: assignee_id ?? undefined,
-      assignee_name: assignee_name ?? undefined,
-      assignee_avatar: assignee_avatar ?? undefined,
-      completed: completed ?? false,
-      due_date: due_date ?? undefined,
+      description: typeof description === 'string' ? description : null,
+      status: typeof status === 'string' ? status : "pending",
+      priority: typeof priority === 'number' ? priority : 0,
+      category_id: typeof category_id === 'string' ? category_id : null,
+      assignee_id: typeof assignee_id === 'string' ? assignee_id : null,
+      assignee_name: typeof assignee_name === 'string' ? assignee_name : null,
+      assignee_avatar: typeof assignee_avatar === 'string' ? assignee_avatar : null,
+      completed: typeof completed === 'boolean' ? completed : false,
+      due_date: typeof due_date === 'string' ? due_date : undefined,
     });
 
     // 如果有指派负责人，创建分配通知
-    if (assignee_name) {
+    if (typeof assignee_name === 'string' && assignee_name) {
       try {
         const { createNotification } = await import("@/app/actions/tasks");
         await createNotification({

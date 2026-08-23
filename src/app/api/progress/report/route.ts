@@ -1,3 +1,4 @@
+import { parseJsonObject } from '@/lib/api/request';
 import { NextResponse } from 'next/server';
 import { getSupabaseClient } from '@/db/client';
 import { getUserFromRequest } from '@/lib/auth';
@@ -37,7 +38,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ success: false, error: '请先登录' }, { status: 401 });
     }
 
-    const body = await request.json();
+    const body = await parseJsonObject(request);
     const parsed = progressReportSchema.safeParse(body);
 
     if (!parsed.success) {

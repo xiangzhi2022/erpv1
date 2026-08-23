@@ -1,3 +1,4 @@
+import { parseJsonObject } from '@/lib/api/request';
 import { NextRequest, NextResponse } from 'next/server';
 import { registerSchema } from '@/lib/auth/schemas';
 import { createAuthService } from '@/lib/auth/service';
@@ -12,7 +13,7 @@ const ENTERPRISE_TYPE_ALIASES: Record<string, 'manufacturer' | 'dealer' | 'suppl
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
   try {
-    const body = (await request.json()) as Record<string, unknown>;
+    const body = (await parseJsonObject(request)) as Record<string, unknown>;
     const rawType = typeof body.enterpriseType === 'string'
       ? body.enterpriseType
       : typeof body.tenantType === 'string'

@@ -1,3 +1,4 @@
+import { parseJsonObject } from '@/lib/api/request';
 import { randomUUID } from 'node:crypto';
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
@@ -74,7 +75,7 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   let unknownBody: unknown;
   try {
-    unknownBody = await request.json();
+    unknownBody = await parseJsonObject(request);
   } catch {
     return errorResponse('INVALID_REQUEST', '请求内容格式错误', 400);
   }

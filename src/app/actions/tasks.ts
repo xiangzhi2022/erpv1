@@ -1,7 +1,15 @@
 "use server";
 
-import { getSupabaseClient } from "@/db/client";
+import { createClient } from '@/lib/supabase/server';
+import { getEnterpriseContext, requirePermission } from '@/lib/enterprise/context';
+import type { EnterprisePermissionCode } from '@/lib/enterprise/permissions';
 import type { Task, InsertTask, Notification, InsertNotification } from "@/db/schema";
+
+async function taskAccess(...permissions: EnterprisePermissionCode[]) {
+  const context = await getEnterpriseContext();
+  for (const permission of permissions) requirePermission(context, permission);
+  return { client: await createClient(), enterpriseId: context.enterpriseId };
+}
 
 // ==================== Tasks ====================
 
@@ -16,7 +24,7 @@ export async function getTasks(filters?: {
   page?: number;
   pageSize?: number;
 }): Promise<{ tasks: Task[]; total: number }> {
-  const client = getSupabaseClient();
+  const { client, enterpriseId } = await taskAccess('tasks.read');
   const page = filters?.page ?? 1;
   const pageSize = filters?.pageSize ?? 50;
   const from = (page - 1) * pageSize;
@@ -25,6 +33,7 @@ export async function getTasks(filters?: {
   let query = client
     .from("tasks")
     .select("id, title, description, status, priority, category_id, assignee_id, assignee_name, assignee_avatar, due_date, completed, created_at, updated_at", { count: "exact" })
+    .eq('enterprise_id', enterpriseId)
     .order("created_at", { ascending: false })
     .range(from, to);
 
@@ -56,10 +65,11 @@ export async function getTasks(filters?: {
 
 // 根据 ID 查询单个任务
 export async function getTaskById(id: string): Promise<Task | null> {
-  const client = getSupabaseClient();
+  const { client, enterpriseId } = await taskAccess('tasks.read');
   const { data, error } = await client
     .from("tasks")
     .select("id, title, description, status, priority, category_id, assignee_id, assignee_name, assignee_avatar, due_date, completed, created_at, updated_at")
+    .eq('enterprise_id', enterpriseId)
     .eq("id", id)
     .maybeSingle();
   if (error) throw new Error(`查询任务失败: ${error.message}`);
@@ -68,10 +78,10 @@ export async function getTaskById(id: string): Promise<Task | null> {
 
 // 创建任务
 export async function createTask(input: InsertTask & { due_date?: string }): Promise<Task> {
-  const client = getSupabaseClient();
+  const { client, enterpriseId } = await taskAccess('tasks.manage');
   const { data, error } = await client
     .from("tasks")
-    .insert(input)
+    .insert({ ...input, enterprise_id: enterpriseId })
     .select("id, title, description, status, priority, category_id, assignee_id, assignee_name, assignee_avatar, due_date, completed, created_at, updated_at")
     .single();
   if (error) throw new Error(`创建任务失败: ${error.message}`);
@@ -83,10 +93,11 @@ export async function updateTask(
   id: string,
   input: Partial<InsertTask & { due_date?: string }>
 ): Promise<Task> {
-  const client = getSupabaseClient();
+  const { client, enterpriseId } = await taskAccess('tasks.manage');
   const { data, error } = await client
     .from("tasks")
     .update({ ...input, updated_at: new Date().toISOString() })
+    .eq('enterprise_id', enterpriseId)
     .eq("id", id)
     .select("id, title, description, status, priority, category_id, assignee_id, assignee_name, assignee_avatar, due_date, completed, created_at, updated_at")
     .maybeSingle();
@@ -97,10 +108,11 @@ export async function updateTask(
 
 // 切换任务完成状态
 export async function toggleTask(id: string): Promise<Task> {
-  const client = getSupabaseClient();
+  const { client, enterpriseId } = await taskAccess('tasks.manage');
   const { data: current, error: fetchError } = await client
     .from("tasks")
     .select("completed")
+    .eq('enterprise_id', enterpriseId)
     .eq("id", id)
     .maybeSingle();
   if (fetchError) throw new Error(`查询任务状态失败: ${fetchError.message}`);
@@ -113,6 +125,7 @@ export async function toggleTask(id: string): Promise<Task> {
       status: !current.completed ? "completed" : "pending",
       updated_at: new Date().toISOString(),
     })
+    .eq('enterprise_id', enterpriseId)
     .eq("id", id)
     .select("id, title, description, status, priority, category_id, assignee_id, assignee_name, assignee_avatar, due_date, completed, created_at, updated_at")
     .maybeSingle();
@@ -123,8 +136,8 @@ export async function toggleTask(id: string): Promise<Task> {
 
 // 删除任务
 export async function deleteTask(id: string): Promise<void> {
-  const client = getSupabaseClient();
-  const { error } = await client.from("tasks").delete().eq("id", id);
+  const { client, enterpriseId } = await taskAccess('tasks.manage');
+  const { error } = await client.from("tasks").delete().eq('enterprise_id', enterpriseId).eq("id", id);
   if (error) throw new Error(`删除任务失败: ${error.message}`);
 }
 
@@ -136,28 +149,32 @@ export async function getTaskStats(): Promise<{
   in_progress: number;
   overdue: number;
 }> {
-  const client = getSupabaseClient();
+  const { client, enterpriseId } = await taskAccess('tasks.read');
 
   const { count: total, error: totalError } = await client
     .from("tasks")
-    .select("*", { count: "exact", head: true });
+    .select("*", { count: "exact", head: true })
+    .eq('enterprise_id', enterpriseId);
   if (totalError) throw new Error(`统计任务失败: ${totalError.message}`);
 
   const { count: completed, error: completedError } = await client
     .from("tasks")
     .select("*", { count: "exact", head: true })
+    .eq('enterprise_id', enterpriseId)
     .eq("completed", true);
   if (completedError) throw new Error(`统计已完成任务失败: ${completedError.message}`);
 
   const { count: inProgress, error: inProgressError } = await client
     .from("tasks")
     .select("*", { count: "exact", head: true })
+    .eq('enterprise_id', enterpriseId)
     .eq("status", "in_progress");
   if (inProgressError) throw new Error(`统计进行中任务失败: ${inProgressError.message}`);
 
   const { count: overdue, error: overdueError } = await client
     .from("tasks")
     .select("*", { count: "exact", head: true })
+    .eq('enterprise_id', enterpriseId)
     .lt("due_date", new Date().toISOString())
     .neq("status", "completed");
   if (overdueError) throw new Error(`统计过期任务失败: ${overdueError.message}`);
@@ -166,6 +183,7 @@ export async function getTaskStats(): Promise<{
   const { count: pendingCount, error: pendingError } = await client
     .from("tasks")
     .select("*", { count: "exact", head: true })
+    .eq('enterprise_id', enterpriseId)
     .eq("status", "pending");
   if (pendingError) throw new Error(`统计待办任务失败: ${pendingError.message}`);
 
@@ -182,10 +200,10 @@ export async function getTaskStats(): Promise<{
 
 // 创建通知
 export async function createNotification(input: InsertNotification): Promise<Notification> {
-  const client = getSupabaseClient();
+  const { client, enterpriseId } = await taskAccess('notifications.manage');
   const { data, error } = await client
     .from("notifications")
-    .insert(input)
+    .insert({ ...input, enterprise_id: enterpriseId })
     .select("id, task_id, type, title, message, read, created_at")
     .single();
   if (error) throw new Error(`创建通知失败: ${error.message}`);
@@ -198,12 +216,13 @@ export async function getNotifications(filters?: {
   type?: string;
   limit?: number;
 }): Promise<Notification[]> {
-  const client = getSupabaseClient();
+  const { client, enterpriseId } = await taskAccess('notifications.read');
   const limit = filters?.limit ?? 50;
 
   let query = client
     .from("notifications")
     .select("id, task_id, type, title, message, read, created_at")
+    .eq('enterprise_id', enterpriseId)
     .order("created_at", { ascending: false })
     .limit(limit);
 
@@ -221,10 +240,11 @@ export async function getNotifications(filters?: {
 
 // 标记通知为已读
 export async function markNotificationRead(id: string): Promise<Notification> {
-  const client = getSupabaseClient();
+  const { client, enterpriseId } = await taskAccess('notifications.manage');
   const { data, error } = await client
     .from("notifications")
     .update({ read: true })
+    .eq('enterprise_id', enterpriseId)
     .eq("id", id)
     .select("id, task_id, type, title, message, read, created_at")
     .maybeSingle();
@@ -235,10 +255,11 @@ export async function markNotificationRead(id: string): Promise<Notification> {
 
 // 标记所有通知为已读
 export async function markAllNotificationsRead(): Promise<number> {
-  const client = getSupabaseClient();
+  const { client, enterpriseId } = await taskAccess('notifications.manage');
   const { data, error } = await client
     .from("notifications")
     .update({ read: true })
+    .eq('enterprise_id', enterpriseId)
     .eq("read", false)
     .select("id");
   if (error) throw new Error(`标记全部通知失败: ${error.message}`);
@@ -247,10 +268,11 @@ export async function markAllNotificationsRead(): Promise<number> {
 
 // 获取未读通知数量
 export async function getUnreadNotificationCount(): Promise<number> {
-  const client = getSupabaseClient();
+  const { client, enterpriseId } = await taskAccess('notifications.read');
   const { count, error } = await client
     .from("notifications")
     .select("*", { count: "exact", head: true })
+    .eq('enterprise_id', enterpriseId)
     .eq("read", false);
   if (error) throw new Error(`统计未读通知失败: ${error.message}`);
   return count ?? 0;
@@ -258,7 +280,7 @@ export async function getUnreadNotificationCount(): Promise<number> {
 
 // 检查即将过期的任务并创建预警通知
 export async function checkOverdueTasks(): Promise<number> {
-  const client = getSupabaseClient();
+  const { client, enterpriseId } = await taskAccess('tasks.manage', 'notifications.manage');
 
   // 查找即将在未来3天内到期且未完成的任务
   const threeDaysLater = new Date();
@@ -268,6 +290,7 @@ export async function checkOverdueTasks(): Promise<number> {
   const { data: upcomingTasks, error: fetchError } = await client
     .from("tasks")
     .select("id, title, due_date, assignee_name, status")
+    .eq('enterprise_id', enterpriseId)
     .lt("due_date", threeDaysLater.toISOString())
     .gte("due_date", now.toISOString())
     .neq("status", "completed");
@@ -277,6 +300,7 @@ export async function checkOverdueTasks(): Promise<number> {
   const { data: overdueTasks, error: overdueError } = await client
     .from("tasks")
     .select("id, title, due_date, assignee_name, status")
+    .eq('enterprise_id', enterpriseId)
     .lt("due_date", now.toISOString())
     .neq("status", "completed");
   if (overdueError) throw new Error(`查询过期任务失败: ${overdueError.message}`);
@@ -290,6 +314,7 @@ export async function checkOverdueTasks(): Promise<number> {
       const { data: existing } = await client
         .from("notifications")
         .select("id")
+        .eq('enterprise_id', enterpriseId)
         .eq("task_id", task.id)
         .eq("type", "due_soon")
         .maybeSingle();
@@ -312,6 +337,7 @@ export async function checkOverdueTasks(): Promise<number> {
       const { data: existing } = await client
         .from("notifications")
         .select("id")
+        .eq('enterprise_id', enterpriseId)
         .eq("task_id", task.id)
         .eq("type", "overdue")
         .maybeSingle();

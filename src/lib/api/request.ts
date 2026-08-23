@@ -6,6 +6,8 @@ export type RouteParams =
   | Promise<Record<string, string | string[] | undefined>>
   | undefined;
 
+const jsonObjectSchema = z.record(z.string(), z.unknown());
+
 function fieldErrors(error: z.ZodError): ApiFieldErrors {
   const flattened = z.flattenError(error);
   const result: ApiFieldErrors = {};
@@ -41,6 +43,10 @@ export async function parseJson<T>(request: Request, schema: z.ZodType<T>): Prom
     throw new ApiError('INVALID_JSON', 400, '请求内容必须是有效 JSON');
   }
   return parseWithSchema(schema, input);
+}
+
+export function parseJsonObject(request: Request): Promise<Record<string, unknown>> {
+  return parseJson(request, jsonObjectSchema);
 }
 
 export function parseQuery<T>(request: Request, schema: z.ZodType<T>): T {

@@ -1,21 +1,17 @@
+import { parseJsonObject } from '@/lib/api/request';
 import { NextResponse } from 'next/server';
-import { createAdminClient } from '@/lib/supabase/admin';
-import { getSession } from '@/lib/auth';
+import { createClient } from '@/lib/supabase/server';
+import { getEnterpriseContext, requirePermission } from '@/lib/enterprise/context';
+import type { EnterprisePermissionCode } from '@/lib/enterprise/permissions';
 
-function getSupabaseAdmin() {
-  return createAdminClient();
-}
-
-async function getAuthUser() {
+async function getAuthUser(permission: EnterprisePermissionCode) {
   try {
-    const session = await getSession();
-    if (session?.user) {
-      return { id: session.user.id, role: 'admin', name: session.user.name };
-    }
+    const context = await getEnterpriseContext();
+    requirePermission(context, permission);
+    return { id: context.userId, enterpriseId: context.enterpriseId };
   } catch {
-    // ignore
+    return null;
   }
-  return null;
 }
 
 const VALID_STATUSES = ['active', 'on_leave', 'resigned'] as const;
@@ -24,10 +20,10 @@ const VALID_CRAFT_TYPES = ['cutting', 'sewing', 'qc', 'packaging', 'ironing', 'p
 // GET - 获取单个工人详情
 export async function GET(_request: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
-    const user = await getAuthUser();
+    const user = await getAuthUser('members.read');
     if (!user) return NextResponse.json({ success: false, error: '请先登录' }, { status: 401 });
     const { id } = await params;
-    const supabase = getSupabaseAdmin();
+    const supabase = await createClient();
     const { data, error } = await supabase.from('workers').select('*, workshops(name)').eq('id', id).single();
     if (error || !data) return NextResponse.json({ success: false, error: '工人不存在' }, { status: 404 });
     const worker = { ...data, workshop_name: (data.workshops as Record<string, unknown>)?.name || null };
@@ -41,11 +37,11 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
 // PUT - 更新工人信息
 export async function PUT(request: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
-    const user = await getAuthUser();
+    const user = await getAuthUser('members.manage');
     if (!user) return NextResponse.json({ success: false, error: '请先登录' }, { status: 401 });
     const { id } = await params;
-    const body = await request.json();
-    const supabase = getSupabaseAdmin();
+    const body = await parseJsonObject(request);
+    const supabase = await createClient();
 
     // 先校验工人是否存在
     const { data: existing, error: findError } = await supabase.from('workers').select('id').eq('id', id).maybeSingle();
@@ -54,12 +50,12 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
     }
 
     // 校验 status 值
-    if (body.status && !(VALID_STATUSES as readonly string[]).includes(body.status)) {
+    if (typeof body.status === 'string' && !(VALID_STATUSES as readonly string[]).includes(body.status)) {
       return NextResponse.json({ success: false, error: '无效的状态值' }, { status: 400 });
     }
 
     // 校验 craft_type 值
-    if (body.craft_type && !(VALID_CRAFT_TYPES as readonly string[]).includes(body.craft_type)) {
+    if (typeof body.craft_type === 'string' && !(VALID_CRAFT_TYPES as readonly string[]).includes(body.craft_type)) {
       return NextResponse.json({ success: false, error: '无效的工种值' }, { status: 400 });
     }
 
@@ -99,10 +95,10 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
 // DELETE - 删除工人
 export async function DELETE(_request: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
-    const user = await getAuthUser();
+    const user = await getAuthUser('members.manage');
     if (!user) return NextResponse.json({ success: false, error: '请先登录' }, { status: 401 });
     const { id } = await params;
-    const supabase = getSupabaseAdmin();
+    const supabase = await createClient();
 
     // 先校验工人是否存在
     const { data: existing, error: findError } = await supabase.from('workers').select('id, name').eq('id', id).maybeSingle();

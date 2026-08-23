@@ -1,3 +1,4 @@
+import { parseJsonObject } from '@/lib/api/request';
 import { getSupabaseClient } from '@/db/client';
 import { getUserFromRequest } from '@/lib/auth';
 import {
@@ -15,7 +16,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
     const user = await getUserFromRequest(request);
     if (!user) return jsonError('请先登录', 401);
     const { id } = await params;
-    const body = (await request.json()) as { action?: string; reason?: string };
+    const body = (await parseJsonObject(request)) as { action?: string; reason?: string };
     const action = body.action;
 
     const supabase = getSupabaseClient();

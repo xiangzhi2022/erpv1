@@ -1,3 +1,4 @@
+import { parseJsonObject } from '@/lib/api/request';
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseClient } from '@/db/client';
 import { authFailed, normalizeTenant, requireSettingsUser } from '../_utils';
@@ -35,7 +36,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ success: false, error: '???????????' }, { status: 403 });
     }
 
-    const body = await request.json();
+    const body = await parseJsonObject(request);
     const tenantType = body.tenant_type;
     const companyName = body.company_name || body.name;
     if (!tenantType || !companyName) {
@@ -74,7 +75,7 @@ export async function PUT(request: NextRequest) {
       return NextResponse.json({ success: false, error: '???????????' }, { status: 403 });
     }
 
-    const body = await request.json();
+    const body = await parseJsonObject(request);
     if (!body.id) return NextResponse.json({ success: false, error: '??ID??' }, { status: 400 });
 
     const supabase = getSupabaseClient();

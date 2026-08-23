@@ -1,30 +1,14 @@
+import { parseJsonObject } from '@/lib/api/request';
 import { NextResponse } from "next/server";
-import { getSupabaseCredentials } from "@/db/client";
+import {
+  getFactoryWorkshopAdminHeaders,
+  getFactoryWorkshopAdminUrl,
+} from '@/lib/admin/factory-workshops';
 import { getUserFromRequest } from "@/lib/auth";
 
 /** 合法的车间状态值 */
 const VALID_STATUSES = ["normal", "maintenance", "stopped"] as const;
 type ValidStatus = (typeof VALID_STATUSES)[number];
-
-function getSupabaseHeaders(
-  options?: { prefer?: string }
-): Record<string, string> {
-  const { secretKey } = getSupabaseCredentials();
-  if (!secretKey) {
-    throw new Error("SUPABASE_SECRET_KEY is required for workshop operations");
-  }
-  return {
-    "Content-Type": "application/json",
-    apikey: secretKey,
-    Authorization: `Bearer ${secretKey}`,
-    Prefer: options?.prefer ?? "return=representation",
-  };
-}
-
-function getSupabaseUrl(): string {
-  const { url } = getSupabaseCredentials();
-  return `${url}/rest/v1`;
-}
 
 /**
  * 计算负荷百分比，上限 100
@@ -66,9 +50,9 @@ export async function GET(request: Request, { params }: RouteContext) {
       select: "*",
       id: `eq.${id}`,
     });
-    const apiUrl = `${getSupabaseUrl()}/factory_workshops?${queryParams.toString()}`;
+    const apiUrl = `${getFactoryWorkshopAdminUrl()}/factory_workshops?${queryParams.toString()}`;
     const response = await fetch(apiUrl, {
-      headers: getSupabaseHeaders(),
+      headers: getFactoryWorkshopAdminHeaders(),
     });
 
     if (!response.ok) {
@@ -128,7 +112,7 @@ export async function PUT(request: Request, { params }: RouteContext) {
     }
 
     const { id } = await params;
-    const body = await request.json();
+    const body = await parseJsonObject(request);
 
     // 状态值校验
     if (
@@ -163,9 +147,9 @@ export async function PUT(request: Request, { params }: RouteContext) {
       select: "id,capacity,current_load",
       id: `eq.${id}`,
     });
-    const checkUrl = `${getSupabaseUrl()}/factory_workshops?${queryParams.toString()}`;
+    const checkUrl = `${getFactoryWorkshopAdminUrl()}/factory_workshops?${queryParams.toString()}`;
     const checkResponse = await fetch(checkUrl, {
-      headers: getSupabaseHeaders({ prefer: "" }),
+      headers: getFactoryWorkshopAdminHeaders({ prefer: "" }),
     });
     const existing = (await checkResponse.json()) as Record<string, unknown>[];
     if (!existing || existing.length === 0) {
@@ -220,10 +204,10 @@ export async function PUT(request: Request, { params }: RouteContext) {
     const patchParams = new URLSearchParams({
       id: `eq.${id}`,
     });
-    const apiUrl = `${getSupabaseUrl()}/factory_workshops?${patchParams.toString()}`;
+    const apiUrl = `${getFactoryWorkshopAdminUrl()}/factory_workshops?${patchParams.toString()}`;
     const response = await fetch(apiUrl, {
       method: "PATCH",
-      headers: getSupabaseHeaders(),
+      headers: getFactoryWorkshopAdminHeaders(),
       body: JSON.stringify(updatePayload),
     });
 
@@ -290,9 +274,9 @@ export async function DELETE(request: Request, { params }: RouteContext) {
       select: "id,name",
       id: `eq.${id}`,
     });
-    const checkUrl = `${getSupabaseUrl()}/factory_workshops?${checkParams.toString()}`;
+    const checkUrl = `${getFactoryWorkshopAdminUrl()}/factory_workshops?${checkParams.toString()}`;
     const checkResponse = await fetch(checkUrl, {
-      headers: getSupabaseHeaders({ prefer: "" }),
+      headers: getFactoryWorkshopAdminHeaders({ prefer: "" }),
     });
     const existing = (await checkResponse.json()) as Record<string, unknown>[];
     if (!existing || existing.length === 0) {
@@ -308,9 +292,9 @@ export async function DELETE(request: Request, { params }: RouteContext) {
       workshop_id: `eq.${id}`,
       limit: "1",
     });
-    const orderCheckUrl = `${getSupabaseUrl()}/work_orders?${orderCheckParams.toString()}`;
+    const orderCheckUrl = `${getFactoryWorkshopAdminUrl()}/work_orders?${orderCheckParams.toString()}`;
     const orderCheckResponse = await fetch(orderCheckUrl, {
-      headers: getSupabaseHeaders({ prefer: "" }),
+      headers: getFactoryWorkshopAdminHeaders({ prefer: "" }),
     });
     if (orderCheckResponse.ok) {
       const relatedOrders = (await orderCheckResponse.json()) as Record<string, unknown>[];
@@ -325,10 +309,10 @@ export async function DELETE(request: Request, { params }: RouteContext) {
     const deleteParams = new URLSearchParams({
       id: `eq.${id}`,
     });
-    const apiUrl = `${getSupabaseUrl()}/factory_workshops?${deleteParams.toString()}`;
+    const apiUrl = `${getFactoryWorkshopAdminUrl()}/factory_workshops?${deleteParams.toString()}`;
     const response = await fetch(apiUrl, {
       method: "DELETE",
-      headers: getSupabaseHeaders(),
+      headers: getFactoryWorkshopAdminHeaders(),
     });
 
     if (!response.ok) {

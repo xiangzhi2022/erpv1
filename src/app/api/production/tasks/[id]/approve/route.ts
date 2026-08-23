@@ -1,3 +1,4 @@
+import { parseJsonObject } from '@/lib/api/request';
 import { getSupabaseClient } from '@/db/client';
 import { getUserFromRequest } from '@/lib/auth';
 import { canManageWages } from '@/lib/four-level-order';
@@ -18,7 +19,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
     if (!user) return jsonError('请先登录', 401);
     if (!canManageWages(user)) return jsonError('无权审核工资', 403);
     const { id } = await params;
-    const body = (await request.json().catch(() => ({}))) as { approved?: boolean; action?: 'approve' | 'rework' | 'abnormal'; remark?: string };
+    const body = (await parseJsonObject(request).catch(() => ({}))) as { approved?: boolean; action?: 'approve' | 'rework' | 'abnormal'; remark?: string };
     const action = body.action || (body.approved === false ? 'rework' : 'approve');
     if (!['approve', 'rework', 'abnormal'].includes(action)) return jsonError('审核动作无效', 400);
     const approved = action === 'approve';

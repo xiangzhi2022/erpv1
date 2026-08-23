@@ -1,3 +1,4 @@
+import { parseJsonObject } from '@/lib/api/request';
 import { NextResponse } from "next/server";
 import { getCategories, createCategory } from "@/app/actions/categories";
 
@@ -15,7 +16,7 @@ export async function GET() {
 // POST /api/categories - 创建分类
 export async function POST(request: Request) {
   try {
-    const body = await request.json();
+    const body = await parseJsonObject(request);
     const { name, color, description } = body;
     if (!name || typeof name !== "string" || name.trim().length === 0) {
       return NextResponse.json(
@@ -34,7 +35,7 @@ export async function POST(request: Request) {
     const category = await createCategory({
       name: name.trim(),
       color: finalColor,
-      description: description ?? null,
+      description: typeof description === "string" ? description : null,
     });
     return NextResponse.json({ success: true, data: category }, { status: 201 });
   } catch (e: unknown) {

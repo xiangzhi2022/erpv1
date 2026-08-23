@@ -1,4 +1,6 @@
+import { parseJson } from '@/lib/api/request';
 import { NextRequest, NextResponse } from 'next/server';
+import { z } from 'zod';
 import { getSupabaseClient } from '@/db/client';
 import { getUserFromRequest } from '@/lib/auth';
 
@@ -39,6 +41,17 @@ function toNullIfEmpty(value: string | undefined | null): string | null {
 const VALID_STATUSES = ['active', 'inspecting', 'blacklisted'] as const;
 const VALID_RATINGS = ['A', 'B', 'C', 'D'] as const;
 const VALID_CATEGORIES = ['原材料', '包装耗材', '外协加工', '办公设备'] as const;
+const supplierCreateSchema = z.object({
+  name: z.string(),
+  contactPerson: z.string().nullable().optional(),
+  phone: z.string().nullable().optional(),
+  email: z.string().nullable().optional(),
+  category: z.enum(VALID_CATEGORIES).nullable().optional(),
+  rating: z.enum(VALID_RATINGS).optional(),
+  status: z.enum(VALID_STATUSES).optional(),
+  address: z.string().nullable().optional(),
+  remark: z.string().nullable().optional(),
+});
 
 // POST - 创建供应商
 export async function POST(request: NextRequest) {
@@ -48,7 +61,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ success: false, error: '未登录' }, { status: 401 });
     }
 
-    const body = await request.json();
+    const body = await parseJson(request, supplierCreateSchema);
     const { name, contactPerson, phone, email, category, rating, status, address, remark } = body;
 
     // 校验必填字段

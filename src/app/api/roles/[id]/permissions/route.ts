@@ -1,3 +1,4 @@
+import { parseJsonObject } from '@/lib/api/request';
 import { getSupabaseClient } from '@/db/client';
 import { getUserFromRequest } from '@/lib/auth';
 import { DEFAULT_ROLES, defaultPermissionsForRole } from '@/lib/organization';
@@ -175,7 +176,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
     if (!user) return jsonError('请先登录', 401);
     if (!canManageOrganization(user)) return jsonError('无权修改角色权限', 403);
     const { id } = await params;
-    const body = (await request.json()) as Record<string, unknown>;
+    const body = (await parseJsonObject(request)) as Record<string, unknown>;
     const requestedPermissionCodes = uniquePermissionKeys(stringArray(body.permission_codes));
     if (!isSuperAdmin(user) && !canAssignPermissionKeys(user, requestedPermissionCodes)) {
       return jsonError('包含不可分配的权限', 403);

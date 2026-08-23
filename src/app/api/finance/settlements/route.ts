@@ -1,3 +1,4 @@
+import { parseJsonObject } from '@/lib/api/request';
 import { getSupabaseClient } from '@/db/client';
 import { getUserFromRequest } from '@/lib/auth';
 import { canEditFinancialFields, canViewFinancialFields } from '@/lib/four-level-order';
@@ -30,7 +31,7 @@ export async function POST(request: Request) {
     const user = await getUserFromRequest(request);
     if (!user) return jsonError('请先登录', 401);
     if (!canEditFinancialFields(user)) return jsonError('无权创建结算', 403);
-    const body = (await request.json()) as { record_ids?: string[] };
+    const body = (await parseJsonObject(request)) as { record_ids?: string[] };
     const recordIds = Array.isArray(body.record_ids) ? body.record_ids.filter((id): id is string => typeof id === 'string') : [];
     if (recordIds.length === 0) return jsonError('请选择工资记录', 400);
     const supabase = getSupabaseClient();

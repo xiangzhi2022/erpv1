@@ -1,3 +1,4 @@
+import { parseJsonObject } from '@/lib/api/request';
 import { getSupabaseClient } from '@/db/client';
 import { getUserFromRequest } from '@/lib/auth';
 import {
@@ -56,7 +57,7 @@ export async function POST(request: Request) {
     const user = await getUserFromRequest(request);
     if (!user) return jsonError('请先登录', 401);
 
-    const body = (await request.json()) as Record<string, unknown>;
+    const body = (await parseJsonObject(request)) as Record<string, unknown>;
     const requestType = body.request_type === 'org_invite' ? 'org_invite' : 'employee_apply' as TenantJoinRequestType;
     const supabase = getSupabaseClient();
 

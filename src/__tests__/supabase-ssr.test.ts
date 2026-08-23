@@ -8,6 +8,7 @@ const mocks = vi.hoisted(() => ({
   cookies: vi.fn(),
   getClaims: vi.fn(),
   getSession: vi.fn(),
+  rpc: vi.fn(),
 }));
 
 vi.mock('@supabase/ssr', () => ({
@@ -149,6 +150,7 @@ describe('Supabase session proxy', () => {
         getClaims: mocks.getClaims.mockResolvedValue({ data: { claims: null }, error: null }),
         getSession: mocks.getSession,
       },
+      rpc: mocks.rpc,
     });
     const { proxy } = await import('@/proxy');
 
@@ -161,8 +163,7 @@ describe('Supabase session proxy', () => {
     const apiResponse = await proxy(new NextRequest('https://erp.example.com/api/orders'));
     expect(apiResponse.status).toBe(401);
     await expect(apiResponse.json()).resolves.toMatchObject({
-      success: false,
-      error: { code: 'UNAUTHORIZED' },
+      error: { code: 'UNAUTHORIZED', requestId: expect.any(String) },
     });
 
     const publicPage = await proxy(new NextRequest('https://erp.example.com/login'));
@@ -172,5 +173,50 @@ describe('Supabase session proxy', () => {
     expect(publicPage.status).toBe(200);
     expect(publicAuthApi.status).toBe(200);
     expect(mocks.getSession).not.toHaveBeenCalled();
+  });
+
+  it('returns 404 for undeclared and production diagnostic APIs', async () => {
+    mocks.createServerClient.mockReturnValue({
+      auth: {
+        getClaims: mocks.getClaims.mockResolvedValue({ data: { claims: { sub: 'user-1' } }, error: null }),
+        getSession: mocks.getSession,
+      },
+      rpc: mocks.rpc,
+    });
+    const { proxy } = await import('@/proxy');
+
+    const undeclared = await proxy(new NextRequest('https://erp.example.com/api/not-declared'));
+    const diagnostic = await proxy(new NextRequest('https://erp.example.com/api/test/db'));
+
+    expect(undeclared.status).toBe(404);
+    expect(diagnostic.status).toBe(404);
+  });
+
+  it('enforces the manifest permission against database grants', async () => {
+    mocks.createServerClient.mockReturnValue({
+      auth: {
+        getClaims: mocks.getClaims.mockResolvedValue({ data: { claims: { sub: 'user-1' } }, error: null }),
+        getSession: mocks.getSession,
+      },
+      rpc: mocks.rpc
+        .mockResolvedValueOnce({ data: [{ permission: 'orders.read' }], error: null })
+        .mockResolvedValueOnce({ data: [{ permission: 'orders.read' }], error: null }),
+    });
+    const { proxy } = await import('@/proxy');
+    const cookie = 'erp_active_enterprise=11111111-1111-4111-8111-111111111111';
+
+    const readResponse = await proxy(new NextRequest('https://erp.example.com/api/orders', {
+      headers: { cookie },
+    }));
+    const writeResponse = await proxy(new NextRequest('https://erp.example.com/api/orders', {
+      method: 'POST',
+      headers: { cookie },
+    }));
+
+    expect(readResponse.status).toBe(200);
+    expect(writeResponse.status).toBe(403);
+    await expect(writeResponse.json()).resolves.toMatchObject({
+      error: { code: 'ENTERPRISE_PERMISSION_DENIED' },
+    });
   });
 });

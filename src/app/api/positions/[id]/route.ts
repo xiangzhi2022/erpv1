@@ -1,3 +1,4 @@
+import { parseJsonObject } from '@/lib/api/request';
 import { getSupabaseClient } from '@/db/client';
 import { getUserFromRequest } from '@/lib/auth';
 import { getUserPermissionKeys, isAdminRole } from '@/lib/role-access';
@@ -17,7 +18,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
     if (!canManageOrganization(user)) return jsonError('无权修改岗位', 403);
 
     const { id } = await params;
-    const body = (await request.json()) as Record<string, unknown>;
+    const body = (await parseJsonObject(request)) as Record<string, unknown>;
     const updateData: Record<string, unknown> = { updated_at: new Date().toISOString() };
     for (const key of [
       'name',

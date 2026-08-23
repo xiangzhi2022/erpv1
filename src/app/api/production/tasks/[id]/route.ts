@@ -1,3 +1,4 @@
+import { parseJsonObject } from '@/lib/api/request';
 import { getSupabaseClient } from '@/db/client';
 import { getUserFromRequest } from '@/lib/auth';
 import {
@@ -32,7 +33,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
     if (!canAccessProductionTask(user, task as Record<string, unknown>, worker)) return jsonError('无权操作该任务', 403);
     if (!canManageProduction(user)) return jsonError('只有生产管理层可以编辑任务基础信息', 403);
 
-    const body = (await request.json()) as Record<string, unknown>;
+    const body = (await parseJsonObject(request)) as Record<string, unknown>;
     const updateData: Record<string, unknown> = { updated_at: new Date().toISOString() };
     PATCH_FIELDS.forEach((key) => {
       if (body[key] !== undefined) updateData[key] = body[key];

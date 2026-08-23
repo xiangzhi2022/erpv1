@@ -1,3 +1,4 @@
+import { parseJsonObject } from '@/lib/api/request';
 import { getSupabaseClient } from '@/db/client';
 import { getUserFromRequest } from '@/lib/auth';
 import { isSuperAdmin } from '@/lib/role-access';
@@ -90,15 +91,15 @@ export async function POST(request: Request) {
       return Response.json({ success: false, error: '无权限新增经销商' }, { status: 403 });
     }
 
-    const body = await request.json();
+    const body = await parseJsonObject(request);
     const { name, contactName, phone, region, status, remark } = body;
 
-    if (!name || name.trim().length < 2) {
+    if (typeof name !== 'string' || name.trim().length < 2) {
       return Response.json({ success: false, error: '经销商名称至少2个字符' }, { status: 400 });
     }
 
     const validStatuses = ['active', 'inactive'] as const;
-    if (status && !validStatuses.includes(status)) {
+    if (typeof status === 'string' && !validStatuses.includes(status as typeof validStatuses[number])) {
       return Response.json({ success: false, error: '状态值无效，仅支持 active/inactive' }, { status: 400 });
     }
 
@@ -107,11 +108,11 @@ export async function POST(request: Request) {
       .from('dealers')
       .insert({
         name: name.trim(),
-        contact_name: contactName?.trim() || null,
-        phone: phone?.trim() || null,
-        region: region?.trim() || null,
-        status: validStatuses.includes(status) ? status : 'active',
-        remark: remark?.trim() || null,
+        contact_name: typeof contactName === 'string' ? contactName.trim() || null : null,
+        phone: typeof phone === 'string' ? phone.trim() || null : null,
+        region: typeof region === 'string' ? region.trim() || null : null,
+        status: typeof status === 'string' && validStatuses.includes(status as typeof validStatuses[number]) ? status : 'active',
+        remark: typeof remark === 'string' ? remark.trim() || null : null,
         created_by: user.id,
         tenant_id: user.tenant_id || null,
       })

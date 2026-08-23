@@ -1,3 +1,4 @@
+import { parseJsonObject } from '@/lib/api/request';
 import { NextResponse } from "next/server";
 import {
   getCategoryById,
@@ -33,7 +34,7 @@ export async function PUT(
 ) {
   try {
     const { id } = await params;
-    const body = await request.json();
+    const body = await parseJsonObject(request);
     // Whitelist allowed update fields
     const allowedFields = ["name", "color", "description"];
     const updateData: Record<string, unknown> = {};
@@ -57,7 +58,7 @@ export async function PATCH(
 ) {
   try {
     const { id } = await params;
-    const body = await request.json();
+    const body = await parseJsonObject(request);
     // Whitelist allowed update fields
     const allowedFields = ["name", "color", "description"];
     const updateData: Record<string, unknown> = {};

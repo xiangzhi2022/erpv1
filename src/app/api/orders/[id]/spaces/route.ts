@@ -1,3 +1,4 @@
+import { parseJsonObject } from '@/lib/api/request';
 import { getSupabaseClient } from '@/db/client';
 import { getUserFromRequest } from '@/lib/auth';
 import { canEditOrderContent } from '@/lib/four-level-order';
@@ -22,7 +23,7 @@ export async function POST(
     if (!tree) return jsonError('订单不存在', 404);
     if (!canSeeOrder(user, tree)) return jsonError('无权操作该订单', 403);
 
-    const body = (await request.json()) as Record<string, unknown>;
+    const body = (await parseJsonObject(request)) as Record<string, unknown>;
     const spaceName = typeof body.space_name === 'string' ? body.space_name.trim() : '';
     if (!spaceName) return jsonError('空间名称不能为空', 400);
 

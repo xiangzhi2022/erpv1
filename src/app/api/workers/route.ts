@@ -1,26 +1,22 @@
+import { parseJsonObject } from '@/lib/api/request';
 import { NextResponse } from 'next/server';
-import { createAdminClient } from '@/lib/supabase/admin';
-import { getSession } from '@/lib/auth';
+import { createClient } from '@/lib/supabase/server';
+import { getEnterpriseContext, requirePermission } from '@/lib/enterprise/context';
+import type { EnterprisePermissionCode } from '@/lib/enterprise/permissions';
 
-function getSupabaseAdmin() {
-  return createAdminClient();
-}
-
-async function getAuthUser() {
+async function getAuthUser(permission: EnterprisePermissionCode) {
   try {
-    const session = await getSession();
-    if (session?.user) {
-      return { id: session.user.id, role: 'admin', name: session.user.name };
-    }
+    const context = await getEnterpriseContext();
+    requirePermission(context, permission);
+    return { id: context.userId, enterpriseId: context.enterpriseId };
   } catch {
-    // ignore
+    return null;
   }
-  return null;
 }
 
 // 生成工号: WK-YYYYMMDD-NNN
 async function generateWorkerNo(): Promise<string> {
-  const supabase = getSupabaseAdmin();
+  const supabase = await createClient();
   const today = new Date();
   const dateStr = today.getFullYear().toString() +
     String(today.getMonth() + 1).padStart(2, '0') +
@@ -47,11 +43,11 @@ const VALID_CRAFT_TYPES = ['cutting', 'sewing', 'qc', 'packaging', 'ironing', 'p
 // GET - 获取工人列表
 export async function GET(request: Request) {
   try {
-    const user = await getAuthUser();
+    const user = await getAuthUser('members.read');
     if (!user) {
       return NextResponse.json({ success: false, error: '请先登录' }, { status: 401 });
     }
-    const supabase = getSupabaseAdmin();
+    const supabase = await createClient();
     const { searchParams } = new URL(request.url);
     const keyword = (searchParams.get('keyword') || '').trim();
     const craftType = searchParams.get('craft_type') || '';
@@ -102,30 +98,30 @@ export async function GET(request: Request) {
 // POST - 创建工人
 export async function POST(request: Request) {
   try {
-    const user = await getAuthUser();
+    const user = await getAuthUser('members.manage');
     if (!user) {
       return NextResponse.json({ success: false, error: '请先登录' }, { status: 401 });
     }
-    const body = await request.json();
+    const body = await parseJsonObject(request);
     const { worker_no, name, phone, gender, craft_type, workshop_id, status, skill_tags, hire_date, remark } = body;
 
-    if (!name || !name.trim()) {
+    if (typeof name !== 'string' || !name.trim()) {
       return NextResponse.json({ success: false, error: '姓名不能为空' }, { status: 400 });
     }
 
     // 校验 status 值
-    if (status && !(VALID_STATUSES as readonly string[]).includes(status)) {
+    if (typeof status === 'string' && !(VALID_STATUSES as readonly string[]).includes(status)) {
       return NextResponse.json({ success: false, error: '无效的状态值' }, { status: 400 });
     }
 
     // 校验 craft_type 值
-    if (craft_type && !(VALID_CRAFT_TYPES as readonly string[]).includes(craft_type)) {
+    if (typeof craft_type === 'string' && !(VALID_CRAFT_TYPES as readonly string[]).includes(craft_type)) {
       return NextResponse.json({ success: false, error: '无效的工种值' }, { status: 400 });
     }
 
-    const supabase = getSupabaseAdmin();
-    let finalWorkerNo = worker_no;
-    if (!finalWorkerNo || !finalWorkerNo.trim()) {
+    const supabase = await createClient();
+    let finalWorkerNo = typeof worker_no === 'string' ? worker_no : '';
+    if (!finalWorkerNo.trim()) {
       finalWorkerNo = await generateWorkerNo();
     } else {
       const { data: existing } = await supabase.from('workers').select('id').eq('worker_no', finalWorkerNo).maybeSingle();
@@ -134,17 +130,18 @@ export async function POST(request: Request) {
       }
     }
 
-    const insertData: Record<string, unknown> = {
+    const insertData = {
+      enterprise_id: user.enterpriseId,
       worker_no: finalWorkerNo,
       name: name.trim(),
-      phone: phone || null,
-      gender: gender || null,
-      craft_type: craft_type || null,
-      workshop_id: workshop_id || null,
-      status: status || 'active',
-      skill_tags: skill_tags || null,
-      hire_date: hire_date || null,
-      remark: remark || null,
+      phone: typeof phone === 'string' && phone ? phone : null,
+      gender: typeof gender === 'string' && gender ? gender : null,
+      craft_type: typeof craft_type === 'string' && craft_type ? craft_type : null,
+      workshop_id: typeof workshop_id === 'string' && workshop_id ? workshop_id : null,
+      status: typeof status === 'string' && status ? status : 'active',
+      skill_tags: typeof skill_tags === 'string' && skill_tags ? skill_tags : null,
+      hire_date: typeof hire_date === 'string' && hire_date ? hire_date : null,
+      remark: typeof remark === 'string' && remark ? remark : null,
       created_by: user.id,
     };
 
