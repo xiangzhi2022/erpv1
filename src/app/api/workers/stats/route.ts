@@ -28,8 +28,8 @@ export async function GET() {
     const workers = allWorkers || [];
     const total = workers.length;
     const active = workers.filter((w: { status: string }) => w.status === 'active').length;
-    const onLeave = workers.filter((w: { status: string }) => w.status === 'on_leave').length;
-    const resigned = workers.filter((w: { status: string }) => w.status === 'resigned').length;
+    const inactive = workers.filter((w: { status: string }) => w.status === 'inactive').length;
+    const departed = workers.filter((w: { status: string }) => w.status === 'departed').length;
 
     const craftDistribution: Record<string, number> = {};
     workers.forEach((w: { craft_type: string | null }) => {
@@ -41,7 +41,7 @@ export async function GET() {
 
     return NextResponse.json({
       success: true,
-      stats: { total, active, onLeave, resigned, activeRate, craftDistribution },
+      stats: { total, active, inactive, departed, activeRate, craftDistribution },
     });
   } catch (error) {
     console.error('获取工人统计失败:', error);

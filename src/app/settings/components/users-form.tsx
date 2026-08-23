@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import Link from 'next/link';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -15,8 +16,9 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-import { Loader2, Pencil, Plus, Trash2 } from 'lucide-react';
+import { Loader2, Pencil, UserPlus, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
+import { getApiErrorMessage } from '@/lib/api/client-error';
 
 interface UserItem {
   id: string;
@@ -114,18 +116,10 @@ export function UsersForm() {
   const [permissions, setPermissions] = useState<PermissionOption[]>([]);
   const [tenants, setTenants] = useState<TenantOption[]>([]);
   const [isLoadingUsers, setIsLoadingUsers] = useState(false);
-  const [addUserOpen, setAddUserOpen] = useState(false);
   const [editUserOpen, setEditUserOpen] = useState(false);
-  const [isAddingUser, setIsAddingUser] = useState(false);
   const [isUpdating, setIsUpdating] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
 
-  const [newUserPhone, setNewUserPhone] = useState('');
-  const [newUserName, setNewUserName] = useState('');
-  const [newUserPassword, setNewUserPassword] = useState('');
-  const [newUserRole, setNewUserRole] = useState('employee');
-  const [newUserTenantId, setNewUserTenantId] = useState('');
-  const [newUserPermissions, setNewUserPermissions] = useState<string[]>([]);
 
   const [editingUser, setEditingUser] = useState<UserItem | null>(null);
   const [editForm, setEditForm] = useState({ name: '', role: 'employee', status: 'active', department: '', tenant_id: '', permissions: [] as string[] });
@@ -160,7 +154,7 @@ export function UsersForm() {
       const response = await fetch('/api/settings/users');
       const data = await response.json();
       if (data.success) setUsers(data.users || []);
-      else toast.error(data.error || '获取用户列表失败');
+      else toast.error(getApiErrorMessage(data, '获取用户列表失败'));
     } catch {
       toast.error('获取用户列表失败');
     } finally {
@@ -176,47 +170,6 @@ export function UsersForm() {
 
   const roleLabel = (role: string) => accountRoles.find((item) => item.value === role)?.label || role;
   const canChooseTenant = tenants.length > 0;
-
-  const resetAddForm = () => {
-    setNewUserPhone('');
-    setNewUserName('');
-    setNewUserPassword('');
-    setNewUserRole('employee');
-    setNewUserTenantId('');
-    setNewUserPermissions([]);
-  };
-
-  const handleAddUser = async () => {
-    if (!newUserPhone || !newUserPassword) return;
-    setIsAddingUser(true);
-    try {
-      const response = await fetch('/api/settings/users', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          phone: newUserPhone,
-          password: newUserPassword,
-          real_name: newUserName || newUserPhone,
-          role: newUserRole,
-          tenant_id: newUserTenantId || undefined,
-          permissions: newUserRole === 'employee' ? newUserPermissions : [],
-        }),
-      });
-      const data = await response.json();
-      if (data.success) {
-        setAddUserOpen(false);
-        resetAddForm();
-        fetchUsers();
-        toast.success('用户添加成功');
-      } else {
-        toast.error(data.error || '添加用户失败');
-      }
-    } catch {
-      toast.error('添加用户失败');
-    } finally {
-      setIsAddingUser(false);
-    }
-  };
 
   const handleEditUser = (user: UserItem) => {
     setEditingUser(user);
@@ -254,7 +207,7 @@ export function UsersForm() {
         fetchUsers();
         toast.success('用户信息已更新');
       } else {
-        toast.error(data.error || '更新失败');
+        toast.error(getApiErrorMessage(data, '更新失败'));
       }
     } catch {
       toast.error('更新失败');
@@ -264,7 +217,12 @@ export function UsersForm() {
   };
 
   const handleToggleStatus = (user: UserItem) => {
-    const newStatus = user.status === 'active' || user.is_active ? 'inactive' : 'active';
+    if (user.status !== 'active' && !user.is_active) {
+      handleEditUser(user);
+      toast.info('重新启用成员时请明确选择角色后保存');
+      return;
+    }
+    const newStatus = 'inactive';
     fetch(`/api/settings/users?id=${user.id}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
@@ -274,9 +232,9 @@ export function UsersForm() {
       .then((data) => {
         if (data.success) {
           fetchUsers();
-          toast.success(`用户已${newStatus === 'active' ? '启用' : '禁用'}`);
+          toast.success('用户已禁用');
         } else {
-          toast.error(data.error || '状态更新失败');
+          toast.error(getApiErrorMessage(data, '状态更新失败'));
         }
       })
       .catch(() => toast.error('状态更新失败'));
@@ -296,7 +254,7 @@ export function UsersForm() {
         fetchUsers();
         toast.success('用户已删除');
       } else {
-        toast.error(data.error || '删除失败');
+        toast.error(getApiErrorMessage(data, '删除失败'));
       }
     } catch {
       toast.error('删除失败');
@@ -315,9 +273,11 @@ export function UsersForm() {
             <CardTitle>用户管理</CardTitle>
             <CardDescription>管理账号层级和员工多岗位权限</CardDescription>
           </div>
-          <Button onClick={() => setAddUserOpen(true)}>
-            <Plus className="mr-1 h-4 w-4" />
-            添加用户
+          <Button asChild>
+            <Link href="/employees/requests">
+              <UserPlus className="mr-1 h-4 w-4" />
+              审批加入申请
+            </Link>
           </Button>
         </div>
       </CardHeader>
@@ -383,56 +343,6 @@ export function UsersForm() {
           </div>
         )}
       </CardContent>
-
-      <Dialog open={addUserOpen} onOpenChange={setAddUserOpen}>
-        <DialogContent className="max-w-2xl">
-          <DialogHeader>
-            <DialogTitle>添加新用户</DialogTitle>
-            <DialogDescription>二级管理员只能创建本企业员工，超级管理员可创建二级管理员或员工。</DialogDescription>
-          </DialogHeader>
-          <div className="grid gap-4 md:grid-cols-2">
-            <div className="space-y-2">
-              <Label>手机号</Label>
-              <Input placeholder="请输入手机号" value={newUserPhone} onChange={(event) => setNewUserPhone(event.target.value)} />
-            </div>
-            <div className="space-y-2">
-              <Label>姓名</Label>
-              <Input placeholder="请输入姓名（选填）" value={newUserName} onChange={(event) => setNewUserName(event.target.value)} />
-            </div>
-            <div className="space-y-2">
-              <Label>密码</Label>
-              <Input type="password" placeholder="请输入密码" value={newUserPassword} onChange={(event) => setNewUserPassword(event.target.value)} />
-            </div>
-            <div className="space-y-2">
-              <Label>账号角色</Label>
-              <select className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm" value={newUserRole} onChange={(event) => setNewUserRole(event.target.value)}>
-                {roleOptions.map((role) => <option key={role.value} value={role.value}>{role.label}</option>)}
-              </select>
-            </div>
-            {canChooseTenant ? (
-              <div className="space-y-2 md:col-span-2">
-                <Label>所属企业</Label>
-                <select className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm" value={newUserTenantId} onChange={(event) => setNewUserTenantId(event.target.value)}>
-                  <option value="">不指定</option>
-                  {tenants.map((tenant) => <option key={tenant.id} value={tenant.id}>{tenant.company_name || tenant.name || tenant.id}</option>)}
-                </select>
-              </div>
-            ) : null}
-            {newUserRole === 'employee' ? (
-              <div className="space-y-2 md:col-span-2">
-                <Label>员工权限</Label>
-                <PermissionChecklist options={permissions} value={newUserPermissions} onChange={setNewUserPermissions} />
-              </div>
-            ) : null}
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setAddUserOpen(false)}>取消</Button>
-            <Button onClick={handleAddUser} disabled={isAddingUser || !newUserPhone || !newUserPassword}>
-              {isAddingUser ? '添加中...' : '添加'}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
 
       <Dialog open={editUserOpen} onOpenChange={setEditUserOpen}>
         <DialogContent className="max-w-2xl">

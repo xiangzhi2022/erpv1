@@ -4,11 +4,28 @@ const ENTERPRISE_ID = '11111111-1111-4111-8111-111111111111';
 
 const mocks = vi.hoisted(() => ({
   getEnterpriseContext: vi.fn(),
+  hasEnterprisePermission: vi.fn(),
   requirePermission: vi.fn(),
   createClient: vi.fn(),
   getSupabaseClient: vi.fn(),
   getUserFromRequest: vi.fn(),
   populatedExistingOrder: false,
+  includeListItem: false,
+  itemAmounts: [] as Array<{ id: string; order_id: string; unit_price: number; subtotal: number }>,
+  rpcResult: {
+    data: {
+      id: 'order-1',
+      order_no: 'SO-ATOMIC-1',
+      enterprise_id: '11111111-1111-4111-8111-111111111111',
+      tenant_id: '11111111-1111-4111-8111-111111111111',
+      customer_name: '客户',
+      status: 'pending',
+      total_amount: 10000,
+      items: [],
+      modules: [],
+    },
+    error: null,
+  } as { data: Record<string, unknown> | null; error: { code?: string; message?: string } | null },
   calls: [] as Array<{ table: string; method: string; args: unknown[] }>,
 }));
 
@@ -44,7 +61,15 @@ class Query {
             total_amount: 1000, delivery_date: null, remark: null,
             order_flow: 'dealer_to_factory', parent_order_id: null,
             target_factory_id: null, dealer_id: null, created_at: '2026-01-01T00:00:00.000Z',
-            updated_at: '2026-01-01T00:00:00.000Z', items: [],
+            updated_at: '2026-01-01T00:00:00.000Z',
+            items: mocks.includeListItem ? [{
+              id: 'item-1', enterprise_id: ENTERPRISE_ID, order_id: 'order-1', module_id: null,
+              item_no: 'I-1', product_name: '衣柜', specifications: null, woodworking_craft: null,
+              forming_craft: null, painting_craft: null, length_mm: null, width_mm: null,
+              thickness_mm: null, quantity: 1, unit: '件', color: null, hardware: null,
+              hardware_quantity: null, construction_surface: null, remark: null, sort_order: 1,
+              created_at: '2026-01-01T00:00:00.000Z', updated_at: '2026-01-01T00:00:00.000Z',
+            }] : [],
             cost_amount: 700, profit_amount: 300, internal_remark: 'internal only',
           }],
           error: null,
@@ -55,10 +80,18 @@ class Query {
   }
 }
 
-const client = { from: vi.fn((table: string) => new Query(table)) };
+const client = {
+  from: vi.fn((table: string) => new Query(table)),
+  rpc: vi.fn((name: string) => Promise.resolve(
+    name === 'finance_list_order_item_amounts'
+      ? { data: mocks.itemAmounts, error: null }
+      : mocks.rpcResult,
+  )),
+};
 
 vi.mock('@/lib/enterprise/context', () => ({
   getEnterpriseContext: mocks.getEnterpriseContext,
+  hasEnterprisePermission: mocks.hasEnterprisePermission,
   requirePermission: mocks.requirePermission,
 }));
 vi.mock('@/lib/supabase/server', () => ({ createClient: mocks.createClient }));
@@ -69,6 +102,17 @@ beforeEach(() => {
   vi.clearAllMocks();
   mocks.calls.length = 0;
   mocks.populatedExistingOrder = false;
+  mocks.includeListItem = false;
+  mocks.itemAmounts = [];
+  mocks.hasEnterprisePermission.mockReturnValue(false);
+  mocks.rpcResult = {
+    data: {
+      id: 'order-1', order_no: 'SO-ATOMIC-1', enterprise_id: ENTERPRISE_ID,
+      tenant_id: ENTERPRISE_ID, customer_name: '客户', status: 'pending',
+      total_amount: 10000, items: [], modules: [],
+    },
+    error: null,
+  };
   mocks.getEnterpriseContext.mockResolvedValue({
     enterpriseId: ENTERPRISE_ID,
     userId: 'user-1',
@@ -112,6 +156,23 @@ describe('aggregate orders API', () => {
     expect(mocks.calls).toContainEqual({ table: 'orders', method: 'eq', args: ['to_enterprise_id', ENTERPRISE_ID] });
   });
 
+  it('batch-enriches item prices only for enterprise finance readers', async () => {
+    mocks.hasEnterprisePermission.mockReturnValue(true);
+    mocks.includeListItem = true;
+    mocks.itemAmounts = [{ id: 'item-1', order_id: 'order-1', unit_price: 2500, subtotal: 2500 }];
+    const { GET } = await import('@/app/api/orders/route');
+    const response = await GET(new Request('https://erp.example.com/api/orders?mode=dealer'));
+
+    expect(response.status).toBe(200);
+    expect(client.rpc).toHaveBeenCalledWith('finance_list_order_item_amounts', {
+      target_enterprise_id: ENTERPRISE_ID,
+      target_order_ids: ['order-1'],
+    });
+    await expect(response.json()).resolves.toMatchObject({
+      data: [{ items: [{ id: 'item-1', unit_price: 2500, subtotal: 2500 }] }],
+    });
+  });
+
   it('rejects unsafe search input before opening a database client', async () => {
     const { GET } = await import('@/app/api/orders/route');
     const response = await GET(new Request('https://erp.example.com/api/orders?search=%25'));
@@ -131,8 +192,50 @@ describe('aggregate orders API', () => {
     expect(mocks.createClient).not.toHaveBeenCalled();
   });
 
-  it('rejects replacing a populated existing order before update or child deletion', async () => {
-    mocks.populatedExistingOrder = true;
+  it('saves the complete order tree through one atomic RPC without direct table mutations', async () => {
+    const { POST } = await import('@/app/api/orders/route');
+    const response = await POST(new Request('https://erp.example.com/api/orders', {
+      method: 'POST',
+      body: JSON.stringify({
+        order_no: 'SO-ATOMIC-1',
+        order_flow: 'dealer_to_factory',
+        to_tenant_id: 'factory-1',
+        target_factory_id: 'factory-1',
+        customer_name: '客户',
+        modules: [{
+          module_name: '主卧',
+          items: [{
+            product_name: '衣柜', quantity: 1, unit: '件', unit_price: 100,
+            tasks: [{ task_type: 'board', task_name: '开料', quantity: 1, unit: '件' }],
+            attachments: [{ file_name: 'drawing.pdf', file_path: 'orders/drawing.pdf', file_url: 'https://files.example/drawing.pdf' }],
+          }],
+        }],
+      }),
+    }));
+
+    expect(response.status).toBe(200);
+    expect(client.rpc).toHaveBeenCalledOnce();
+    expect(client.rpc).toHaveBeenCalledWith('save_order_tree', {
+      target_enterprise_id: ENTERPRISE_ID,
+      target_existing_order_id: null,
+      target_order: expect.objectContaining({
+        order_no: 'SO-ATOMIC-1',
+        order_flow: 'dealer_to_factory',
+        to_tenant_id: 'factory-1',
+      }),
+    });
+    expect(client.from).not.toHaveBeenCalled();
+    await expect(response.json()).resolves.toMatchObject({
+      success: true,
+      data: { id: 'order-1', order_no: 'SO-ATOMIC-1' },
+    });
+  });
+
+  it('maps the atomic RPC populated-tree conflict without attempting compensation writes', async () => {
+    mocks.rpcResult = {
+      data: null,
+      error: { code: 'P0001', message: 'ORDER_TREE_NOT_EMPTY' },
+    };
     const { POST } = await import('@/app/api/orders/route');
     const response = await POST(new Request('https://erp.example.com/api/orders', {
       method: 'POST',
@@ -151,7 +254,8 @@ describe('aggregate orders API', () => {
     }));
 
     expect(response.status).toBe(409);
-    expect(mocks.calls).toContainEqual({ table: 'order_modules', method: 'eq', args: ['enterprise_id', ENTERPRISE_ID] });
+    expect(client.rpc).toHaveBeenCalledOnce();
+    expect(client.from).not.toHaveBeenCalled();
     expect(mocks.calls.filter((call) => call.method === 'update' || call.method === 'delete')).toEqual([]);
   });
 

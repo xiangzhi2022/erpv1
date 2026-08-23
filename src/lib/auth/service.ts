@@ -7,6 +7,8 @@ import {
   type RegisterInput,
   type SupportedOAuthProvider,
 } from './schemas';
+import { issueRecoveryFlow } from './recovery-proof';
+import { createAdminClient } from '@/lib/supabase/admin';
 
 export type AuthServiceErrorCode =
   | 'AUTH_UNAVAILABLE'
@@ -155,8 +157,18 @@ export class AuthService {
   }
 
   async requestPasswordReset(email: string, baseUrl: string): Promise<void> {
+    const redirect = new URL(authCallbackUrl(baseUrl, '/reset-password'));
+    redirect.searchParams.set('type', 'recovery');
+    const flow = issueRecoveryFlow(email);
+    redirect.searchParams.set('flow', flow.token);
+    const { error: flowError } = await createAdminClient().rpc('register_recovery_flow', {
+      target_email_hash: flow.emailHash,
+      target_expires_at: flow.expiresAt,
+      target_nonce_hash: flow.nonceHash,
+    });
+    if (flowError) throw new AuthServiceError('AUTH_UNAVAILABLE', 503, '认证服务暂时不可用');
     const { error } = await this.client.auth.resetPasswordForEmail(email, {
-      redirectTo: authCallbackUrl(baseUrl, '/reset-password'),
+      redirectTo: redirect.toString(),
     });
     if (error) providerError(error, 'AUTH_UNAVAILABLE');
   }
@@ -212,9 +224,10 @@ export class AuthService {
     return data.url;
   }
 
-  async exchangeCodeForSession(code: string): Promise<void> {
-    const { error } = await this.client.auth.exchangeCodeForSession(code);
-    if (error) providerError(error, 'INVALID_REQUEST');
+  async exchangeCodeForSession(code: string): Promise<{ email: string; userId: string }> {
+    const { data, error } = await this.client.auth.exchangeCodeForSession(code);
+    if (error || !data.user?.id || !data.user.email) providerError(error, 'INVALID_REQUEST');
+    return { email: data.user.email, userId: data.user.id };
   }
 
   async sendEmailVerification(email: string): Promise<void> {

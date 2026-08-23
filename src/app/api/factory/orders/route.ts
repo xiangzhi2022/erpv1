@@ -3,7 +3,7 @@ import { ORDER_STATUSES } from '@/app/orders/schemas';
 import { isApiError } from '@/lib/api/errors';
 import { parseJson, parseQuery } from '@/lib/api/request';
 import { NextResponse, type NextRequest } from 'next/server';
-import { getEnterpriseContext, requirePermission } from '@/lib/enterprise/context';
+import { getEnterpriseContext, hasEnterprisePermission, requirePermission } from '@/lib/enterprise/context';
 import { isEnterpriseAccessError } from '@/lib/enterprise/errors';
 import { createClient } from '@/lib/supabase/server';
 
@@ -24,6 +24,11 @@ interface FactoryOrderItem {
   id: string;
   product_name: string;
   quantity: number;
+}
+
+interface FactoryOrderItemAmount {
+  id: string;
+  order_id: string;
   unit_price: number;
   subtotal: number;
 }
@@ -87,7 +92,7 @@ export async function GET(request: NextRequest) {
       .select(`
         id, order_no, customer_name, customer_phone, status, total_amount,
         delivery_date, remark, dealer_id, from_enterprise_id, target_factory_id, created_at, updated_at,
-        items:order_items(id, product_name, quantity, unit_price, subtotal)
+        items:order_items(id, product_name, quantity)
       `)
       .eq('enterprise_id', context.enterpriseId)
       .eq('target_factory_id', context.enterpriseId)
@@ -118,6 +123,19 @@ export async function GET(request: NextRequest) {
     );
 
     const orderIds = orderList.map((order) => order.id);
+    const itemAmountsResult = hasEnterprisePermission(context, 'finance.read') && orderIds.length > 0
+      ? await supabase.rpc('finance_list_order_item_amounts', {
+          target_enterprise_id: context.enterpriseId,
+          target_order_ids: orderIds,
+        })
+      : { data: [], error: null };
+    if (itemAmountsResult.error) {
+      console.error('factory_orders.item_amounts_failed', { code: itemAmountsResult.error.code });
+      return NextResponse.json({ success: false, error: '获取失败' }, { status: 500 });
+    }
+    const itemAmountsById = new Map<string, FactoryOrderItemAmount>(
+      ((itemAmountsResult.data ?? []) as FactoryOrderItemAmount[]).map((item) => [item.id, item]),
+    );
     const { data: taskRows } = orderIds.length > 0
       ? await supabase
           .from('production_tasks')
@@ -142,13 +160,18 @@ export async function GET(request: NextRequest) {
         target_factory_id: order.target_factory_id,
         created_at: order.created_at,
         updated_at: order.updated_at,
-        items: (order.items ?? []).map((item) => ({
-          id: item.id,
-          product_name: item.product_name,
-          quantity: item.quantity,
-          unit_price: item.unit_price,
-          subtotal: item.subtotal,
-        })),
+        items: (order.items ?? []).map((item) => {
+          const amounts = itemAmountsById.get(item.id);
+          return {
+            id: item.id,
+            product_name: item.product_name,
+            quantity: item.quantity,
+            ...(amounts ? {
+              unit_price: amounts.unit_price,
+              subtotal: amounts.subtotal,
+            } : {}),
+          };
+        }),
         dealer: dealerId ? enterprisesById.get(dealerId) ?? null : null,
         total_tasks: stats.total,
         completed_tasks: stats.completed,
@@ -217,20 +240,18 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ success: false, error: '当前订单状态无法接收' }, { status: 409 });
     }
 
-    const { data: updatedOrder, error } = await supabase
-      .from('orders')
-      .update({ status: 'confirmed', updated_at: new Date().toISOString() })
-      .eq('enterprise_id', context.enterpriseId)
-      .eq('target_factory_id', context.enterpriseId)
-      .eq('id', orderId)
-      .eq('status', existingOrder.status)
-      .select('id')
-      .maybeSingle();
+    const { data: updatedRows, error } = await supabase.rpc('transition_order_status' as never, {
+      target_enterprise_id: context.enterpriseId,
+      target_order_id: orderId,
+      target_expected_status: existingOrder.status,
+      target_status: 'confirmed',
+      target_remark: '工厂接收订单',
+    } as never);
     if (error) {
       console.error('factory_orders.accept_failed', { code: error.code });
       return NextResponse.json({ success: false, error: '接收失败' }, { status: 500 });
     }
-    if (!updatedOrder) return NextResponse.json({ success: false, error: '订单状态已变更，请刷新后重试' }, { status: 409 });
+    if (!updatedRows) return NextResponse.json({ success: false, error: '订单状态已变更，请刷新后重试' }, { status: 409 });
     return NextResponse.json({ success: true, message: '订单已接收' });
   } catch (error) {
     return errorResponse(error, '服务器错误');

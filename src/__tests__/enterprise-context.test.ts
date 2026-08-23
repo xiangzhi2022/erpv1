@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   canAccessEnterpriseSite,
   canAccessEnterpriseWorkshop,
+  hasEnterprisePermission,
   resolveEnterpriseContext,
   type EnterpriseContextDependencies,
   type EnterpriseMembershipRecord,
@@ -143,5 +144,19 @@ describe('authoritative enterprise context', () => {
     expect(canAccessEnterpriseWorkshop(context, 'production.read', 'workshop-2', 'site-1')).toBe(true);
     expect(canAccessEnterpriseWorkshop(context, 'production.report.self', 'workshop-1')).toBe(true);
     expect(canAccessEnterpriseWorkshop(context, 'production.report.self', 'workshop-2')).toBe(false);
+    expect(hasEnterprisePermission(context, 'production.read')).toBe(false);
+    expect(hasEnterprisePermission(context, 'production.report.self')).toBe(false);
+  });
+
+  it('distinguishes enterprise-wide grants from scoped grants', async () => {
+    const context = await resolveEnterpriseContext(dependencies([activeMembership()], {
+      grants: [
+        { permission: 'finance.read', scope_kind: 'enterprise', site_ids: [], workshop_ids: [] },
+        { permission: 'finance.manage', scope_kind: 'workshops', site_ids: [], workshop_ids: ['workshop-1'] },
+      ],
+    }));
+
+    expect(hasEnterprisePermission(context, 'finance.read')).toBe(true);
+    expect(hasEnterprisePermission(context, 'finance.manage')).toBe(false);
   });
 });

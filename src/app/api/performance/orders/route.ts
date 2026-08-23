@@ -1,4 +1,5 @@
-import { getEnterpriseContext, requirePermission } from '@/lib/enterprise/context';
+import { getEnterpriseContext, hasEnterprisePermission, requirePermission } from '@/lib/enterprise/context';
+import { EnterpriseAccessError } from '@/lib/enterprise/errors';
 import { createClient } from '@/lib/supabase/server';
 import { numeric, performanceError } from '../_lib';
 
@@ -8,6 +9,9 @@ export async function GET() {
     requirePermission(context, 'orders.read');
     requirePermission(context, 'production.read');
     requirePermission(context, 'wages.read.all');
+    if (!hasEnterprisePermission(context, 'wages.read.all')) {
+      throw new EnterpriseAccessError('ENTERPRISE_PERMISSION_DENIED', 403, '没有执行该操作的权限');
+    }
     const supabase = await createClient();
     const [ordersResult, tasksResult, wagesResult] = await Promise.all([
       supabase.from('orders')

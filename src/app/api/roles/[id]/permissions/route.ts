@@ -49,37 +49,22 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
     const context = await getEnterpriseContext();
     requirePermission(context, 'roles.manage');
     const { id } = await params;
-    const role = await enterpriseRole(id, context.enterpriseId);
-    if (!role) return jsonError('角色不存在', 404);
     const body = await parseJson(request, permissionsSchema);
     const permissionCodes = Array.from(new Set(body.permission_codes));
     const client = await createClient();
-    if (permissionCodes.length > 0) {
-      const { data: catalog, error } = await client
-        .from('permission_catalog')
-        .select('code')
-        .in('code', permissionCodes);
-      if (error || (catalog ?? []).length !== permissionCodes.length) {
-        return jsonError('包含无效权限编码', 400);
-      }
-    }
-    const { error: clearError } = await client
-      .from('role_permissions')
-      .delete()
-      .eq('tenant_id', context.enterpriseId)
-      .eq('role_id', id);
-    if (clearError) return jsonError('修改角色权限失败', 500);
-    if (permissionCodes.length > 0) {
-      const { error } = await client.from('role_permissions').insert(
-        permissionCodes.map((permissionCode) => ({
-          tenant_id: context.enterpriseId,
-          role_id: id,
-          permission_code: permissionCode,
-        })),
-      );
-      if (error) return jsonError('修改角色权限失败', 500);
-    }
-    return Response.json({ success: true, data: permissionCodes });
+    const { data, error } = await client.rpc('set_enterprise_role_permissions', {
+      target_enterprise_id: context.enterpriseId,
+      target_role_id: id,
+      target_permission_codes: permissionCodes,
+    });
+    if (error?.message === 'role_not_found') return jsonError('角色不存在', 404);
+    if (error?.message === 'invalid_permission_code') return jsonError('包含无效权限编码', 400);
+    if (error?.message === 'permission_not_assignable') return jsonError('不能授予当前账号不拥有的权限', 403);
+    if (error?.message === 'owner_protected') return jsonError('只有企业所有者可以修改所有者角色', 403);
+    if (error?.message === 'owner_minimum_permissions_required') return jsonError('所有者角色必须保留角色和成员管理权限', 409);
+    if (error?.message === 'permission_denied') return jsonError('没有修改角色权限的权限', 403);
+    if (error || !data) return jsonError('修改角色权限失败', 500);
+    return Response.json({ success: true, data });
   } catch (error) {
     console.error('update enterprise role permissions failed:', error);
     return jsonError('修改角色权限失败', 500);

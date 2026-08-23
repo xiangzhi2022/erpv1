@@ -17,6 +17,7 @@ import {
 } from '@/components/ui/dialog';
 import { Loader2, Pencil, ShieldCheck } from 'lucide-react';
 import { toast } from 'sonner';
+import { getApiErrorMessage } from '@/lib/api/client-error';
 
 interface UserItem {
   id: string;
@@ -102,7 +103,7 @@ export function RolesForm() {
         setAccountRoles(data.accountRoles || []);
         setPermissions(data.permissions || []);
       } else {
-        toast.error(data.error || '获取权限模板失败');
+        toast.error(getApiErrorMessage(data, '获取权限模板失败'));
       }
     } catch {
       toast.error('获取权限模板失败');
@@ -115,7 +116,7 @@ export function RolesForm() {
       const response = await fetch('/api/settings/users');
       const data = await response.json();
       if (data.success) setUsers(data.users || []);
-      else toast.error(data.error || '获取用户权限失败');
+      else toast.error(getApiErrorMessage(data, '获取用户权限失败'));
     } catch {
       toast.error('获取用户权限失败');
     } finally {
@@ -186,7 +187,7 @@ export function RolesForm() {
         setEditingUser(null);
         fetchUsers();
       } else {
-        toast.error(data.error || '保存权限失败');
+        toast.error(getApiErrorMessage(data, '保存权限失败'));
       }
     } catch {
       toast.error('保存权限失败');

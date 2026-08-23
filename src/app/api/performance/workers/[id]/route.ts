@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { parseParams } from '@/lib/api/request';
-import { getEnterpriseContext, requirePermission } from '@/lib/enterprise/context';
+import { getEnterpriseContext, hasEnterprisePermission, requirePermission } from '@/lib/enterprise/context';
+import { EnterpriseAccessError } from '@/lib/enterprise/errors';
 import { createClient } from '@/lib/supabase/server';
 import { performanceError } from '../../_lib';
 
@@ -14,6 +15,9 @@ export async function GET(
     const context = await getEnterpriseContext();
     requirePermission(context, 'production.read');
     requirePermission(context, 'wages.read.all');
+    if (!hasEnterprisePermission(context, 'wages.read.all')) {
+      throw new EnterpriseAccessError('ENTERPRISE_PERMISSION_DENIED', 403, '没有执行该操作的权限');
+    }
     const { id } = await parseParams(params, paramsSchema);
     const supabase = await createClient();
     const { data: worker, error: workerError } = await supabase.from('workers')

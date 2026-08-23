@@ -2,8 +2,8 @@ import { z } from 'zod';
 import { NextResponse } from 'next/server';
 import { isApiError } from '@/lib/api/errors';
 import { parseParams } from '@/lib/api/request';
-import { getEnterpriseContext, requirePermission } from '@/lib/enterprise/context';
-import { isEnterpriseAccessError } from '@/lib/enterprise/errors';
+import { getEnterpriseContext, hasEnterprisePermission, requirePermission } from '@/lib/enterprise/context';
+import { EnterpriseAccessError, isEnterpriseAccessError } from '@/lib/enterprise/errors';
 import { createClient } from '@/lib/supabase/server';
 
 const paramsSchema = z.object({ id: z.string().uuid() });
@@ -17,6 +17,9 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
   try {
     const context = await getEnterpriseContext();
     requirePermission(context, 'wages.read.all');
+    if (!hasEnterprisePermission(context, 'wages.read.all')) {
+      throw new EnterpriseAccessError('ENTERPRISE_PERMISSION_DENIED', 403, '没有执行该操作的权限');
+    }
     const { id } = await parseParams(params, paramsSchema);
     const supabase = await createClient();
     const { data: worker, error: workerError } = await supabase.from('workers').select('id,worker_no,name,status,workshop_id')

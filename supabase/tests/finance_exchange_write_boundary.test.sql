@@ -25,9 +25,12 @@ select ok(
 );
 
 select ok(
-  has_column_privilege('authenticated', 'public.worker_wage_records', 'wage_amount', 'UPDATE')
-  and has_column_privilege('authenticated', 'public.worker_wage_records', 'quantity', 'UPDATE'),
-  'authenticated callers retain pending wage calculation columns'
+  not has_table_privilege('authenticated', 'public.worker_wage_records', 'INSERT')
+  and not has_table_privilege('authenticated', 'public.worker_wage_records', 'UPDATE')
+  and not has_table_privilege('authenticated', 'public.worker_wage_records', 'DELETE')
+  and not has_column_privilege('authenticated', 'public.worker_wage_records', 'wage_amount', 'UPDATE')
+  and not has_column_privilege('authenticated', 'public.worker_wage_records', 'quantity', 'UPDATE'),
+  'authenticated callers cannot write wage records outside guarded RPCs'
 );
 
 select is_empty(
@@ -157,10 +160,23 @@ select lives_ok(
 );
 
 select throws_ok(
-  $$update public.worker_wage_records set status = 'paid' where false$$,
+  $$update public.worker_wage_records set wage_amount = 999 where false$$,
   '42501',
   'permission denied for table worker_wage_records',
-  'browser roles cannot write wage settlement state directly'
+  'browser roles cannot write wage amounts directly'
+);
+
+select throws_ok(
+  $$insert into public.worker_wage_records (
+    enterprise_id, worker_id, quantity, unit_price, wage_amount
+  ) values (
+    '41000000-0000-4000-8000-000000000001',
+    '41000000-0000-4000-8000-000000000201',
+    1, 1, 1
+  )$$,
+  '42501',
+  'permission denied for table worker_wage_records',
+  'browser roles cannot insert wage records directly'
 );
 
 select throws_ok(

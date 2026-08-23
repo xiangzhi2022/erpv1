@@ -3,6 +3,7 @@
 import { Suspense, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { toast } from 'sonner';
+import { getApiErrorMessage } from '@/lib/api/client-error';
 import { ArrowLeft, Eye, EyeOff, Loader2, ShieldCheck } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -44,7 +45,7 @@ function ResetPasswordPageContent() {
       const data = await res.json();
 
       if (!res.ok) {
-        toast.error(data.error || '重置失败');
+        toast.error(getApiErrorMessage(data, '重置失败'));
         return;
       }
 

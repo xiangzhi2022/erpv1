@@ -47,7 +47,7 @@ function errorResponse(error: unknown, message: string) {
 export async function GET(request: Request) {
   try {
     const context = await getEnterpriseContext();
-    requirePermission(context, 'wages.manage');
+    requirePermission(context, 'wages.read.all');
     const filters = parseQuery(request, querySchema);
     const supabase = await createClient();
     let query = supabase.from('wage_rules').select('*').eq('enterprise_id', context.enterpriseId).order('created_at', { ascending: false });
@@ -68,6 +68,7 @@ export async function POST(request: Request) {
   try {
     const context = await getEnterpriseContext();
     requirePermission(context, 'wages.manage');
+    requirePermission(context, 'wages.read.all');
     const input = await parseJson(request, createSchema);
     const supabase = await createClient();
     const rpc = (functionName: string, args: Record<string, unknown>) => (supabase as unknown as RpcClient).rpc(functionName, args);

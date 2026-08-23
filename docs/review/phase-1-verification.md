@@ -17,19 +17,21 @@ maintenance window.
 
 ## Verified repository gates
 
-The following gates have passed during this branch audit. Re-run
+The following repository gates passed on 2026-08-23. Re-run
 `pnpm verify:production-readiness` against an explicit non-production target
-after the remaining identity and database review findings are resolved.
+after the remaining operational and database gates are resolved. This host ran
+Node.js 25.6.0; CI and Netlify must run the repository contract, Node.js 24.
 
 | Gate | Current evidence |
 | --- | --- |
 | Frozen dependency install | `pnpm install --frozen-lockfile` passed |
 | ESLint | `pnpm lint` passed with zero warnings |
 | TypeScript | `pnpm ts-check` passed |
-| Vitest | Full suite passed before the final review fixes; must be rerun for final evidence |
-| Next.js build | `pnpm build` passed and produced 147 routes; must be rerun for final evidence |
+| Vitest | `pnpm test` passed: 86 files, 582 tests |
+| Next.js build | `pnpm build` passed and produced 147 routes |
 | Source safety | Auth/session, debug-route, Secret Key, deploy-context, and legacy-script scans are committed |
-| Independent review | Review completed; findings below remain release gates |
+| Independent review | Final combined diff review found no remaining reachable P0/P1 repository finding |
+| Database runtime gates | Blocked locally: pgTAP and DB lint could not connect to `127.0.0.1:54322`; generated-type comparison could not start without local Supabase |
 
 ## Supabase migration and advisor evidence
 
@@ -42,7 +44,7 @@ the production project:
 - `20260817152357_v2_platform_idempotency`
 - `20260817180901_v2_platform_audit`
 
-The repository currently contains 19 migrations. Therefore 14 repository
+The repository currently contains 43 migrations. Therefore 38 repository
 migrations are not recorded on production. This is expected until an approved
 rollout; none were applied during this work.
 
@@ -66,16 +68,17 @@ remove; no production indexes were changed.
    though current HEAD is clean. Rotate/revoke all affected high-privilege keys
    first, verify deployed environments use only replacements, then coordinate a
    history rewrite. History rewriting does not revoke a credential.
-2. Identity, direct-write, and order-exchange fixes now have focused regression
-   coverage, but the final combined suite/build and independent diff review are
-   still pending.
+2. Identity, direct-write, order workflow, scoped production access, worker,
+   component, finite-numeric, and order-parent fixes have repository regression
+   coverage and passed final combined review, but their SQL has not run against
+   a clean Supabase database or a restored snapshot.
 3. Enable Supabase Auth leaked-password protection and verify the Site URL,
    redirect allowlist, identity providers, SMTP/SMS settings, and CAPTCHA policy.
 4. Run a clean local migration reset, pgTAP, database lint, and generated-type
    check. The Supabase CLI is installed, but this host has no Docker/Podman, so
    the database-backed commands have not run here.
 5. Restore a reviewed production snapshot into an isolated non-production
-   Supabase project or branch, apply all 14 pending migrations there, and prove preserved v2 row
+   Supabase project or branch, apply all 38 pending migrations there, and prove preserved v2 row
    IDs/counts plus successful Auth and cross-enterprise denial flows.
 6. Create and verify an external backup with checksums. No backup was created
    because no explicit `ERP_BACKUP_DIR` or production backup authorization was

@@ -16,8 +16,8 @@ export const CRAFT_TYPES = [
 // 状态枚举
 export const WORKER_STATUSES = [
   { value: 'active', label: '在岗', color: 'bg-green-100 text-green-800' },
-  { value: 'on_leave', label: '请假', color: 'bg-yellow-100 text-yellow-800' },
-  { value: 'resigned', label: '离职', color: 'bg-red-100 text-red-800' },
+  { value: 'inactive', label: '停用', color: 'bg-yellow-100 text-yellow-800' },
+  { value: 'departed', label: '离职', color: 'bg-red-100 text-red-800' },
 ] as const;
 
 // 性别枚举
@@ -34,7 +34,7 @@ export const workerFormSchema = z.object({
   gender: z.string(),
   craft_type: z.string(),
   workshop_id: z.string(),
-  status: z.enum(['active', 'on_leave', 'resigned']),
+  status: z.enum(['active', 'inactive', 'departed']),
   skill_tags: z.string(),
   hire_date: z.string(),
   remark: z.string(),
@@ -65,8 +65,8 @@ export interface Worker {
 export interface WorkerStats {
   total: number;
   active: number;
-  onLeave: number;
-  resigned: number;
+  inactive: number;
+  departed: number;
   activeRate: number;
   craftDistribution: Record<string, number>;
 }

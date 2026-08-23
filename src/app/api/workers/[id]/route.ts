@@ -14,7 +14,7 @@ async function getAuthUser(permission: EnterprisePermissionCode) {
   }
 }
 
-const VALID_STATUSES = ['active', 'on_leave', 'resigned'] as const;
+const VALID_STATUSES = ['active', 'inactive', 'departed'] as const;
 const VALID_CRAFT_TYPES = ['cutting', 'sewing', 'qc', 'packaging', 'ironing', 'pattern', 'cutting_die', 'assembly', 'other'] as const;
 
 // GET - 获取单个工人详情

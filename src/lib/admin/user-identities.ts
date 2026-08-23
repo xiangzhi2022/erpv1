@@ -28,10 +28,6 @@ export async function findManagedIdentityByPhone(phone: string) {
   };
 }
 
-export async function updateManagedIdentityPassword(userId: string, password: string) {
-  return createAdminClient().auth.admin.updateUserById(userId, { password });
-}
-
 export async function deleteManagedIdentity(userId: string) {
   return createAdminClient().auth.admin.deleteUser(userId);
 }

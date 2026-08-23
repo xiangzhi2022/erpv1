@@ -29,7 +29,7 @@ as $$
 declare
   updated_order public.orders%rowtype;
 begin
-  if auth.uid() is null or not app_private.has_permission(target_enterprise_id, 'finance.manage') then
+  if auth.uid() is null or not app_private.has_enterprise_permission(target_enterprise_id, 'finance.manage') then
     raise exception 'finance permission denied' using errcode = '42501';
   end if;
   if (target_total_amount is not null and (target_total_amount < 0 or target_total_amount <> trunc(target_total_amount)))
@@ -68,7 +68,7 @@ declare
   updated_ids uuid[];
   actor_id uuid := auth.uid();
 begin
-  if actor_id is null or not app_private.has_permission(target_enterprise_id, 'wages.settle') then
+  if actor_id is null or not app_private.has_enterprise_permission(target_enterprise_id, 'wages.settle') then
     raise exception 'wage settlement permission denied' using errcode = '42501';
   end if;
   if coalesce(cardinality(target_record_ids), 0) not between 1 and 100
@@ -115,7 +115,7 @@ declare
   updated_record public.worker_wage_records%rowtype;
   actor_id uuid := auth.uid();
 begin
-  if actor_id is null or not app_private.has_permission(target_enterprise_id, 'wages.settle') then
+  if actor_id is null or not app_private.has_enterprise_permission(target_enterprise_id, 'wages.settle') then
     raise exception 'wage settlement permission denied' using errcode = '42501';
   end if;
 
@@ -158,7 +158,7 @@ declare
   updated_record public.worker_wage_records%rowtype;
   actor_id uuid := auth.uid();
 begin
-  if actor_id is null or not app_private.has_permission(target_enterprise_id, 'wages.manage') then
+  if actor_id is null or not app_private.has_enterprise_permission(target_enterprise_id, 'wages.manage') then
     raise exception 'wage management permission denied' using errcode = '42501';
   end if;
   if target_expected_status = 'approved' and (target_wage_amount is not null or target_quantity is not null or target_unit_price is not null) then
@@ -230,7 +230,7 @@ security definer
 set search_path = pg_catalog
 as $$
 begin
-  if auth.uid() is null or not app_private.has_permission(target_enterprise_id, 'finance.read') then
+  if auth.uid() is null or not app_private.has_enterprise_permission(target_enterprise_id, 'finance.read') then
     raise exception 'finance permission denied' using errcode = '42501';
   end if;
 
@@ -283,7 +283,7 @@ security definer
 set search_path = pg_catalog
 as $$
 begin
-  if auth.uid() is null or not app_private.has_permission(target_enterprise_id, 'finance.read') then
+  if auth.uid() is null or not app_private.has_enterprise_permission(target_enterprise_id, 'finance.read') then
     raise exception 'finance permission denied' using errcode = '42501';
   end if;
 
@@ -323,7 +323,7 @@ security definer
 set search_path = pg_catalog
 as $$
 begin
-  if auth.uid() is null or not app_private.has_permission(target_enterprise_id, 'finance.read') then
+  if auth.uid() is null or not app_private.has_enterprise_permission(target_enterprise_id, 'finance.read') then
     raise exception 'finance permission denied' using errcode = '42501';
   end if;
 

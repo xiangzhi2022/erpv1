@@ -2825,6 +2825,55 @@ export type Database = {
           response_status: number | null
         }[]
       }
+      consume_recovery_proof: {
+        Args: { target_nonce_hash: string }
+        Returns: boolean
+      }
+      consume_recovery_flow: {
+        Args: { target_email_hash: string; target_nonce_hash: string }
+        Returns: boolean
+      }
+      confirm_order_task_drafts: {
+        Args: {
+          target_enterprise_id: string
+          target_expected_status: string
+          target_order_id: string
+          target_remark?: string | null
+        }
+        Returns: Json
+      }
+      create_dealer_order_with_items: {
+        Args: {
+          target_enterprise_id: string
+          target_factory_id: string
+          target_order: Json
+        }
+        Returns: Json
+      }
+      create_basic_order: {
+        Args: {
+          target_enterprise_id: string
+          target_order: Json
+        }
+        Returns: Json
+      }
+      delete_order_component: {
+        Args: {
+          target_enterprise_id: string
+          target_id: string
+          target_type: string
+        }
+        Returns: Json
+      }
+      create_enterprise_role: {
+        Args: {
+          target_code: string
+          target_description: string | null
+          target_enterprise_id: string
+          target_name: string
+        }
+        Returns: Json
+      }
       create_order_exchange: {
         Args: {
           target_from_enterprise_id: string
@@ -2834,6 +2883,34 @@ export type Database = {
           target_to_enterprise_id: string
         }
         Returns: Database["public"]["Tables"]["order_exchanges"]["Row"][]
+      }
+      create_order_item_with_pricing: {
+        Args: {
+          target_enterprise_id: string
+          target_item: Json
+          target_order_id: string
+        }
+        Returns: Database["public"]["Tables"]["order_items"]["Row"][]
+      }
+      create_order_product_with_pricing: {
+        Args: {
+          target_enterprise_id: string
+          target_order_id: string
+          target_product: Json
+        }
+        Returns: Database["public"]["Tables"]["order_products"]["Row"][]
+      }
+      create_order_space: {
+        Args: {
+          target_enterprise_id: string
+          target_order_id: string
+          target_space: Json
+        }
+        Returns: Json
+      }
+      create_enterprise_join_request: {
+        Args: { target_enterprise_id: string; target_message: string | null }
+        Returns: Json
       }
       create_production_work_order: {
         Args: {
@@ -2845,6 +2922,101 @@ export type Database = {
           target_quantity: number
           target_remark?: string | null
           target_workshop_id: string | null
+        }
+        Returns: Json
+      }
+      create_production_tasks: {
+        Args: {
+          target_enterprise_id: string
+          target_order_id: string
+          target_tasks: Json
+        }
+        Returns: Json
+      }
+      handle_enterprise_join_request: {
+        Args: {
+          target_action: string
+          target_reason: string | null
+          target_request_id: string
+        }
+        Returns: Json
+      }
+      list_enterprise_join_requests: {
+        Args: { target_enterprise_id: string | null; target_status: string }
+        Returns: Json
+      }
+      register_recovery_proof: {
+        Args: { target_expires_at: string; target_nonce_hash: string }
+        Returns: undefined
+      }
+      register_recovery_flow: {
+        Args: {
+          target_email_hash: string
+          target_expires_at: string
+          target_nonce_hash: string
+        }
+        Returns: undefined
+      }
+      remove_enterprise_member: {
+        Args: { target_enterprise_id: string; target_user_id: string }
+        Returns: undefined
+      }
+      replace_employee_role_bindings: {
+        Args: {
+          target_enterprise_id: string
+          target_role_ids: string[]
+          target_user_id: string
+        }
+        Returns: undefined
+      }
+      save_employee_with_relations: {
+        Args: {
+          target_employee_id: string | null
+          target_enterprise_id: string
+          target_fields: Json
+          target_position_ids: string[]
+          target_primary_position_id: string | null
+          target_role_ids: string[]
+          target_user_id: string | null
+        }
+        Returns: Json
+      }
+      set_enterprise_role_permissions: {
+        Args: {
+          target_enterprise_id: string
+          target_permission_codes: string[]
+          target_role_id: string
+        }
+        Returns: string[]
+      }
+      delete_employee_with_access: {
+        Args: {
+          target_employee_id: string
+          target_enterprise_id: string
+          target_hard_delete: boolean
+        }
+        Returns: Json
+      }
+      update_enterprise_member: {
+        Args: {
+          target_display_name: string | null
+          target_enterprise_id: string
+          target_role_id: string | null
+          target_status: string | null
+          target_user_id: string
+        }
+        Returns: Json
+      }
+      update_enterprise_role: {
+        Args: {
+          target_code: string | null
+          target_description: string | null
+          target_enterprise_id: string
+          target_name: string | null
+          target_role_id: string
+          update_code: boolean
+          update_description: boolean
+          update_name: boolean
         }
         Returns: Json
       }
@@ -2876,7 +3048,11 @@ export type Database = {
           target_unit_price?: number | null
           target_wage_amount?: number | null
         }
-        Returns: Database["public"]["Tables"]["worker_wage_records"]["Row"][]
+        Returns: {
+          id: string
+          status: string
+          updated_at: string
+        }[]
       }
       finance_list_order_summaries: {
         Args: { target_enterprise_id: string; target_status?: string | null }
@@ -2897,6 +3073,19 @@ export type Database = {
           total_cost: number
           updated_at: string
         }[]
+      }
+      finance_list_order_item_amounts: {
+        Args: { target_enterprise_id: string; target_order_ids: string[] }
+        Returns: {
+          id: string
+          order_id: string
+          subtotal: number
+          unit_price: number
+        }[]
+      }
+      finance_read_order_details: {
+        Args: { target_enterprise_id: string; target_order_id: string }
+        Returns: Json
       }
       finance_list_settlements: {
         Args: { target_enterprise_id: string }
@@ -2930,11 +3119,19 @@ export type Database = {
       }
       finance_pay_wage_record: {
         Args: { target_enterprise_id: string; target_record_id: string }
-        Returns: Database["public"]["Tables"]["worker_wage_records"]["Row"][]
+        Returns: {
+          id: string
+          status: string
+          updated_at: string
+        }[]
       }
       finance_settle_wage_records: {
         Args: { target_enterprise_id: string; target_record_ids: string[] }
-        Returns: Database["public"]["Tables"]["worker_wage_records"]["Row"][]
+        Returns: {
+          id: string
+          status: string
+          updated_at: string
+        }[]
       }
       finance_update_order_pricing: {
         Args: {
@@ -2945,7 +3142,36 @@ export type Database = {
           target_profit_amount?: number | null
           target_total_amount?: number | null
         }
-        Returns: Database["public"]["Tables"]["orders"]["Row"][]
+        Returns: { id: string }[]
+      }
+      finance_update_order_item_pricing: {
+        Args: {
+          target_enterprise_id: string
+          target_order_item_id: string
+          target_subtotal?: number | null
+          target_unit_price?: number | null
+        }
+        Returns: { id: string }[]
+      }
+      finance_update_order_product: {
+        Args: {
+          target_cost_amount?: number | null
+          target_enterprise_id: string
+          target_internal_remark?: string | null
+          target_product_id: string
+          target_profit_amount?: number | null
+          target_quoted_amount?: number | null
+          update_internal_remark?: boolean
+        }
+        Returns: { id: string }[]
+      }
+      wages_read_order_task_amounts: {
+        Args: { target_enterprise_id: string; target_order_id: string }
+        Returns: Json
+      }
+      wages_read_employee_base_salaries: {
+        Args: { target_enterprise_id: string }
+        Returns: Json
       }
       onboard_enterprise: {
         Args: {
@@ -2983,6 +3209,50 @@ export type Database = {
         }
         Returns: Json
       }
+      transition_order_status: {
+        Args: {
+          target_enterprise_id: string
+          target_expected_status: string
+          target_order_id: string
+          target_remark?: string | null
+          target_status: string
+        }
+        Returns: {
+          id: string
+          status: string
+          updated_at: string
+        }[]
+      }
+      transition_order_exchanges_for_order: {
+        Args: {
+          target_action: string
+          target_enterprise_id: string
+          target_message?: string | null
+          target_order_id: string
+        }
+        Returns: number
+      }
+      transition_order_status_with_exchanges: {
+        Args: {
+          target_enterprise_id: string
+          target_expected_status: string
+          target_order_id: string
+          target_remark?: string | null
+          target_status: string
+        }
+        Returns: Json
+      }
+      transition_order_component_status: {
+        Args: {
+          target_enterprise_id: string
+          target_expected_status: string
+          target_id: string
+          target_remark?: string | null
+          target_status: string
+          target_type: string
+        }
+        Returns: Json
+      }
       transition_order_exchange: {
         Args: {
           target_action: string
@@ -2990,7 +3260,7 @@ export type Database = {
           target_message?: string | null
           target_proposed_changes?: Json | null
         }
-        Returns: Database["public"]["Tables"]["order_exchanges"]["Row"][]
+        Returns: { id: string; status: string; updated_at: string }[]
       }
       transition_own_production_task: {
         Args: {
@@ -2998,6 +3268,31 @@ export type Database = {
           p_enterprise_id: string
           p_expected_status?: string | null
           p_task_id: string
+        }
+        Returns: Json
+      }
+      update_basic_order: {
+        Args: {
+          target_enterprise_id: string
+          target_order: Json
+          target_order_id: string
+        }
+        Returns: Json
+      }
+      update_order_internal_remark: {
+        Args: {
+          target_enterprise_id: string
+          target_internal_remark: string | null
+          target_order_id: string
+        }
+        Returns: { id: string }[]
+      }
+      update_order_component_fields: {
+        Args: {
+          target_enterprise_id: string
+          target_fields: Json
+          target_id: string
+          target_type: string
         }
         Returns: Json
       }

@@ -46,7 +46,7 @@ function getDefaultValues(editWorker: Worker | null): WorkerFormValues {
       gender: editWorker.gender || '',
       craft_type: editWorker.craft_type || '',
       workshop_id: editWorker.workshop_id || '',
-      status: (editWorker.status === 'active' || editWorker.status === 'on_leave' || editWorker.status === 'resigned')
+      status: (editWorker.status === 'active' || editWorker.status === 'inactive' || editWorker.status === 'departed')
         ? editWorker.status
         : 'active',
       skill_tags: safeParseTags(editWorker.skill_tags).join(','),

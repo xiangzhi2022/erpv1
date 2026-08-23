@@ -66,6 +66,7 @@ export async function POST(
       }
       requirePermission(context, 'production.assign');
     }
+    if (input.wage_rule_id) requirePermission(context, 'wages.manage');
 
     const { count, error: countError } = await supabase.from('production_tasks')
       .select('id', { count: 'exact', head: true })
@@ -116,25 +117,46 @@ export async function POST(
       estimatedWage = calculateTaskWage(draftTask, wageRule);
     }
 
-    const { data, error } = await supabase.from('production_tasks').insert({
-      ...draftTask,
-      estimated_wage_amount: estimatedWage,
-      final_wage_amount: 0,
-      status: input.assigned_worker_id ? 'assigned' : 'pending_assign',
-      updated_at: new Date().toISOString(),
-    }).select('id,order_id,space_id,product_id,task_no,task_type,task_name,task_code,product_name,quantity,unit,length,width,thickness,area,material,color,process_name,status,workshop_id,workstation_id,created_at,updated_at').single();
-    if (error || !data) return Response.json({ success: false, error: '新增生产任务失败' }, { status: 500 });
-    const { error: logError } = await supabase.from('order_status_logs').insert({
-      enterprise_id: context.enterpriseId,
-      target_type: 'production_task',
-      target_id: data.id,
-      from_status: null,
-      to_status: data.status,
-      changed_by: context.userId,
-      remark: '新增生产任务',
-    });
-    if (logError) console.error('product_task.status_log_failed', { code: logError.code });
-    return Response.json({ success: true, data });
+    const safeTaskInput = {
+      space_id: draftTask.space_id,
+      product_id: draftTask.product_id,
+      task_no: draftTask.task_no,
+      task_type: draftTask.task_type,
+      task_name: draftTask.task_name,
+      task_code: draftTask.task_code,
+      product_name: draftTask.product_name,
+      quantity: draftTask.quantity,
+      unit: draftTask.unit,
+      length: draftTask.length,
+      width: draftTask.width,
+      thickness: draftTask.thickness,
+      area: draftTask.area,
+      material: draftTask.material,
+      color: draftTask.color,
+      process_name: draftTask.process_name,
+      workshop_id: draftTask.workshop_id,
+      workstation_id: draftTask.workstation_id,
+      assigned_worker_id: draftTask.assigned_worker_id,
+      wage_rule_id: draftTask.wage_rule_id,
+      remark: draftTask.remark,
+    };
+    const { data, error } = await supabase.rpc('create_production_tasks' as never, {
+      target_enterprise_id: context.enterpriseId,
+      target_order_id: product.order_id,
+      target_tasks: [{
+        ...safeTaskInput,
+        estimated_wage_amount: estimatedWage,
+        initial_status: input.assigned_worker_id ? 'assigned' : 'pending_assign',
+      }],
+    } as never);
+    const createdTask = Array.isArray(data) ? data[0] : null;
+    if (error || !createdTask) {
+      return Response.json(
+        { success: false, error: '新增生产任务失败' },
+        { status: error?.code === '42501' ? 403 : error?.code === 'P0002' || error?.code === '22023' ? 422 : 500 },
+      );
+    }
+    return Response.json({ success: true, data: createdTask });
   } catch (error) {
     return errorResponse(error);
   }

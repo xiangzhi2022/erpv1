@@ -2,7 +2,6 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import type { AuthUser } from '@/lib/auth';
 import { getUserPermissionKeys, isSuperAdmin, type PermissionKey } from '@/lib/role-access';
 import {
-  calculateTaskWage,
   canEditFinancialFields,
   canManageProduction,
   canManageWages,
@@ -21,6 +20,11 @@ import {
 } from '@/lib/four-level-order';
 
 export type DbRow = Record<string, unknown>;
+
+const SAFE_ORDER_COLUMNS = 'id,enterprise_id,order_no,customer_name,customer_phone,customer_address,order_source,status,total_amount,target_factory_id,dealer_id,order_flow,from_enterprise_id,to_enterprise_id,parent_order_id,delivery_date,remark,created_by,created_at,updated_at';
+const SAFE_ORDER_PRODUCT_COLUMNS = 'id,enterprise_id,order_id,space_id,product_no,product_name,product_type,product_model,width,height,depth,area,quantity,material,color,status,sort_order,remark,created_at,updated_at';
+const SAFE_PRODUCTION_TASK_COLUMNS = 'id,enterprise_id,order_id,space_id,product_id,work_order_id,task_no,task_type,task_name,task_code,product_name,quantity,unit,length,width,thickness,area,material,color,process_name,status,priority,progress,completed,workshop_id,workstation_id,assigned_to,assigned_worker_id,worker_id,planned_start_date,planned_end_date,actual_start_date,actual_end_date,start_date,end_date,started_at,submitted_at,completed_at,approved_by,approved_at,remark,created_at,updated_at';
+const SAFE_ORDER_ITEM_COLUMNS = 'id,enterprise_id,order_id,module_id,item_no,product_name,specifications,woodworking_craft,forming_craft,painting_craft,length_mm,width_mm,thickness_mm,quantity,unit,color,hardware,hardware_quantity,construction_surface,remark,sort_order,created_at,updated_at';
 
 export interface OrderTree extends DbRow {
   id: string;
@@ -83,19 +87,6 @@ const TASK_MATCHERS = [
 
 function valueString(value: unknown): string | null {
   return typeof value === 'string' && value ? value : null;
-}
-
-function valueNumber(value: unknown): number {
-  if (typeof value === 'number') return Number.isFinite(value) ? value : 0;
-  if (typeof value === 'string' && value !== '') {
-    const parsed = Number(value);
-    return Number.isFinite(parsed) ? parsed : 0;
-  }
-  return 0;
-}
-
-function nowIso(): string {
-  return new Date().toISOString();
 }
 
 function valueBoolean(value: unknown): boolean | null {
@@ -353,25 +344,6 @@ export async function canWorkerCalculatePieceWage(
   return hasProductionPermission(permissions) || workerHasSkillFallback(workerRow);
 }
 
-export async function writeStatusLog(
-  supabase: SupabaseClient,
-  targetType: OrderStatusLogTarget,
-  targetId: string,
-  fromStatus: string | null | undefined,
-  toStatus: string,
-  changedBy: string | null | undefined,
-  remark?: string | null
-): Promise<void> {
-  await supabase.from('order_status_logs').insert({
-    target_type: targetType,
-    target_id: targetId,
-    from_status: fromStatus || null,
-    to_status: toStatus,
-    changed_by: changedBy || null,
-    remark: remark || null,
-  });
-}
-
 async function updateStatus(
   supabase: SupabaseClient,
   table: string,
@@ -379,29 +351,45 @@ async function updateStatus(
   id: string | null,
   currentStatus: string | null | undefined,
   nextStatus: string,
-  changedBy: string | null | undefined,
-  remark?: string
+  _changedBy: string | null | undefined,
+  remark?: string,
+  enterpriseId?: string | null,
 ): Promise<void> {
   if (!id || currentStatus === nextStatus) return;
-  const { error } = await supabase
-    .from(table)
-    .update({ status: nextStatus, updated_at: nowIso() })
-    .eq('id', id);
-  if (!error) await writeStatusLog(supabase, targetType, id, currentStatus, nextStatus, changedBy, remark);
+  if (table === 'orders') {
+    if (!enterpriseId || !currentStatus) return;
+    await supabase.rpc('transition_order_status', {
+      target_enterprise_id: enterpriseId,
+      target_order_id: id,
+      target_expected_status: currentStatus,
+      target_status: nextStatus,
+      target_remark: remark || null,
+    });
+    return;
+  }
+  if (!enterpriseId || !currentStatus || !['order_spaces', 'order_products'].includes(table)) return;
+  await supabase.rpc('transition_order_component_status', {
+    target_enterprise_id: enterpriseId,
+    target_type: targetType,
+    target_id: id,
+    target_expected_status: currentStatus,
+    target_status: nextStatus,
+    target_remark: remark || null,
+  });
 }
 
 export async function loadOrderTree(supabase: SupabaseClient, orderId: string): Promise<OrderTree | null> {
   const { data: order, error } = await supabase
     .from('orders')
-    .select('*')
+    .select(SAFE_ORDER_COLUMNS)
     .eq('id', orderId)
     .maybeSingle();
   if (error || !order) return null;
 
   const [spacesRes, productsRes, tasksRes, logsRes] = await Promise.all([
     supabase.from('order_spaces').select('*').eq('order_id', orderId).order('sort_order', { ascending: true }),
-    supabase.from('order_products').select('*').eq('order_id', orderId).order('sort_order', { ascending: true }),
-    supabase.from('production_tasks').select('*').eq('order_id', orderId).order('created_at', { ascending: true }),
+    supabase.from('order_products').select(SAFE_ORDER_PRODUCT_COLUMNS).eq('order_id', orderId).order('sort_order', { ascending: true }),
+    supabase.from('production_tasks').select(SAFE_PRODUCTION_TASK_COLUMNS).eq('order_id', orderId).order('created_at', { ascending: true }),
     supabase.from('order_status_logs').select('*').in('target_type', ['order', 'space', 'product', 'production_task']).order('changed_at', { ascending: false }).limit(100),
   ]);
 
@@ -417,7 +405,7 @@ export async function loadOrderTree(supabase: SupabaseClient, orderId: string): 
   if (spaces.length === 0) {
     const [modulesRes, itemsRes] = await Promise.all([
       supabase.from('order_modules').select('*').eq('order_id', orderId).order('sort_order', { ascending: true }),
-      supabase.from('order_items').select('*').eq('order_id', orderId).order('sort_order', { ascending: true }),
+      supabase.from('order_items').select(SAFE_ORDER_ITEM_COLUMNS).eq('order_id', orderId).order('sort_order', { ascending: true }),
     ]);
     const modules = (modulesRes.data || []) as DbRow[];
     const items = (itemsRes.data || []) as DbRow[];
@@ -449,9 +437,6 @@ export async function loadOrderTree(supabase: SupabaseClient, orderId: string): 
         material: item.specifications,
         color: item.color,
         status: valueString(order.status) || 'draft',
-        quoted_amount: item.subtotal,
-        cost_amount: 0,
-        profit_amount: 0,
         sort_order: index + 1,
         remark: item.remark,
         legacy: true,
@@ -577,34 +562,35 @@ export async function recomputeParentStatuses(
   const spaceId = valueString(task.space_id);
   const productId = valueString(task.product_id);
   const taskStatus = valueString(task.status);
+  const enterpriseId = valueString(task.enterprise_id);
 
   if (taskStatus === 'producing') {
     if (productId) {
       const { data } = await supabase.from('order_products').select('id, status').eq('id', productId).maybeSingle();
-      await updateStatus(supabase, 'order_products', 'product', productId, valueString(data?.status), 'producing', changedBy, remark || '任务开始生产');
+      await updateStatus(supabase, 'order_products', 'product', productId, valueString(data?.status), 'producing', changedBy, remark || '任务开始生产', enterpriseId);
     }
     if (spaceId) {
       const { data } = await supabase.from('order_spaces').select('id, status').eq('id', spaceId).maybeSingle();
-      await updateStatus(supabase, 'order_spaces', 'space', spaceId, valueString(data?.status), 'producing', changedBy, remark || '任务开始生产');
+      await updateStatus(supabase, 'order_spaces', 'space', spaceId, valueString(data?.status), 'producing', changedBy, remark || '任务开始生产', enterpriseId);
     }
     if (orderId) {
       const { data } = await supabase.from('orders').select('id, status').eq('id', orderId).maybeSingle();
-      await updateStatus(supabase, 'orders', 'order', orderId, valueString(data?.status), 'producing', changedBy, remark || '任务开始生产');
+      await updateStatus(supabase, 'orders', 'order', orderId, valueString(data?.status), 'producing', changedBy, remark || '任务开始生产', enterpriseId);
     }
   }
 
   if (taskStatus === 'abnormal') {
     if (productId) {
       const { data } = await supabase.from('order_products').select('id, status').eq('id', productId).maybeSingle();
-      await updateStatus(supabase, 'order_products', 'product', productId, valueString(data?.status), 'abnormal', changedBy, remark || '任务异常');
+      await updateStatus(supabase, 'order_products', 'product', productId, valueString(data?.status), 'abnormal', changedBy, remark || '任务异常', enterpriseId);
     }
     if (spaceId) {
       const { data } = await supabase.from('order_spaces').select('id, status').eq('id', spaceId).maybeSingle();
-      await updateStatus(supabase, 'order_spaces', 'space', spaceId, valueString(data?.status), 'abnormal', changedBy, remark || '任务异常');
+      await updateStatus(supabase, 'order_spaces', 'space', spaceId, valueString(data?.status), 'abnormal', changedBy, remark || '任务异常', enterpriseId);
     }
     if (orderId) {
       const { data } = await supabase.from('orders').select('id, status').eq('id', orderId).maybeSingle();
-      await updateStatus(supabase, 'orders', 'order', orderId, valueString(data?.status), 'abnormal', changedBy, remark || '任务异常');
+      await updateStatus(supabase, 'orders', 'order', orderId, valueString(data?.status), 'abnormal', changedBy, remark || '任务异常', enterpriseId);
     }
   }
 
@@ -616,7 +602,7 @@ export async function recomputeParentStatuses(
   if (!allProductDone) return;
 
   const productRes = await supabase.from('order_products').select('id, status').eq('id', productId).maybeSingle();
-  await updateStatus(supabase, 'order_products', 'product', productId, valueString(productRes.data?.status), 'completed', changedBy, '产品任务全部完成');
+  await updateStatus(supabase, 'order_products', 'product', productId, valueString(productRes.data?.status), 'completed', changedBy, '产品任务全部完成', enterpriseId);
 
   if (!spaceId) return;
   const spaceProducts = await supabase.from('order_products').select('id, status').eq('space_id', spaceId);
@@ -625,7 +611,7 @@ export async function recomputeParentStatuses(
   if (!allSpaceDone) return;
 
   const spaceRes = await supabase.from('order_spaces').select('id, status').eq('id', spaceId).maybeSingle();
-  await updateStatus(supabase, 'order_spaces', 'space', spaceId, valueString(spaceRes.data?.status), 'completed', changedBy, '空间产品全部完成');
+  await updateStatus(supabase, 'order_spaces', 'space', spaceId, valueString(spaceRes.data?.status), 'completed', changedBy, '空间产品全部完成', enterpriseId);
 
   const orderSpaces = await supabase.from('order_spaces').select('id, status').eq('order_id', orderId);
   const allOrderDone = ((orderSpaces.data || []) as DbRow[]).length > 0 &&
@@ -633,7 +619,7 @@ export async function recomputeParentStatuses(
   if (!allOrderDone) return;
 
   const orderRes = await supabase.from('orders').select('id, status').eq('id', orderId).maybeSingle();
-  await updateStatus(supabase, 'orders', 'order', orderId, valueString(orderRes.data?.status), 'ready_to_ship', changedBy, '订单生产完成，待发货');
+  await updateStatus(supabase, 'orders', 'order', orderId, valueString(orderRes.data?.status), 'ready_to_ship', changedBy, '订单生产完成，待发货', enterpriseId);
 }
 
 export async function syncOrderProgressFromTask(
@@ -642,86 +628,12 @@ export async function syncOrderProgressFromTask(
   changedBy: string | null | undefined,
   remark?: string | null
 ): Promise<void> {
-  const { data } = await supabase.from('production_tasks').select('*').eq('id', taskId).maybeSingle();
+  const { data } = await supabase.from('production_tasks')
+    .select('id,enterprise_id,order_id,space_id,product_id,status')
+    .eq('id', taskId)
+    .maybeSingle();
   if (!data) return;
   await recomputeParentStatuses(supabase, data as DbRow, changedBy, remark);
-}
-
-export async function createOrUpdatePendingWageRecord(
-  supabase: SupabaseClient,
-  task: DbRow,
-  wageRule: DbRow | null,
-  changedBy: string
-): Promise<DbRow | null> {
-  const assignedWorkerId = valueString(task.assigned_worker_id) || valueString(task.worker_id);
-  if (!assignedWorkerId || !wageRule) return null;
-  const canCalculate = await canWorkerCalculatePieceWage(supabase, assignedWorkerId);
-  if (!canCalculate) return null;
-
-  const amount = calculateTaskWage(task, wageRule);
-  const taskId = valueString(task.id);
-  if (!taskId) return null;
-
-  const record = {
-    worker_id: assignedWorkerId,
-    order_id: valueString(task.order_id),
-    space_id: valueString(task.space_id),
-    product_id: valueString(task.product_id),
-    task_id: taskId,
-    wage_rule_id: valueString(wageRule.id),
-    quantity: valueNumber(task.quantity) || 1,
-    unit_price: valueNumber(wageRule.unit_price),
-    wage_amount: amount,
-    status: 'pending',
-    submitted_at: nowIso(),
-    updated_at: nowIso(),
-  };
-
-  const existing = await supabase
-    .from('worker_wage_records')
-    .select('*')
-    .eq('task_id', taskId)
-    .maybeSingle();
-
-  if (existing.data) {
-    const { data } = await supabase
-      .from('worker_wage_records')
-      .update(record)
-      .eq('id', String((existing.data as DbRow).id))
-      .select()
-      .single();
-    if (data) {
-      await writeStatusLog(
-        supabase,
-        'wage_record',
-        String((data as DbRow).id),
-        valueString((existing.data as DbRow).status),
-        'pending',
-        changedBy,
-        '任务提交后更新待审核工资'
-      );
-    }
-    return (data as DbRow | null) || null;
-  }
-
-  const { data } = await supabase
-    .from('worker_wage_records')
-    .insert({ ...record, approved_by: null, created_at: nowIso() })
-    .select()
-    .single();
-  await writeStatusLog(supabase, 'production_task', taskId, valueString(task.status), 'submitted', changedBy, '提交任务并生成待审核工资');
-  if (data) {
-    await writeStatusLog(
-      supabase,
-      'wage_record',
-      String((data as DbRow).id),
-      null,
-      'pending',
-      changedBy,
-      '生成待审核工资'
-    );
-  }
-  return (data as DbRow | null) || null;
 }
 
 async function loadWageWorkerContext(

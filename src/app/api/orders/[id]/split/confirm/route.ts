@@ -22,67 +22,31 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
       .eq('enterprise_id', context.enterpriseId).eq('id', id).maybeSingle();
     if (!order) return jsonError('订单不存在', 404);
 
-    const { data: draftTasks, error: taskQueryError } = await supabase
-      .from('production_tasks')
-      .select('id, status')
-      .eq('enterprise_id', context.enterpriseId)
-      .eq('order_id', id)
-      .eq('status', 'pending_generate');
-    if (taskQueryError) return jsonError('查询生产任务失败', 500);
-
-    const tasks = (draftTasks || []) as Array<{ id: string; status: string | null }>;
-    if (tasks.length === 0) {
-      return Response.json({ success: true, updated_tasks: 0, message: '没有待确认的生产草稿任务' });
+    const { data: updatedTasks, error: updateError } = await supabase.rpc('confirm_order_task_drafts' as never, {
+      target_enterprise_id: context.enterpriseId,
+      target_order_id: id,
+      target_expected_status: order.status,
+      target_remark: text(body.remark) || '确认拆单，订单进入待排产',
+    } as never);
+    if (updateError) {
+      return jsonError(
+        updateError.code === 'P0002' ? '订单不存在' : updateError.code === 'P0001' ? '订单或任务状态已变化' : '确认生产任务失败',
+        updateError.code === 'P0002' ? 404 : updateError.code === 'P0001' ? 409 : updateError.code === '42501' ? 403 : 500,
+      );
     }
-
-    const now = new Date().toISOString();
-    const taskIds = tasks.map((task) => task.id);
-    const { data: updatedTasks, error: updateError } = await supabase
-      .from('production_tasks')
-      .update({ status: 'pending_assign', updated_at: now })
-      .eq('enterprise_id', context.enterpriseId)
-      .in('id', taskIds)
-      .select('*');
-    if (updateError) return jsonError('确认生产任务失败', 500);
-
-    await Promise.all(
-      tasks.map((task) =>
-        supabase.from('order_status_logs').insert({
-          enterprise_id: context.enterpriseId,
-          target_type: 'production_task',
-          target_id: task.id,
-          from_status: text(task.status) || 'pending_generate',
-          to_status: 'pending_assign',
-          changed_by: context.userId,
-          remark: '确认拆单，进入待分配',
-        })
-      )
-    );
-
-    const currentStatus = text(order.status);
-    if (currentStatus && ['pending', 'confirmed', 'accepted', 'reviewed', 'draft'].includes(currentStatus)) {
-      const { error: orderError } = await supabase
-        .from('orders')
-        .update({ status: 'pool', updated_at: now })
-        .eq('enterprise_id', context.enterpriseId)
-        .eq('id', id);
-      if (!orderError) {
-        await supabase.from('order_status_logs').insert({
-          enterprise_id: context.enterpriseId,
-          target_type: 'order',
-          target_id: id,
-          from_status: currentStatus,
-          to_status: 'pool',
-          changed_by: context.userId,
-          remark: text(body.remark) || '确认拆单，订单进入待排产',
-        });
-      }
+    const rpcResult = updatedTasks as unknown;
+    const confirmedTasks = rpcResult && typeof rpcResult === 'object'
+      && 'tasks' in rpcResult && Array.isArray(rpcResult.tasks)
+      ? rpcResult.tasks
+      : [];
+    if (confirmedTasks.length === 0) {
+      return Response.json({ success: true, updated_tasks: 0, message: '没有待确认的生产草稿任务' });
     }
 
     return Response.json({
       success: true,
-      updated_tasks: (updatedTasks || []).length,
-      data: updatedTasks || [],
+      updated_tasks: confirmedTasks.length,
+      data: confirmedTasks,
     });
   } catch (error) {
     console.error('confirm split failed:', error);

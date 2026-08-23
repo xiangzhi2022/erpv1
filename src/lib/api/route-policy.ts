@@ -199,9 +199,16 @@ export const API_ROUTE_POLICY_ENTRIES: readonly PolicyEntry[] = [
   ...enterpriseRoutes([
     '/api/production/tasks/[id]/start',
     '/api/production/tasks/[id]/submit',
-    '/api/progress/report',
     '/api/worker/report',
   ], 'production.report.self'),
+  ...enterpriseRoutesWithMutationPermissions([
+    '/api/progress/report',
+  ], 'production.read', [
+    'production.report.self',
+    'production.review',
+    'shipping.manage',
+    'production.manage',
+  ]),
   ...enterpriseRoutes([
     '/api/production/tasks/[id]',
   ], 'production.read', 'production.plan'),

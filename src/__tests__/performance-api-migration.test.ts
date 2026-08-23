@@ -23,6 +23,7 @@ describe('performance API enterprise boundary', () => {
     for (const route of [routes[0], routes[2], routes[3]]) {
       const source = readFileSync(resolve(process.cwd(), route), 'utf8');
       expect(source).toContain("requirePermission(context, 'wages.read.all')");
+      expect(source).toContain("hasEnterprisePermission(context, 'wages.read.all')");
     }
   });
 });

@@ -19,6 +19,11 @@ const auth = {
 };
 
 const rpc = vi.fn();
+const adminRpc = vi.fn();
+
+vi.mock('@/lib/supabase/admin', () => ({
+  createAdminClient: () => ({ rpc: adminRpc }),
+}));
 
 function membershipQuery(rows: Array<{ status: string }> = [{ status: 'active' }]) {
   const query = {
@@ -40,6 +45,7 @@ function makeClient(rows: Array<{ status: string }> = [{ status: 'active' }]) {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  process.env.SUPABASE_SECRET_KEY = 'test-only-secret-key-with-enough-entropy';
   auth.signOut.mockResolvedValue({ error: null });
 });
 
@@ -142,6 +148,7 @@ describe('AuthService', () => {
 
   it('uses Supabase recovery and session password update APIs', async () => {
     auth.resetPasswordForEmail.mockResolvedValue({ data: {}, error: null });
+    adminRpc.mockResolvedValue({ data: null, error: null });
     auth.updateUser.mockResolvedValue({ data: { user: { id: 'user-1' } }, error: null });
     const { AuthService } = await import('@/lib/auth/service');
     const service = new AuthService(makeClient());
@@ -149,10 +156,32 @@ describe('AuthService', () => {
     await service.requestPasswordReset('owner@example.com', 'https://erp.example.com');
     await service.updatePassword('new-secret12');
 
-    expect(auth.resetPasswordForEmail).toHaveBeenCalledWith('owner@example.com', {
-      redirectTo: 'https://erp.example.com/auth/confirm?next=%2Freset-password',
-    });
+    const resetOptions = auth.resetPasswordForEmail.mock.calls[0]?.[1] as { redirectTo: string };
+    const resetUrl = new URL(resetOptions.redirectTo);
+    expect(resetUrl.origin + resetUrl.pathname).toBe('https://erp.example.com/auth/confirm');
+    expect(resetUrl.searchParams.get('next')).toBe('/reset-password');
+    expect(resetUrl.searchParams.get('type')).toBe('recovery');
+    expect(resetUrl.searchParams.get('flow')).toBeTruthy();
+    expect(resetUrl.search).not.toContain('owner%40example.com');
+    expect(adminRpc).toHaveBeenCalledWith('register_recovery_flow', expect.objectContaining({
+      target_email_hash: expect.stringMatching(/^[0-9a-f]{64}$/),
+      target_expires_at: expect.any(String),
+      target_nonce_hash: expect.stringMatching(/^[0-9a-f]{64}$/),
+    }));
     expect(auth.updateUser).toHaveBeenCalledWith({ password: 'new-secret12' });
+  });
+
+  it('returns the verified callback user id after exchanging the PKCE code', async () => {
+    auth.exchangeCodeForSession.mockResolvedValue({
+      data: { user: { id: 'recovery-user-1', email: 'owner@example.com' }, session: { access_token: 'token' } },
+      error: null,
+    });
+    const { AuthService } = await import('@/lib/auth/service');
+    const service = new AuthService(makeClient());
+
+    await expect(service.exchangeCodeForSession('recovery-code')).resolves.toEqual({
+      email: 'owner@example.com', userId: 'recovery-user-1',
+    });
   });
 
   it('delegates email and phone OTP delivery and verification to Supabase Auth', async () => {

@@ -37,7 +37,7 @@ async function generateWorkerNo(): Promise<string> {
   return `${prefix}${String(seq).padStart(3, '0')}`;
 }
 
-const VALID_STATUSES = ['active', 'on_leave', 'resigned'] as const;
+const VALID_STATUSES = ['active', 'inactive', 'departed'] as const;
 const VALID_CRAFT_TYPES = ['cutting', 'sewing', 'qc', 'packaging', 'ironing', 'pattern', 'cutting_die', 'assembly', 'other'] as const;
 
 // GET - 获取工人列表
@@ -142,7 +142,6 @@ export async function POST(request: Request) {
       skill_tags: typeof skill_tags === 'string' && skill_tags ? skill_tags : null,
       hire_date: typeof hire_date === 'string' && hire_date ? hire_date : null,
       remark: typeof remark === 'string' && remark ? remark : null,
-      created_by: user.id,
     };
 
     const { data, error } = await supabase.from('workers').insert(insertData).select('*, workshops(name)').single();

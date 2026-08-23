@@ -117,6 +117,7 @@ describe('finance and wage API enterprise boundary', () => {
     }), { params: Promise.resolve({ id: '11111111-1111-4111-8111-111111111112' }) });
 
     expect(valid.status).toBe(200);
+    await expect(valid.json()).resolves.toEqual({ success: true, data: { id: 'record-1' } });
     expect(mocks.rpc).toHaveBeenCalledWith('finance_update_order_pricing', {
       target_enterprise_id: ENTERPRISE_ID,
       target_order_id: '11111111-1111-4111-8111-111111111112',

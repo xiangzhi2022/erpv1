@@ -8,12 +8,15 @@ const ORDER_ID = '33333333-3333-4333-8333-333333333333';
 const mocks = vi.hoisted(() => ({
   createClient: vi.fn(),
   getEnterpriseContext: vi.fn(),
+  hasEnterprisePermission: vi.fn(),
   requirePermission: vi.fn(),
+  rpc: vi.fn(),
 }));
 
 vi.mock('@/lib/supabase/server', () => ({ createClient: mocks.createClient }));
 vi.mock('@/lib/enterprise/context', () => ({
   getEnterpriseContext: mocks.getEnterpriseContext,
+  hasEnterprisePermission: mocks.hasEnterprisePermission,
   requirePermission: mocks.requirePermission,
 }));
 
@@ -27,6 +30,7 @@ function createScopedClient({
   orderStatus?: string;
 } = {}) {
   return {
+    rpc: mocks.rpc,
     from(table: string) {
       const filters: Filter[] = [];
       let selectedColumns = '';
@@ -130,6 +134,8 @@ beforeEach(() => {
   });
   const client = createScopedClient();
   mocks.createClient.mockResolvedValue(client);
+  mocks.hasEnterprisePermission.mockReturnValue(false);
+  mocks.rpc.mockResolvedValue({ data: [{ id: ORDER_ID, status: 'confirmed' }], error: null });
 });
 
 describe('factory orders API', () => {
@@ -153,7 +159,7 @@ describe('factory orders API', () => {
         target_factory_id: ENTERPRISE_ID,
         created_at: '2026-08-01T00:00:00Z',
         updated_at: '2026-08-02T00:00:00Z',
-        items: [{ id: 'item-1', product_name: '衣柜', quantity: 1, unit_price: 2500, subtotal: 2500 }],
+        items: [{ id: 'item-1', product_name: '衣柜', quantity: 1 }],
         dealer: { id: '22222222-2222-4222-8222-222222222222', name: '经销商甲' },
         total_tasks: 1,
         completed_tasks: 1,
@@ -163,6 +169,38 @@ describe('factory orders API', () => {
       taskStats: { total: 1, completed: 1 },
     });
     expect(mocks.requirePermission).toHaveBeenCalledWith(expect.any(Object), 'orders.read');
+    expect(mocks.rpc).not.toHaveBeenCalledWith('finance_list_order_item_amounts', expect.anything());
+  });
+
+  it('merges item pricing with one batch RPC only for enterprise finance readers', async () => {
+    mocks.hasEnterprisePermission.mockReturnValue(true);
+    mocks.rpc.mockImplementation(async (functionName: string) => (
+      functionName === 'finance_list_order_item_amounts'
+        ? {
+            data: [{ id: 'item-1', order_id: ORDER_ID, unit_price: 2500, subtotal: 2500 }],
+            error: null,
+          }
+        : { data: [{ id: ORDER_ID, status: 'confirmed' }], error: null }
+    ));
+    const { GET } = await import('@/app/api/factory/orders/route');
+
+    const response = await GET(new NextRequest('https://erp.example.com/api/factory/orders'));
+
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body.orders[0].items).toEqual([{
+      id: 'item-1',
+      product_name: '衣柜',
+      quantity: 1,
+      unit_price: 2500,
+      subtotal: 2500,
+    }]);
+    expect(mocks.hasEnterprisePermission).toHaveBeenCalledWith(expect.any(Object), 'finance.read');
+    expect(mocks.rpc).toHaveBeenCalledTimes(1);
+    expect(mocks.rpc).toHaveBeenCalledWith('finance_list_order_item_amounts', {
+      target_enterprise_id: ENTERPRISE_ID,
+      target_order_ids: [ORDER_ID],
+    });
   });
 
   it('accepts an order only inside the active enterprise and factory scope', async () => {
@@ -176,6 +214,13 @@ describe('factory orders API', () => {
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({ success: true, message: '订单已接收' });
     expect(mocks.requirePermission).toHaveBeenCalledWith(expect.any(Object), 'orders.accept');
+    expect(mocks.rpc).toHaveBeenCalledWith('transition_order_status', {
+      target_enterprise_id: ENTERPRISE_ID,
+      target_order_id: ORDER_ID,
+      target_expected_status: 'pending',
+      target_status: 'confirmed',
+      target_remark: '工厂接收订单',
+    });
   });
 
   it.each([

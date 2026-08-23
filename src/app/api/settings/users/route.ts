@@ -1,29 +1,28 @@
+import { randomUUID } from 'node:crypto';
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
+import { isApiError } from '@/lib/api/errors';
 import { parseJson } from '@/lib/api/request';
-import {
-  createManagedIdentity,
-  findManagedIdentityByPhone,
-  updateManagedIdentityPassword,
-} from '@/lib/admin/user-identities';
+import { errorResponse } from '@/lib/api/response';
 import { createClient } from '@/lib/supabase/server';
 import { authFailed, requireSettingsUser } from '../_utils';
 
-const createUserSchema = z.object({
-  phone: z.string().regex(/^1[3-9]\d{9}$/, '手机号格式不正确'),
-  password: z.string().min(8, '密码至少 8 位'),
-  real_name: z.string().trim().min(1).max(100).optional(),
-  name: z.string().trim().min(1).max(100).optional(),
-  role: z.string().trim().regex(/^[A-Za-z0-9_.-]+$/).optional(),
-});
+const REQUEST_ID_PATTERN = /^[A-Za-z0-9._:-]{1,128}$/;
+
+function requestId(request: Request): string {
+  const candidate = request.headers.get('x-request-id');
+  return candidate && REQUEST_ID_PATTERN.test(candidate) ? candidate : randomUUID();
+}
 
 const updateUserSchema = z.object({
   real_name: z.string().trim().min(1).max(100).optional(),
   name: z.string().trim().min(1).max(100).optional(),
   role: z.string().trim().regex(/^[A-Za-z0-9_.-]+$/).optional(),
   status: z.enum(['active', 'inactive', 'suspended']).optional(),
-  password: z.string().min(8).optional(),
-});
+  department: z.string().trim().max(100).optional(),
+  tenant_id: z.string().uuid().optional(),
+  permissions: z.array(z.string()).optional(),
+}).strict();
 
 async function resolveEnterpriseRole(roleIdOrCode: string | undefined, enterpriseId: string) {
   const client = await createClient();
@@ -96,8 +95,8 @@ export async function GET(request: NextRequest) {
         id: membership.user_id,
         membership_id: membership.id,
         phone: profile?.phone ?? '',
-        real_name: profile?.display_name ?? membership.display_name,
-        nickname: profile?.display_name ?? membership.display_name,
+        real_name: membership.display_name,
+        nickname: membership.display_name,
         role: role?.code ?? 'employee',
         role_id: role?.id ?? null,
         department: null,
@@ -122,82 +121,10 @@ export async function POST(request: NextRequest) {
   try {
     const auth = await requireSettingsUser(request);
     if (authFailed(auth)) return auth.response;
-    const body = await parseJson(request, createUserSchema);
-    const role = await resolveEnterpriseRole(body.role, auth.context.enterpriseId);
-    if (!role) return NextResponse.json({ success: false, error: '角色不存在' }, { status: 400 });
-
-    const found = await findManagedIdentityByPhone(body.phone);
-    if (found.error) return NextResponse.json({ success: false, error: '查询认证账号失败' }, { status: 503 });
-    let userId = found.identity?.id ?? null;
-    let createdIdentity = false;
-    if (!userId) {
-      const result = await createManagedIdentity({
-        phone: body.phone,
-        password: body.password,
-        displayName: body.real_name ?? body.name ?? body.phone,
-      });
-      if (result.error || !result.data.user) {
-        return NextResponse.json({ success: false, error: '创建认证账号失败' }, { status: 503 });
-      }
-      userId = result.data.user.id;
-      createdIdentity = true;
-    }
-
-    const client = await createClient();
-    const displayName = body.real_name ?? body.name ?? body.phone;
-    const { data: existing } = await client
-      .from('enterprise_memberships')
-      .select('id')
-      .eq('tenant_id', auth.context.enterpriseId)
-      .eq('user_id', userId)
-      .maybeSingle();
-    if (existing) {
-      return NextResponse.json({ success: false, error: '该账号已属于当前企业' }, { status: 409 });
-    }
-    const { data: membership, error: membershipError } = await client
-      .from('enterprise_memberships')
-      .insert({
-        tenant_id: auth.context.enterpriseId,
-        user_id: userId,
-        display_name: displayName,
-        status: 'active',
-      })
-      .select('id,user_id,display_name,status,created_at')
-      .single();
-    if (membershipError) {
-      return NextResponse.json({ success: false, error: '创建企业成员失败' }, { status: 500 });
-    }
-    await client.from('profiles').upsert({
-      id: userId,
-      enterprise_id: auth.context.enterpriseId,
-      phone: body.phone,
-      display_name: displayName,
-      updated_at: new Date().toISOString(),
-    }, { onConflict: 'id' });
-    const { error: bindingError } = await client.from('role_bindings').insert({
-      tenant_id: auth.context.enterpriseId,
-      membership_id: membership.id,
-      role_id: role.id,
-      scope_kind: 'enterprise',
-    });
-    if (bindingError) {
-      await client.from('enterprise_memberships').delete().eq('tenant_id', auth.context.enterpriseId).eq('id', membership.id);
-      return NextResponse.json({ success: false, error: '分配企业角色失败' }, { status: 500 });
-    }
     return NextResponse.json({
-      success: true,
-      user: {
-        id: userId,
-        membership_id: membership.id,
-        phone: body.phone,
-        real_name: displayName,
-        role: role.code,
-        status: 'active',
-        is_active: true,
-        tenant_id: auth.context.enterpriseId,
-        created_identity: createdIdentity,
-      },
-    }, { status: 201 });
+      success: false,
+      error: '企业管理员不能直接创建登录账号；请让用户自行注册后提交加入申请，再由管理员审批。',
+    }, { status: 409 });
   } catch (error) {
     console.error('create enterprise user failed:', error);
     return NextResponse.json({ success: false, error: '创建用户失败' }, { status: 500 });
@@ -211,49 +138,35 @@ export async function PUT(request: NextRequest) {
     const userId = request.nextUrl.searchParams.get('id');
     if (!userId) return NextResponse.json({ success: false, error: '缺少用户 ID' }, { status: 400 });
     const body = await parseJson(request, updateUserSchema);
-    const client = await createClient();
-    const { data: membership } = await client
-      .from('enterprise_memberships')
-      .select('id,display_name,status')
-      .eq('tenant_id', auth.context.enterpriseId)
-      .eq('user_id', userId)
-      .maybeSingle();
-    if (!membership) return NextResponse.json({ success: false, error: '用户不存在' }, { status: 404 });
     const displayName = body.real_name ?? body.name;
     const membershipStatus = body.status === 'inactive' ? 'suspended' : body.status;
-    if (displayName || membershipStatus) {
-      const { error } = await client
-        .from('enterprise_memberships')
-        .update({
-          ...(displayName ? { display_name: displayName } : {}),
-          ...(membershipStatus ? { status: membershipStatus } : {}),
-          updated_at: new Date().toISOString(),
-        })
-        .eq('tenant_id', auth.context.enterpriseId)
-        .eq('id', membership.id);
-      if (error) return NextResponse.json({ success: false, error: '更新用户失败' }, { status: 500 });
-    }
-    if (displayName) {
-      await client.from('profiles').update({ display_name: displayName }).eq('enterprise_id', auth.context.enterpriseId).eq('id', userId);
-    }
+    const client = await createClient();
+    let roleId: string | null = null;
     if (body.role) {
       const role = await resolveEnterpriseRole(body.role, auth.context.enterpriseId);
       if (!role) return NextResponse.json({ success: false, error: '角色不存在' }, { status: 400 });
-      await client.from('role_bindings').delete().eq('tenant_id', auth.context.enterpriseId).eq('membership_id', membership.id).eq('scope_kind', 'enterprise');
-      const { error } = await client.from('role_bindings').insert({
-        tenant_id: auth.context.enterpriseId,
-        membership_id: membership.id,
-        role_id: role.id,
-        scope_kind: 'enterprise',
-      });
-      if (error) return NextResponse.json({ success: false, error: '更新角色失败' }, { status: 500 });
+      roleId = role.id;
     }
-    if (body.password) {
-      const { error } = await updateManagedIdentityPassword(userId, body.password);
-      if (error) return NextResponse.json({ success: false, error: '更新认证密码失败' }, { status: 503 });
-    }
+    const { error } = await client.rpc('update_enterprise_member', {
+      target_display_name: displayName ?? null,
+      target_enterprise_id: auth.context.enterpriseId,
+      target_role_id: roleId,
+      target_status: membershipStatus ?? null,
+      target_user_id: userId,
+    });
+    if (error?.message === 'member_not_found') return NextResponse.json({ success: false, error: '用户不存在' }, { status: 404 });
+    if (error?.message === 'permission_denied') return NextResponse.json({ success: false, error: '没有更新成员或角色的权限' }, { status: 403 });
+    if (error?.message === 'owner_protected') return NextResponse.json({ success: false, error: '只有企业所有者可以修改所有者账号' }, { status: 403 });
+    if (error?.message === 'role_not_assignable') return NextResponse.json({ success: false, error: '不能分配超出当前账号权限范围的角色' }, { status: 403 });
+    if (error?.message === 'last_owner_required') return NextResponse.json({ success: false, error: '企业必须保留至少一名启用的所有者' }, { status: 409 });
+    if (error?.message === 'role_required') return NextResponse.json({ success: false, error: '重新启用成员时必须明确分配角色' }, { status: 409 });
+    if (error?.message === 'cannot_suspend_self') return NextResponse.json({ success: false, error: '不能停用当前登录账号' }, { status: 409 });
+    if (error) return NextResponse.json({ success: false, error: '更新用户失败' }, { status: 500 });
     return NextResponse.json({ success: true });
   } catch (error) {
+    if (isApiError(error)) {
+      return errorResponse(error, error.status, requestId(request), error.responseHeaders);
+    }
     console.error('update enterprise user failed:', error);
     return NextResponse.json({ success: false, error: '更新用户失败' }, { status: 500 });
   }
@@ -265,22 +178,16 @@ export async function DELETE(request: NextRequest) {
     if (authFailed(auth)) return auth.response;
     const userId = request.nextUrl.searchParams.get('id');
     if (!userId) return NextResponse.json({ success: false, error: '缺少用户 ID' }, { status: 400 });
-    if (userId === auth.user.id) {
-      return NextResponse.json({ success: false, error: '不能移除当前登录账号' }, { status: 400 });
-    }
     const client = await createClient();
-    const { data: membership } = await client
-      .from('enterprise_memberships')
-      .select('id')
-      .eq('tenant_id', auth.context.enterpriseId)
-      .eq('user_id', userId)
-      .maybeSingle();
-    if (!membership) return NextResponse.json({ success: false, error: '用户不存在' }, { status: 404 });
-    const { error } = await client
-      .from('enterprise_memberships')
-      .delete()
-      .eq('tenant_id', auth.context.enterpriseId)
-      .eq('id', membership.id);
+    const { error } = await client.rpc('remove_enterprise_member', {
+      target_enterprise_id: auth.context.enterpriseId,
+      target_user_id: userId,
+    });
+    if (error?.message === 'member_not_found') return NextResponse.json({ success: false, error: '用户不存在' }, { status: 404 });
+    if (error?.message === 'cannot_remove_self') return NextResponse.json({ success: false, error: '不能移除当前登录账号' }, { status: 409 });
+    if (error?.message === 'owner_protected') return NextResponse.json({ success: false, error: '只有企业所有者可以移除所有者账号' }, { status: 403 });
+    if (error?.message === 'last_owner_required') return NextResponse.json({ success: false, error: '企业必须保留至少一名启用的所有者' }, { status: 409 });
+    if (error?.message === 'permission_denied') return NextResponse.json({ success: false, error: '没有移除成员的权限' }, { status: 403 });
     if (error) return NextResponse.json({ success: false, error: '移除企业成员失败' }, { status: 500 });
     return NextResponse.json({ success: true });
   } catch (error) {

@@ -114,6 +114,44 @@ describe('worker progress API enterprise boundary', () => {
     }));
   });
 
+  it.each([
+    ['start', 'production.report.self'],
+    ['complete_cutting', 'production.report.self'],
+    ['complete_assembly', 'production.report.self'],
+    ['complete_painting', 'production.report.self'],
+    ['report_progress', 'production.report.self'],
+    ['report_defect', 'production.report.self'],
+    ['quality_check', 'production.review'],
+    ['warehouse_in', 'shipping.manage'],
+    ['pause', 'production.manage'],
+    ['resume', 'production.manage'],
+    ['abort', 'production.manage'],
+  ] as const)('%s requires the %s permission boundary', async (action, permission) => {
+    const rpc = vi.fn(async (functionName: string) => {
+      if (functionName === 'claim_api_idempotency') {
+        return { data: [{ outcome: 'claimed', response_status: null, response_body: null, claim_token: CLAIM_TOKEN }], error: null };
+      }
+      if (functionName === 'report_work_order_progress') {
+        return {
+          data: { work_order: { id: WORK_ORDER_ID, status: 'producing', completed_quantity: 0 }, log: { id: '66666666-6666-4666-8666-666666666666' } },
+          error: null,
+        };
+      }
+      return { data: [{ outcome: 'completed' }], error: null };
+    });
+    mocks.createClient.mockResolvedValue({ rpc });
+    const { POST } = await import('@/app/api/progress/report/route');
+
+    const response = await POST(new NextRequest('https://erp.example.com/api/progress/report', {
+      method: 'POST',
+      headers: { 'Idempotency-Key': `progress-${action}` },
+      body: JSON.stringify({ work_order_id: WORK_ORDER_ID, action, completed_delta: 0 }),
+    }));
+
+    expect(response.status).toBe(200);
+    expect(mocks.requirePermission).toHaveBeenCalledWith(expect.any(Object), permission);
+  });
+
   it('delegates a worker status change to the atomic RPC without accepting a worker identity from the request', async () => {
     const rpc = vi.fn(async (functionName: string) => {
       if (functionName === 'claim_api_idempotency') {

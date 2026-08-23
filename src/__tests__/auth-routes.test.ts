@@ -19,6 +19,7 @@ const mocks = vi.hoisted(() => {
     exchangeCodeForSession: vi.fn(),
     enforceRateLimit: vi.fn(),
     getClaims: vi.fn(),
+    rpc: vi.fn(),
     requestPasswordReset: vi.fn(),
     requireTrustedClientIp: vi.fn(),
     sendEmailVerification: vi.fn(),
@@ -60,7 +61,12 @@ vi.mock('@/lib/security/rate-limit', () => ({
 vi.mock('@/lib/supabase/server', () => ({
   createClient: vi.fn(async () => ({
     auth: { getClaims: mocks.getClaims },
+    rpc: mocks.rpc,
   })),
+}));
+
+vi.mock('@/lib/supabase/admin', () => ({
+  createAdminClient: vi.fn(() => ({ rpc: mocks.rpc })),
 }));
 
 beforeEach(() => {
@@ -71,9 +77,18 @@ beforeEach(() => {
     retryAfterSeconds: 0,
   });
   mocks.getClaims.mockReset().mockResolvedValue({
-    data: { claims: { sub: 'recovery-user-1' } },
+    data: {
+      claims: {
+        sub: 'recovery-user-1',
+      },
+    },
     error: null,
   });
+  mocks.rpc.mockReset().mockImplementation(async (name: string) => ({
+    data: name === 'consume_recovery_proof' || name === 'consume_recovery_flow' ? true : null,
+    error: null,
+  }));
+  process.env.SUPABASE_SECRET_KEY = 'test-only-secret-key-with-enough-entropy';
   mocks.requireTrustedClientIp.mockReset().mockReturnValue('192.0.2.10');
 });
 
@@ -330,7 +345,13 @@ describe('Auth API routes', () => {
       success: true,
       message: '如果该邮箱已注册，密码重置邮件已发送',
     });
-    expect(mocks.enforceRateLimit).toHaveBeenCalledWith({
+    expect(mocks.enforceRateLimit).toHaveBeenNthCalledWith(1, {
+      bucket: 'auth.forgot-password.ip',
+      identifier: '192.0.2.10',
+      limit: 20,
+      windowSeconds: 3600,
+    });
+    expect(mocks.enforceRateLimit).toHaveBeenNthCalledWith(2, {
       bucket: 'auth.forgot-password.account',
       identifier: 'owner@example.com',
       limit: 5,
@@ -338,12 +359,39 @@ describe('Auth API routes', () => {
     });
   });
 
-  it('updates the password only through the authenticated recovery session', async () => {
+  it('rejects password-reset email rotation at the trusted-client IP boundary', async () => {
+    mocks.enforceRateLimit.mockRejectedValueOnce(ApiError.rateLimited('RATE_LIMITED', '请求过于频繁', 60));
+    const { POST } = await import('@/app/api/auth/forgot-password/route');
+    const response = await POST(new NextRequest('https://erp.example.com/api/auth/forgot-password', {
+      method: 'POST', body: JSON.stringify({ email: 'random-address@example.com' }),
+    }));
+
+    expect(response.status).toBe(429);
+    expect(mocks.requestPasswordReset).not.toHaveBeenCalled();
+    expect(mocks.enforceRateLimit).toHaveBeenCalledOnce();
+  });
+
+  it('updates the password only with a one-time proof issued by the recovery callback', async () => {
     mocks.updatePassword.mockResolvedValue({ id: 'user-1' });
+    mocks.exchangeCodeForSession.mockResolvedValue({ email: 'owner@example.com', userId: 'recovery-user-1' });
+    const { issueRecoveryFlow } = await import('@/lib/auth/recovery-proof');
+    const flow = issueRecoveryFlow('owner@example.com');
+    const { GET } = await import('@/app/auth/confirm/route');
+    const confirmation = await GET(new NextRequest(
+      `https://erp.example.com/auth/confirm?code=recovery-code&type=recovery&next=%2Freset-password&flow=${encodeURIComponent(flow.token)}`,
+    ));
+    const proofCookie = confirmation.headers.get('set-cookie')?.match(/erp_recovery_proof=([^;]+)/)?.[1];
+    expect(proofCookie).toBeTruthy();
+    expect(mocks.rpc).toHaveBeenCalledWith('register_recovery_proof', expect.objectContaining({
+      target_nonce_hash: expect.any(String),
+      target_expires_at: expect.any(String),
+    }));
+
     const { POST } = await import('@/app/api/auth/reset-password/route');
     const response = await POST(
       new NextRequest('https://erp.example.com/api/auth/reset-password', {
         method: 'POST',
+        headers: { cookie: `erp_recovery_proof=${proofCookie}` },
         body: JSON.stringify({ password: 'new-secret12', confirmPassword: 'new-secret12' }),
       }),
     );
@@ -351,6 +399,11 @@ describe('Auth API routes', () => {
     expect(response.status).toBe(200);
     expect(mocks.getClaims).toHaveBeenCalledOnce();
     expect(mocks.updatePassword).toHaveBeenCalledWith('new-secret12');
+    expect(mocks.rpc).toHaveBeenCalledWith('consume_recovery_proof', expect.objectContaining({
+      target_nonce_hash: expect.any(String),
+    }));
+    expect(response.headers.get('set-cookie')).toContain('erp_recovery_proof=');
+    expect(response.headers.get('set-cookie')).toMatch(/Max-Age=0/i);
     expect(mocks.enforceRateLimit).toHaveBeenCalledWith({
       bucket: 'auth.reset-password.user',
       identifier: 'recovery-user-1',
@@ -359,14 +412,48 @@ describe('Auth API routes', () => {
     });
   });
 
+  it('rejects forged, replayed, expired, wrong-email and ordinary callback recovery flows', async () => {
+    const { issueRecoveryFlow } = await import('@/lib/auth/recovery-proof');
+    const { GET } = await import('@/app/auth/confirm/route');
+    mocks.exchangeCodeForSession.mockResolvedValue({ email: 'owner@example.com', userId: 'recovery-user-1' });
+    const valid = issueRecoveryFlow('owner@example.com').token;
+    const expired = issueRecoveryFlow('owner@example.com', Date.now() - 11 * 60 * 1000).token;
+    const wrongEmail = issueRecoveryFlow('someone@example.com').token;
+
+    for (const flow of ['forged.value', expired, wrongEmail]) {
+      const response = await GET(new NextRequest(
+        `https://erp.example.com/auth/confirm?code=ordinary-code&type=recovery&next=%2Freset-password&flow=${encodeURIComponent(flow)}`,
+      ));
+      expect(response.headers.get('location')).toContain('/auth/error?code=confirmation_failed');
+      expect(response.headers.get('set-cookie')).toBeNull();
+    }
+
+    mocks.rpc.mockImplementationOnce(async (name: string) => ({
+      data: name === 'consume_recovery_flow' ? false : null, error: null,
+    }));
+    const replay = await GET(new NextRequest(
+      `https://erp.example.com/auth/confirm?code=replayed-code&type=recovery&next=%2Freset-password&flow=${encodeURIComponent(valid)}`,
+    ));
+    expect(replay.headers.get('location')).toContain('/auth/error?code=confirmation_failed');
+    expect(replay.headers.get('set-cookie')).toBeNull();
+
+    const ordinary = await GET(new NextRequest(
+      'https://erp.example.com/auth/confirm?code=ordinary-code&type=recovery&next=%2Freset-password',
+    ));
+    expect(ordinary.headers.get('location')).toContain('/auth/error?code=confirmation_failed');
+  });
+
   it('does not update a password when the recovery-user limiter rejects', async () => {
     mocks.enforceRateLimit.mockRejectedValueOnce(
       ApiError.rateLimited('RATE_LIMITED', '请求过于频繁', 12),
     );
     const { POST } = await import('@/app/api/auth/reset-password/route');
+    const { issueRecoveryProof } = await import('@/lib/auth/recovery-proof');
+    const proof = issueRecoveryProof('recovery-user-1');
     const response = await POST(
       new NextRequest('https://erp.example.com/api/auth/reset-password', {
         method: 'POST',
+        headers: { cookie: `erp_recovery_proof=${proof.token}` },
         body: JSON.stringify({ password: 'new-secret12', confirmPassword: 'new-secret12' }),
       }),
     );
@@ -376,6 +463,7 @@ describe('Auth API routes', () => {
     expect(mocks.enforceRateLimit).toHaveBeenCalledWith(expect.objectContaining({
       identifier: 'recovery-user-1',
     }));
+    expect(mocks.rpc).not.toHaveBeenCalledWith('consume_recovery_proof', expect.anything());
     expect(JSON.stringify(mocks.enforceRateLimit.mock.calls)).not.toContain('new-secret12');
   });
 
@@ -399,6 +487,63 @@ describe('Auth API routes', () => {
       },
     });
     expect(mocks.enforceRateLimit).not.toHaveBeenCalled();
+    expect(mocks.updatePassword).not.toHaveBeenCalled();
+  });
+
+  it('rejects an ordinary password session before rate limiting password updates', async () => {
+    mocks.getClaims.mockResolvedValueOnce({
+      data: {
+        claims: {
+          sub: 'signed-in-user-1',
+          amr: [{ method: 'password', timestamp: 1_728_000_000 }],
+        },
+      },
+      error: null,
+    });
+    const { POST } = await import('@/app/api/auth/reset-password/route');
+    const response = await POST(
+      new NextRequest('https://erp.example.com/api/auth/reset-password', {
+        method: 'POST',
+        headers: { 'x-request-id': 'ordinary-session-rejected' },
+        body: JSON.stringify({ password: 'new-secret12', confirmPassword: 'new-secret12' }),
+      }),
+    );
+
+    expect(response.status).toBe(401);
+    await expect(response.json()).resolves.toMatchObject({
+      error: {
+        code: 'RECOVERY_SESSION_REQUIRED',
+        requestId: 'ordinary-session-rejected',
+      },
+    });
+    expect(mocks.enforceRateLimit).not.toHaveBeenCalled();
+    expect(mocks.updatePassword).not.toHaveBeenCalled();
+  });
+
+  it('rejects forged, expired, wrong-user and replayed recovery proofs before password update', async () => {
+    const { issueRecoveryProof } = await import('@/lib/auth/recovery-proof');
+    const { POST } = await import('@/app/api/auth/reset-password/route');
+    const body = JSON.stringify({ password: 'new-secret12', confirmPassword: 'new-secret12' });
+
+    const expired = issueRecoveryProof(
+      'recovery-user-1',
+      Date.now() - (11 * 60 * 1000),
+    ).token;
+    for (const cookie of ['forged.token.value', expired, issueRecoveryProof('another-user').token]) {
+      const response = await POST(new NextRequest('https://erp.example.com/api/auth/reset-password', {
+        method: 'POST', headers: { cookie: `erp_recovery_proof=${cookie}` }, body,
+      }));
+      expect(response.status).toBe(401);
+    }
+    expect(mocks.enforceRateLimit).not.toHaveBeenCalled();
+
+    const replayProof = issueRecoveryProof('recovery-user-1');
+    mocks.rpc.mockResolvedValueOnce({ data: false, error: null });
+    const replayResponse = await POST(new NextRequest('https://erp.example.com/api/auth/reset-password', {
+      method: 'POST', headers: { cookie: `erp_recovery_proof=${replayProof.token}` }, body,
+    }));
+    expect(replayResponse.status).toBe(401);
+    expect(mocks.enforceRateLimit).toHaveBeenCalledOnce();
     expect(mocks.updatePassword).not.toHaveBeenCalled();
   });
 
@@ -454,7 +599,7 @@ describe('Auth API routes', () => {
 
   it('uses Supabase OAuth and the PKCE confirmation callback', async () => {
     mocks.signInWithOAuth.mockResolvedValue('https://github.com/login/oauth/authorize');
-    mocks.exchangeCodeForSession.mockResolvedValue(undefined);
+    mocks.exchangeCodeForSession.mockResolvedValue({ email: 'oauth@example.com', userId: 'oauth-user-1' });
     const { GET: startOAuth } = await import('@/app/api/auth/oauth/[provider]/route');
     const startResponse = await startOAuth(
       new NextRequest('https://erp.example.com/api/auth/oauth/github?redirect=%2Forders'),
@@ -468,5 +613,6 @@ describe('Auth API routes', () => {
     );
     expect(mocks.exchangeCodeForSession).toHaveBeenCalledWith('pkce-code');
     expect(confirmResponse.headers.get('location')).toBe('https://erp.example.com/orders');
+    expect(confirmResponse.headers.get('set-cookie')).toBeNull();
   });
 });

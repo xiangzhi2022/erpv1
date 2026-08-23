@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { parseJson } from '@/lib/api/request';
 import { createClient } from '@/lib/supabase/server';
+import { getEnterpriseContext, requirePermission } from '@/lib/enterprise/context';
 
 const createJoinRequestSchema = z.object({
   enterprise_id: z.string().uuid().optional(),
@@ -24,15 +25,22 @@ export async function GET(request: Request) {
   try {
     const userId = await verifiedUserId();
     if (!userId) return jsonError('请先登录', 401);
-    const status = new URL(request.url).searchParams.get('status') ?? 'pending';
+    const searchParams = new URL(request.url).searchParams;
+    const status = searchParams.get('status') ?? 'pending';
+    if (!['pending', 'approved', 'rejected', 'cancelled', 'all'].includes(status)) {
+      return jsonError('申请状态不正确', 400);
+    }
+    let enterpriseId: string | null = null;
+    if (searchParams.get('scope') === 'enterprise') {
+      const context = await getEnterpriseContext();
+      requirePermission(context, 'members.manage');
+      enterpriseId = context.enterpriseId;
+    }
     const client = await createClient();
-    let query = client
-      .from('enterprise_join_requests')
-      .select('id,enterprise_id,user_id,status,requested_role_code,message,handled_by,handled_at,created_at,updated_at,enterprise:enterprises(id,name,enterprise_type,status)')
-      .eq('user_id', userId)
-      .order('created_at', { ascending: false });
-    if (status !== 'all') query = query.eq('status', status);
-    const { data, error } = await query;
+    const { data, error } = await client.rpc('list_enterprise_join_requests', {
+      target_enterprise_id: enterpriseId,
+      target_status: status,
+    });
     if (error) return jsonError('获取组织申请失败', 500);
     return Response.json({ success: true, data: data ?? [] });
   } catch (error) {
@@ -48,43 +56,20 @@ export async function POST(request: Request) {
     const body = await parseJson(request, createJoinRequestSchema);
     const enterpriseId = body.enterprise_id ?? body.tenant_id;
     if (!enterpriseId) return jsonError('请选择要加入的企业', 400);
+    const requestedRole = body.requested_role_code ?? body.role ?? 'worker';
+    if (!['worker', 'employee'].includes(requestedRole)) {
+      return jsonError('自助加入申请仅支持员工角色', 422);
+    }
     const client = await createClient();
-    const { data: membership } = await client
-      .from('enterprise_memberships')
-      .select('id,status')
-      .eq('tenant_id', enterpriseId)
-      .eq('user_id', userId)
-      .maybeSingle();
-    if (membership?.status === 'active') return jsonError('你已经是该企业成员', 409);
-
-    const requestedRoleCode = body.requested_role_code ?? body.role ?? 'worker';
-    const { data: existing, error: existingError } = await client
-      .from('enterprise_join_requests')
-      .select('id,status')
-      .eq('enterprise_id', enterpriseId)
-      .eq('user_id', userId)
-      .maybeSingle();
-    if (existingError) return jsonError('创建组织申请失败', 500);
-    if (existing?.status === 'pending') return jsonError('已有待处理申请，请勿重复提交', 409);
-
-    const values = {
-      enterprise_id: enterpriseId,
-      user_id: userId,
-      status: 'pending' as const,
-      requested_role_code: requestedRoleCode,
-      message: body.message ?? null,
-      handled_by: null,
-      handled_at: null,
-      updated_at: new Date().toISOString(),
-    };
-    const mutation = existing
-      ? client.from('enterprise_join_requests').update(values).eq('enterprise_id', enterpriseId).eq('id', existing.id)
-      : client.from('enterprise_join_requests').insert(values);
-    const { data, error } = await mutation
-      .select('id,enterprise_id,user_id,status,requested_role_code,message,handled_by,handled_at,created_at,updated_at')
-      .single();
+    const { data, error } = await client.rpc('create_enterprise_join_request', {
+      target_enterprise_id: enterpriseId,
+      target_message: body.message ?? null,
+    });
+    if (error?.message === 'already_active_member') return jsonError('你已经是该企业成员', 409);
+    if (error?.message === 'join_request_pending') return jsonError('已有待处理申请，请勿重复提交', 409);
+    if (error?.message === 'enterprise_not_found') return jsonError('企业不存在或不可加入', 404);
     if (error) return jsonError('创建组织申请失败', 500);
-    return Response.json({ success: true, data }, { status: existing ? 200 : 201 });
+    return Response.json({ success: true, data }, { status: 201 });
   } catch (error) {
     console.error('create enterprise join request failed:', error);
     return jsonError('创建组织申请失败', 500);

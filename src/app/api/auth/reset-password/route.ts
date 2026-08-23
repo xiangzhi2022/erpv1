@@ -6,6 +6,11 @@ import { authRouteError, authValidationError } from '@/lib/auth/route-response';
 import { ApiError } from '@/lib/api/errors';
 import { enforceRateLimit } from '@/lib/security/rate-limit';
 import { createClient } from '@/lib/supabase/server';
+import {
+  RECOVERY_PROOF_COOKIE,
+  recoveryProofCookieOptions,
+  verifyRecoveryProof,
+} from '@/lib/auth/recovery-proof';
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
   try {
@@ -15,8 +20,12 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     }
     const client = await createClient();
     const { data: claimsData, error: claimsError } = await client.auth.getClaims();
-    const recoveryUserId = claimsError ? null : claimsData?.claims?.sub;
-    if (!recoveryUserId) {
+    const claims = claimsError ? null : claimsData?.claims;
+    const recoveryUserId = claims && typeof claims.sub === 'string' ? claims.sub : null;
+    const proof = recoveryUserId
+      ? verifyRecoveryProof(request.cookies.get(RECOVERY_PROOF_COOKIE)?.value, recoveryUserId)
+      : null;
+    if (!recoveryUserId || !proof) {
       throw ApiError.unauthorized('RECOVERY_SESSION_REQUIRED', '请先完成密码恢复验证');
     }
     await enforceRateLimit({
@@ -25,8 +34,16 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       limit: 5,
       windowSeconds: 3600,
     });
+    const { data: consumed, error: consumeError } = await client.rpc('consume_recovery_proof', {
+      target_nonce_hash: proof.nonceHash,
+    });
+    if (consumeError || consumed !== true) {
+      throw ApiError.unauthorized('RECOVERY_SESSION_REQUIRED', '请先完成密码恢复验证');
+    }
     await (await createAuthService()).updatePassword(parsed.data.password);
-    return NextResponse.json({ success: true, message: '密码已更新' });
+    const response = NextResponse.json({ success: true, message: '密码已更新' });
+    response.cookies.set(RECOVERY_PROOF_COOKIE, '', { ...recoveryProofCookieOptions, maxAge: 0 });
+    return response;
   } catch (error) {
     return authRouteError(error, request);
   }

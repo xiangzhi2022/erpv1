@@ -12,6 +12,14 @@ const reportSchema = z.object({ work_order_id: z.string().uuid(), action: z.enum
 const reportResultSchema = z.object({ work_order: z.object({ id: z.string().uuid(), status: z.string(), completed_quantity: z.number() }), log: z.object({ id: z.string().uuid() }).passthrough().nullable() });
 interface RpcError { code?: string; message: string; }
 interface AtomicRpcClient { rpc(functionName: string, args: Record<string, unknown>): Promise<{ data: unknown; error: RpcError | null }>; }
+
+function permissionForAction(action: (typeof actions)[number]) {
+  if (action === 'quality_check') return 'production.review' as const;
+  if (action === 'warehouse_in') return 'shipping.manage' as const;
+  if (action === 'pause' || action === 'resume' || action === 'abort') return 'production.manage' as const;
+  return 'production.report.self' as const;
+}
+
 function errorResponse(error: unknown) {
   if (isEnterpriseAccessError(error) || isApiError(error)) return NextResponse.json({ success: false, error: error.message }, { status: error.status });
   console.error('progress_report.request_failed', { error });
@@ -27,8 +35,8 @@ function rpcErrorResponse(error: RpcError) {
 export async function POST(request: Request) {
   try {
     const context = await getEnterpriseContext();
-    requirePermission(context, 'production.report.self');
     const input = await parseJson(request, reportSchema);
+    requirePermission(context, permissionForAction(input.action));
     const supabase = await createClient();
     const rpc = (functionName: string, args: Record<string, unknown>) => (supabase as unknown as AtomicRpcClient).rpc(functionName, args);
     return await executeIdempotentMutation({

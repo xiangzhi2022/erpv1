@@ -5,8 +5,10 @@ const ORDER_ID = '22222222-2222-4222-8222-222222222222';
 
 const mocks = vi.hoisted(() => ({
   getEnterpriseContext: vi.fn(),
+  hasEnterprisePermission: vi.fn(),
   requirePermission: vi.fn(),
   from: vi.fn(),
+  rpc: vi.fn(),
   queries: [] as Array<{
     table: string;
     filters: Array<[string, unknown]>;
@@ -17,11 +19,12 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock('@/lib/enterprise/context', () => ({
   getEnterpriseContext: mocks.getEnterpriseContext,
+  hasEnterprisePermission: mocks.hasEnterprisePermission,
   requirePermission: mocks.requirePermission,
 }));
 
 vi.mock('@/lib/supabase/server', () => ({
-  createClient: vi.fn(async () => ({ from: mocks.from })),
+  createClient: vi.fn(async () => ({ from: mocks.from, rpc: mocks.rpc })),
 }));
 
 function responseFor(table: string, operation: string) {
@@ -118,6 +121,11 @@ beforeEach(() => {
   vi.resetModules();
   vi.clearAllMocks();
   mocks.requirePermission.mockReset();
+  mocks.hasEnterprisePermission.mockImplementation((context: { grants: Set<string> }, permission: string) => (
+    context.grants.has(permission)
+  ));
+  mocks.rpc.mockReset();
+  mocks.rpc.mockResolvedValue({ data: [{ id: ORDER_ID, status: 'confirmed' }], error: null });
   mocks.queries.length = 0;
   mocks.getEnterpriseContext.mockResolvedValue({
     enterpriseId: ENTERPRISE_ID,
@@ -196,12 +204,9 @@ describe('order detail API', () => {
   it('uses enterprise-scoped writes and returns a safe update error', async () => {
     mocks.from.mockImplementation((table: string) => {
       const query = createQuery(table);
-      if (table === 'orders') query.single.mockResolvedValue({
-        data: null,
-        error: { message: 'relation orders does not exist' },
-      });
       return query;
     });
+    mocks.rpc.mockResolvedValue({ data: null, error: { code: 'XX000' } });
     const { PATCH } = await import('@/app/api/orders/[id]/route');
     const response = await PATCH(new Request(`https://erp.example.com/api/orders/${ORDER_ID}`, {
       method: 'PATCH',
@@ -211,5 +216,73 @@ describe('order detail API', () => {
     expect(response.status).toBe(500);
     await expect(response.json()).resolves.toEqual({ success: false, error: '更新订单失败' });
     expectEnterpriseScope('orders');
+    expect(mocks.rpc).toHaveBeenCalledWith('transition_order_status_with_exchanges', {
+      target_enterprise_id: ENTERPRISE_ID,
+      target_order_id: ORDER_ID,
+      target_expected_status: 'pending',
+      target_status: 'confirmed',
+      target_remark: null,
+    });
+  });
+
+  it('uses one atomic RPC for the order status and exchange side effects', async () => {
+    const { PATCH } = await import('@/app/api/orders/[id]/route');
+    const response = await PATCH(new Request(`https://erp.example.com/api/orders/${ORDER_ID}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ status: 'accepted' }),
+    }), params());
+
+    expect(response.status).toBe(200);
+    expect(mocks.rpc).toHaveBeenCalledWith('transition_order_status_with_exchanges', {
+      target_enterprise_id: ENTERPRISE_ID,
+      target_order_id: ORDER_ID,
+      target_expected_status: 'pending',
+      target_status: 'accepted',
+      target_remark: null,
+    });
+    expect(mocks.rpc).not.toHaveBeenCalledWith('transition_order_exchange', expect.anything());
+  });
+
+  it('routes internal remarks through the finance-only RPC', async () => {
+    mocks.getEnterpriseContext.mockResolvedValue({
+      enterpriseId: ENTERPRISE_ID,
+      enterpriseType: 'manufacturer',
+      userId: 'user-1',
+      grants: new Set(['orders.read', 'orders.update', 'finance.manage']),
+    });
+    const { PATCH } = await import('@/app/api/orders/[id]/route');
+    const response = await PATCH(new Request(`https://erp.example.com/api/orders/${ORDER_ID}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ internal_remark: '内部核价说明' }),
+    }), params());
+
+    expect(response.status).toBe(200);
+    expect(mocks.rpc).toHaveBeenCalledWith('update_order_internal_remark', {
+      target_enterprise_id: ENTERPRISE_ID,
+      target_order_id: ORDER_ID,
+      target_internal_remark: '内部核价说明',
+    });
+    const directOrderWrites = mocks.queries
+      .filter((query) => query.table === 'orders')
+      .flatMap((query) => query.updates);
+    expect(directOrderWrites).toEqual([]);
+  });
+
+  it('rejects mixed direct and sensitive updates before either can partially commit', async () => {
+    mocks.getEnterpriseContext.mockResolvedValue({
+      enterpriseId: ENTERPRISE_ID,
+      enterpriseType: 'manufacturer',
+      userId: 'user-1',
+      grants: new Set(['orders.read', 'orders.update', 'finance.manage']),
+    });
+    const { PATCH } = await import('@/app/api/orders/[id]/route');
+    const response = await PATCH(new Request(`https://erp.example.com/api/orders/${ORDER_ID}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ customer_name: '新客户', cost_amount: 500 }),
+    }), params());
+
+    expect(response.status).toBe(422);
+    expect(mocks.rpc).not.toHaveBeenCalled();
+    expect(mocks.queries).toEqual([]);
   });
 });

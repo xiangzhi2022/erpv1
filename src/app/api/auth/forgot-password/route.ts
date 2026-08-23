@@ -3,12 +3,18 @@ import { NextRequest, NextResponse } from 'next/server';
 import { forgotPasswordSchema } from '@/lib/auth/schemas';
 import { createAuthService, getApplicationUrl } from '@/lib/auth/service';
 import { authRouteError, authValidationError } from '@/lib/auth/route-response';
-import { enforceRateLimit } from '@/lib/security/rate-limit';
+import { enforceRateLimit, requireTrustedClientIp } from '@/lib/security/rate-limit';
 
 const GENERIC_MESSAGE = '如果该邮箱已注册，密码重置邮件已发送';
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
   try {
+    await enforceRateLimit({
+      bucket: 'auth.forgot-password.ip',
+      identifier: requireTrustedClientIp(request),
+      limit: 20,
+      windowSeconds: 3600,
+    });
     const parsed = forgotPasswordSchema.safeParse(await parseJsonObject(request));
     if (!parsed.success) {
       return authValidationError(parsed.error.issues[0]?.message || '邮箱格式不正确');

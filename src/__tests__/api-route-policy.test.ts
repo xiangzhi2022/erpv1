@@ -105,7 +105,14 @@ describe('API route policy manifest', () => {
     expect(getApiRoutePolicy('/api/production/tasks/task-id/rework', 'PATCH')).toMatchObject({ permission: 'production.review' });
     expect(getApiRoutePolicy('/api/production/tasks/task-id/start', 'PATCH')).toMatchObject({ permission: 'production.report.self' });
     expect(getApiRoutePolicy('/api/production/tasks/task-id/submit', 'PATCH')).toMatchObject({ permission: 'production.report.self' });
-    expect(getApiRoutePolicy('/api/progress/report', 'POST')).toMatchObject({ permission: 'production.report.self' });
+    expect(getApiRoutePolicy('/api/progress/report', 'POST')).toMatchObject({
+      permissions: [
+        'production.report.self',
+        'production.review',
+        'shipping.manage',
+        'production.manage',
+      ],
+    });
     expect(getApiRoutePolicy('/api/worker/report', 'POST')).toMatchObject({ permission: 'production.report.self' });
     expect(getApiRoutePolicy('/api/worker/me/wages', 'GET')).toMatchObject({ permission: 'wages.read.self' });
     expect(getApiRoutePolicy('/api/workers/worker-id/wages', 'GET')).toMatchObject({ permission: 'wages.read.all' });

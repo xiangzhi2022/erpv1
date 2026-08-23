@@ -77,8 +77,9 @@ describe('cross-enterprise access boundary', () => {
     expect(parsedOrder).not.toHaveProperty('enterprise_id');
 
     const basicOrderRoute = source('src/app/api/orders/basic/route.ts');
-    expect(basicOrderRoute).toMatch(/enterprise_id:\s*context\.enterpriseId/);
-    expect(basicOrderRoute).toMatch(/\.eq\('enterprise_id',\s*context\.enterpriseId\)/);
+    expect(basicOrderRoute).toContain("rpc('create_basic_order'");
+    expect(basicOrderRoute).toMatch(/target_enterprise_id:\s*context\.enterpriseId/);
+    expect(basicOrderRoute).not.toMatch(/\.from\('orders'\)[\s\S]{0,100}\.insert\(/);
   });
 
   it('scopes direct-ID and list access to the authoritative enterprise', () => {

@@ -49,6 +49,25 @@ export async function PATCH(
       || input.profit_amount !== undefined
       || input.internal_remark !== undefined;
     if (financialUpdate) requirePermission(context, 'finance.manage');
+    const {
+      quoted_amount: quotedAmount,
+      cost_amount: costAmount,
+      profit_amount: profitAmount,
+      internal_remark: internalRemark,
+      status: requestedStatus,
+      ...directInput
+    } = input;
+    const updateCategoryCount = [
+      financialUpdate,
+      Object.keys(directInput).length > 0,
+      requestedStatus !== undefined,
+    ].filter(Boolean).length;
+    if (updateCategoryCount > 1) {
+      return Response.json(
+        { success: false, error: '财务、状态和基础字段请分别提交' },
+        { status: 422 },
+      );
+    }
     const supabase = await createClient();
     const { data: existing, error: existingError } = await supabase.from('order_products')
       .select('id,status')
@@ -57,26 +76,55 @@ export async function PATCH(
       .maybeSingle();
     if (existingError) return Response.json({ success: false, error: '查询产品失败' }, { status: 500 });
     if (!existing) return Response.json({ success: false, error: '产品不存在' }, { status: 404 });
-    const { data, error } = await supabase.from('order_products')
-      .update({ ...input, updated_at: new Date().toISOString() })
-      .eq('enterprise_id', context.enterpriseId)
-      .eq('id', id)
-      .select('id,order_id,space_id,product_no,product_name,product_type,product_model,width,height,depth,area,quantity,material,color,status,sort_order,remark,updated_at')
-      .maybeSingle();
-    if (error) return Response.json({ success: false, error: '更新产品失败' }, { status: 500 });
-    if (!data) return Response.json({ success: false, error: '产品不存在' }, { status: 404 });
-    if (input.status && input.status !== existing.status) {
-      const { error: logError } = await supabase.from('order_status_logs').insert({
-        enterprise_id: context.enterpriseId,
+    if (financialUpdate) {
+      const { error } = await supabase.rpc('finance_update_order_product' as never, {
+        target_enterprise_id: context.enterpriseId,
+        target_product_id: id,
+        target_quoted_amount: quotedAmount ?? null,
+        target_cost_amount: costAmount ?? null,
+        target_profit_amount: profitAmount ?? null,
+        target_internal_remark: internalRemark ?? null,
+        update_internal_remark: input.internal_remark !== undefined,
+      } as never);
+      if (error) {
+        return Response.json(
+          { success: false, error: '更新产品财务字段失败' },
+          { status: error.code === '42501' ? 403 : error.code === 'P0002' ? 404 : 500 },
+        );
+      }
+    }
+    if (Object.keys(directInput).length > 0) {
+      const { error } = await supabase.rpc('update_order_component_fields' as never, {
+        target_enterprise_id: context.enterpriseId,
         target_type: 'product',
         target_id: id,
-        from_status: existing.status,
-        to_status: input.status,
-        changed_by: context.userId,
-        remark: '更新产品状态',
-      });
-      if (logError) console.error('order_product.status_log_failed', { code: logError.code });
+        target_fields: directInput,
+      } as never);
+      if (error) return Response.json({ success: false, error: '更新产品失败' }, { status: error.code === 'P0001' ? 409 : error.code === '42501' ? 403 : error.code === 'P0002' ? 404 : error.code === '22023' ? 422 : 500 });
     }
+    if (requestedStatus && requestedStatus !== existing.status) {
+      const { error } = await supabase.rpc('transition_order_component_status' as never, {
+        target_enterprise_id: context.enterpriseId,
+        target_type: 'product',
+        target_id: id,
+        target_expected_status: existing.status,
+        target_status: requestedStatus,
+        target_remark: '更新产品状态',
+      } as never);
+      if (error) {
+        return Response.json(
+          { success: false, error: error.code === 'P0001' ? '产品状态已变化' : '更新产品状态失败' },
+          { status: error.code === 'P0001' ? 409 : error.code === '42501' ? 403 : error.code === 'P0002' ? 404 : error.code === '22023' ? 422 : 500 },
+        );
+      }
+    }
+    const { data, error } = await supabase.from('order_products')
+      .select('id,order_id,space_id,product_no,product_name,product_type,product_model,width,height,depth,area,quantity,material,color,status,sort_order,remark,updated_at')
+      .eq('enterprise_id', context.enterpriseId)
+      .eq('id', id)
+      .maybeSingle();
+    if (error) return Response.json({ success: false, error: '查询产品失败' }, { status: 500 });
+    if (!data) return Response.json({ success: false, error: '产品不存在' }, { status: 404 });
     return Response.json({ success: true, data });
   } catch (error) {
     return errorResponse(error, '更新产品失败');
@@ -92,14 +140,24 @@ export async function DELETE(
     requirePermission(context, 'orders.update');
     const { id } = await parseParams(params, paramsSchema);
     const supabase = await createClient();
-    const { data, error } = await supabase.from('order_products')
-      .delete()
-      .eq('enterprise_id', context.enterpriseId)
-      .eq('id', id)
-      .select('id')
-      .maybeSingle();
-    if (error) return Response.json({ success: false, error: '删除产品失败' }, { status: 500 });
-    if (!data) return Response.json({ success: false, error: '产品不存在' }, { status: 404 });
+    const { error } = await supabase.rpc('delete_order_component' as never, {
+      target_enterprise_id: context.enterpriseId,
+      target_type: 'product',
+      target_id: id,
+    } as never);
+    if (error) {
+      return Response.json(
+        {
+          success: false,
+          error: error.code === 'P0001'
+            ? '当前订单状态或关联生产数据不允许删除产品'
+            : '删除产品失败',
+        },
+        {
+          status: error.code === 'P0001' ? 409 : error.code === '42501' ? 403 : error.code === 'P0002' ? 404 : error.code === '22023' ? 422 : 500,
+        },
+      );
+    }
     return Response.json({ success: true });
   } catch (error) {
     return errorResponse(error, '删除产品失败');

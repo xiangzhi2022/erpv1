@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { toast } from 'sonner';
-import { BriefcaseBusiness, Check, ClipboardList, Edit, MoreHorizontal, Plus, RefreshCw, Search, Send, ShieldCheck, Trash2, UserCheck, UserPlus, Users, UserX, X } from 'lucide-react';
+import { BriefcaseBusiness, Check, ClipboardList, Edit, MoreHorizontal, Plus, RefreshCw, Search, ShieldCheck, Trash2, UserCheck, UserPlus, Users, UserX, X } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -96,8 +96,6 @@ interface EmployeeForm {
   leave_date: string;
   base_salary: string;
   remark: string;
-  password: string;
-  create_account: boolean;
 }
 
 interface OrgRequestRow {
@@ -129,8 +127,6 @@ const EMPTY_FORM: EmployeeForm = {
   leave_date: '',
   base_salary: '0',
   remark: '',
-  password: '',
-  create_account: false,
 };
 
 const employeeTypeLabel: Record<string, string> = {
@@ -143,8 +139,7 @@ const employeeTypeLabel: Record<string, string> = {
 const statusLabel: Record<string, string> = {
   active: '在职',
   inactive: '停用',
-  probation: '试用',
-  resigned: '离职',
+  departed: '离职',
 };
 
 function normalizeSelectValue(value?: string | null) {
@@ -171,8 +166,6 @@ function employeeToForm(employee: EmployeeRow): EmployeeForm {
     leave_date: employee.leave_date || '',
     base_salary: employee.base_salary === null || employee.base_salary === undefined ? '0' : String(employee.base_salary),
     remark: employee.remark || '',
-    password: '',
-    create_account: Boolean(employee.user_id),
   };
 }
 
@@ -209,7 +202,6 @@ export function EmployeeManagementClient({ view = 'overview' }: EmployeeManageme
   const [roleIds, setRoleIds] = useState<Set<string>>(new Set());
   const [deleteTarget, setDeleteTarget] = useState<EmployeeRow | null>(null);
   const [orgRequests, setOrgRequests] = useState<OrgRequestRow[]>([]);
-  const [inviteForm, setInviteForm] = useState({ phone: '', name: '', employee_no: '', role: 'employee', department: '', message: '' });
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -224,7 +216,7 @@ export function EmployeeManagementClient({ view = 'overview' }: EmployeeManageme
         fetch('/api/departments'),
         fetch('/api/positions'),
         fetch('/api/roles'),
-        fetch('/api/organization-requests?status=pending'),
+        fetch('/api/organization-requests?scope=enterprise&status=pending'),
       ]);
       const [employeeJson, departmentJson, positionJson, roleJson, requestJson] = await Promise.all([
         employeeRes.json(),
@@ -281,8 +273,6 @@ export function EmployeeManagementClient({ view = 'overview' }: EmployeeManageme
     primary_position_id: form.primary_position_id === 'none' ? null : form.primary_position_id,
     position_ids: form.primary_position_id === 'none' ? [] : [form.primary_position_id],
     role_ids: Array.from(roleIds),
-    create_account: form.create_account,
-    password: form.password || undefined,
     base_salary: Number(form.base_salary || 0),
   });
 
@@ -338,31 +328,6 @@ export function EmployeeManagementClient({ view = 'overview' }: EmployeeManageme
       }
       toast.success('员工已删除');
       setDeleteTarget(null);
-      await load();
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const inviteEmployee = async () => {
-    if (!/^1[3-9]\d{9}$/.test(inviteForm.phone)) {
-      toast.error('请输入正确的员工手机号');
-      return;
-    }
-    setSaving(true);
-    try {
-      const res = await fetch('/api/organization-requests', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ request_type: 'org_invite', ...inviteForm }),
-      });
-      const json = await res.json();
-      if (!json.success) {
-        toast.error(json.error || '邀请发送失败');
-        return;
-      }
-      toast.success('邀请已发送');
-      setInviteForm({ phone: '', name: '', employee_no: '', role: 'employee', department: '', message: '' });
       await load();
     } finally {
       setSaving(false);
@@ -478,9 +443,8 @@ export function EmployeeManagementClient({ view = 'overview' }: EmployeeManageme
             <SelectContent>
               <SelectItem value="all">全部状态</SelectItem>
               <SelectItem value="active">在职</SelectItem>
-              <SelectItem value="probation">试用</SelectItem>
               <SelectItem value="inactive">停用</SelectItem>
-              <SelectItem value="resigned">离职</SelectItem>
+              <SelectItem value="departed">离职</SelectItem>
             </SelectContent>
           </Select>
           <Select value={departmentId} onValueChange={setDepartmentId}>
@@ -528,24 +492,8 @@ export function EmployeeManagementClient({ view = 'overview' }: EmployeeManageme
           </CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
-          <div className="grid gap-3 lg:grid-cols-[160px_160px_140px_150px_1fr_auto]">
-            <Input value={inviteForm.phone} onChange={(event) => setInviteForm({ ...inviteForm, phone: event.target.value })} placeholder="员工手机号" />
-            <Input value={inviteForm.name} onChange={(event) => setInviteForm({ ...inviteForm, name: event.target.value })} placeholder="姓名" />
-            <Input value={inviteForm.employee_no} onChange={(event) => setInviteForm({ ...inviteForm, employee_no: event.target.value })} placeholder="工号" />
-            <Select value={inviteForm.role} onValueChange={(value) => setInviteForm({ ...inviteForm, role: value })}>
-              <SelectTrigger><SelectValue /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="employee">员工</SelectItem>
-                <SelectItem value="factory_admin">工厂管理员</SelectItem>
-                <SelectItem value="dealer_admin">经销商管理员</SelectItem>
-                <SelectItem value="supplier_admin">供应商管理员</SelectItem>
-              </SelectContent>
-            </Select>
-            <Input value={inviteForm.message} onChange={(event) => setInviteForm({ ...inviteForm, message: event.target.value })} placeholder="邀请说明" />
-            <Button onClick={inviteEmployee} disabled={saving}>
-              <Send className="size-4" />
-              发起邀请
-            </Button>
+          <div className="rounded-md border bg-muted/30 p-4 text-sm text-muted-foreground">
+            为防止手机号抢注和跨企业账号接管，请让员工自行注册，在“加入企业”入口填写企业 ID 并提交申请；管理员仅在此审批。
           </div>
 
           <div className="rounded-md border">
@@ -754,7 +702,7 @@ export function EmployeeManagementClient({ view = 'overview' }: EmployeeManageme
         <DialogContent className="max-h-[92vh] overflow-y-auto sm:max-w-[860px]">
           <DialogHeader>
             <DialogTitle>{isEditing ? '编辑员工' : '新增员工'}</DialogTitle>
-            <DialogDescription>员工档案会写入 Supabase；勾选角色后会同步到员工角色关系，绑定账号后会同步登录权限。</DialogDescription>
+            <DialogDescription>员工档案会写入 Supabase。登录账号只能绑定已注册且已通过当前企业加入审批的成员。</DialogDescription>
           </DialogHeader>
 
           <div className="grid gap-4 md:grid-cols-2">
@@ -826,17 +774,10 @@ export function EmployeeManagementClient({ view = 'overview' }: EmployeeManageme
             </div>
             <div className="space-y-2">
               <Label>登录账号</Label>
-              <label className="flex h-10 items-center gap-2 rounded-md border px-3 text-sm">
-                <Checkbox checked={form.create_account} onCheckedChange={(checked) => setForm({ ...form, create_account: checked === true })} />
-                同步开通/绑定登录账号
-              </label>
-            </div>
-            {form.create_account && !form.user_id ? (
-              <div className="space-y-2 md:col-span-2">
-                <Label>初始密码</Label>
-                <Input value={form.password} onChange={(event) => setForm({ ...form, password: event.target.value })} placeholder="留空则默认使用手机号后 6 位" />
+              <div className="flex h-10 items-center rounded-md border bg-muted/30 px-3 text-sm text-muted-foreground">
+                {form.user_id ? '已绑定企业成员账号' : '请先让用户注册并提交加入申请'}
               </div>
-            ) : null}
+            </div>
             <div className="space-y-2 md:col-span-2">
               <Label>备注</Label>
               <Textarea value={form.remark} onChange={(event) => setForm({ ...form, remark: event.target.value })} placeholder="员工技能、排班说明、账号备注等" />

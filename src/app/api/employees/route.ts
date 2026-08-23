@@ -1,13 +1,15 @@
 import { parseJsonObject } from '@/lib/api/request';
-import { getEnterpriseContext, requirePermission } from '@/lib/enterprise/context';
+import { getEnterpriseContext, hasEnterprisePermission, requirePermission } from '@/lib/enterprise/context';
 import { createClient } from '@/lib/supabase/server';
 import {
   createOrReuseEmployeeLoginUser,
-  replaceEmployeeRelations,
+  EmployeeIdentityConflict,
+  ensureEmployeeRoleRows,
   stringArray,
-  syncEmployeeRoleBindings,
   text,
 } from '@/lib/employee-management';
+
+const EMPLOYEE_LIST_COLUMNS = 'id,enterprise_id,user_id,employee_no,name,phone,email,avatar_url,department_id,primary_position_id,employee_type,status,hire_date,leave_date,remark,created_at,updated_at,department:departments(id,name,code),primary_position:positions(id,name,code,position_type,can_receive_production_task,can_calculate_piece_wage,can_review_task,can_assign_task)';
 
 function jsonError(error: string, status: number) {
   return Response.json({ success: false, error }, { status });
@@ -25,7 +27,7 @@ export async function GET(request: Request) {
     const positionId = searchParams.get('position_id');
     let query = supabase
       .from('employees')
-      .select('*, department:departments(id,name,code), primary_position:positions(id,name,code,position_type,can_receive_production_task,can_calculate_piece_wage,can_review_task,can_assign_task)')
+      .select(EMPLOYEE_LIST_COLUMNS)
       .eq('enterprise_id', context.enterpriseId)
       .order('created_at', { ascending: false });
     if (status && status !== 'all') query = query.eq('status', status);
@@ -35,7 +37,18 @@ export async function GET(request: Request) {
     const { data, error } = await query;
     if (error) return jsonError('获取员工失败', 500);
 
-    const rows = data || [];
+    const salaryRes = hasEnterprisePermission(context, 'wages.read.all')
+      ? await supabase.rpc('wages_read_employee_base_salaries', { target_enterprise_id: context.enterpriseId })
+      : { data: [], error: null };
+    if (salaryRes.error) return jsonError('获取员工薪资失败', 500);
+    const salaryRows = Array.isArray(salaryRes.data)
+      ? salaryRes.data as unknown as Array<{ id: string; base_salary: number }>
+      : [];
+    const salaries = new Map(salaryRows.map((row) => [row.id, row.base_salary]));
+    const rows = (data || []).map((row) => ({
+      ...row,
+      ...(salaries.has(row.id) ? { base_salary: salaries.get(row.id) } : {}),
+    }));
     const employeeIds = rows.map((row) => row.id).filter(Boolean);
     const [positionsRes, rolesRes] = await Promise.all([
       employeeIds.length
@@ -84,36 +97,46 @@ export async function POST(request: Request) {
     const userId = await createOrReuseEmployeeLoginUser(body, context);
 
     const supabase = await createClient();
-    const { data, error } = await supabase
-      .from('employees')
-      .insert({
-        user_id: userId,
+    const roles = await ensureEmployeeRoleRows(roleIds, context);
+    const { data, error } = await supabase.rpc('save_employee_with_relations', {
+      target_employee_id: null,
+      target_enterprise_id: context.enterpriseId,
+      target_fields: {
         employee_no: employeeNo,
         name,
         phone: text(body.phone),
         email: text(body.email),
         avatar_url: text(body.avatar_url),
         department_id: text(body.department_id),
-        primary_position_id: primaryPositionId,
         employee_type: text(body.employee_type) || 'full_time',
-        status: text(body.status) || 'active',
+        status: text(body.status) === 'resigned'
+          ? 'departed'
+          : text(body.status) === 'probation' ? 'active' : text(body.status) || 'active',
         hire_date: text(body.hire_date),
         leave_date: text(body.leave_date),
         base_salary: typeof body.base_salary === 'number' ? body.base_salary : Number(body.base_salary || 0),
-        enterprise_id: context.enterpriseId,
         remark: text(body.remark),
-      })
-      .select()
-      .single();
+      },
+      target_position_ids: positionIds,
+      target_primary_position_id: primaryPositionId,
+      target_role_ids: roles.map((role) => role.id),
+      target_user_id: userId,
+    });
+    if (error?.message === 'permission_denied') return jsonError('没有创建员工或分配角色的权限', 403);
+    if (error?.message === 'wage_permission_denied') return jsonError('没有设置员工底薪的权限', 403);
+    if (error?.message === 'role_not_assignable' || error?.message === 'owner_protected') return jsonError('不能分配超出当前账号权限范围的角色', 403);
     if (error) return jsonError('创建员工失败', 500);
-
-    const employeeId = String(data.id);
-    const roles = await replaceEmployeeRelations(employeeId, roleIds, positionIds, primaryPositionId, context);
-    await syncEmployeeRoleBindings(userId, roles, context);
-
-    return Response.json({ success: true, data: { ...data, role_ids: roles.map((role) => role.id) } });
+    const responseData = data && typeof data === 'object' && !Array.isArray(data)
+      ? { ...(data as Record<string, unknown>) }
+      : data;
+    if (responseData && typeof responseData === 'object'
+      && !hasEnterprisePermission(context, 'wages.read.all')) {
+      delete (responseData as Record<string, unknown>).base_salary;
+    }
+    return Response.json({ success: true, data: responseData });
   } catch (error) {
     console.error('create employee failed:', error);
-    return jsonError(error instanceof Error ? error.message : '创建员工失败', 500);
+    if (error instanceof EmployeeIdentityConflict) return jsonError(error.message, error.status);
+    return jsonError('创建员工失败', 500);
   }
 }

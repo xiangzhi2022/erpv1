@@ -1,7 +1,6 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { z } from 'zod';
 import { parseJson } from '@/lib/api/request';
-import type { Database } from '@/db/database.types';
 import { getEnterpriseContext, requirePermission } from '@/lib/enterprise/context';
 import { createClient } from '@/lib/supabase/server';
 
@@ -29,68 +28,67 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ success: false, error: '无权限创建该类型订单' }, { status: 403 });
     }
     const supabase = await createClient();
-    let duplicateQuery = supabase.from('orders').select('id')
-      .eq('enterprise_id', context.enterpriseId)
-      .eq('order_no', input.order_no);
-    if (input.existing_order_id) duplicateQuery = duplicateQuery.neq('id', input.existing_order_id);
-    const { data: duplicate, error: duplicateError } = await duplicateQuery.maybeSingle();
-    if (duplicateError) {
-      return NextResponse.json({ success: false, error: '检查订单号失败' }, { status: 500 });
-    }
-    if (duplicate) {
-      return NextResponse.json({ success: false, error: '订单号已存在，请重新生成' }, { status: 409 });
-    }
-
-    const payload: Database['public']['Tables']['orders']['Insert'] = {
-      enterprise_id: context.enterpriseId,
+    const basicOrderPayload = {
       order_no: input.order_no,
       customer_name: input.customer_name,
       customer_phone: input.customer_phone || null,
       customer_address: input.customer_address || null,
-      status: 'pending',
-      total_amount: 0,
       delivery_date: input.delivery_date || null,
       remark: input.remark || null,
-      dealer_id: input.order_flow === 'dealer_to_factory' ? context.enterpriseId : null,
       order_flow: input.order_flow,
-      from_enterprise_id: context.enterpriseId,
-      to_enterprise_id: null,
-      target_factory_id: null,
       parent_order_id: input.parent_order_id || null,
-      created_by: context.userId,
     };
 
     if (input.existing_order_id) {
-      const basicOrderUpdatePayload = {
-        order_no: payload.order_no,
-        customer_name: payload.customer_name,
-        customer_phone: payload.customer_phone,
-        customer_address: payload.customer_address,
-        status: payload.status,
-        delivery_date: payload.delivery_date,
-        remark: payload.remark,
-        dealer_id: payload.dealer_id,
-        order_flow: payload.order_flow,
-        from_enterprise_id: payload.from_enterprise_id,
-        to_enterprise_id: payload.to_enterprise_id,
-        target_factory_id: payload.target_factory_id,
-        parent_order_id: payload.parent_order_id,
-      };
-      const { data, error } = await supabase
-        .from('orders')
-        .update(basicOrderUpdatePayload)
-        .eq('enterprise_id', context.enterpriseId)
-        .eq('id', input.existing_order_id)
-        .select()
-        .maybeSingle();
-      if (error) return NextResponse.json({ success: false, error: '保存订单失败' }, { status: 500 });
+      const basicOrderUpdatePayload = basicOrderPayload;
+      const { data, error } = await supabase.rpc('update_basic_order', {
+        target_enterprise_id: context.enterpriseId,
+        target_order_id: input.existing_order_id,
+        target_order: basicOrderUpdatePayload,
+      });
+      if (error) {
+        const status = error.code === 'P0002'
+          ? 404
+          : error.code === 'P0001' || error.code === '23505'
+            ? 409
+            : error.code === '42501'
+              ? 403
+              : error.code === '22023'
+                ? 422
+                : 500;
+        const message = error.code === 'P0002'
+          ? '订单不存在'
+          : error.code === 'P0001'
+            ? '订单状态已变化'
+            : error.code === '23505'
+              ? '订单号已存在，请重新生成'
+              : '保存订单失败';
+        return NextResponse.json({ success: false, error: message }, { status });
+      }
       if (!data) return NextResponse.json({ success: false, error: '订单不存在' }, { status: 404 });
       return NextResponse.json({ success: true, data });
     }
 
-    const { data, error } = await supabase.from('orders').insert(payload).select().single();
+    const { data, error } = await supabase.rpc('create_basic_order', {
+      target_enterprise_id: context.enterpriseId,
+      target_order: basicOrderPayload,
+    });
     if (error || !data) {
-      return NextResponse.json({ success: false, error: '保存订单失败' }, { status: 500 });
+      const status = error?.code === '23505'
+        ? 409
+        : error?.code === '42501'
+          ? 403
+          : error?.code === 'P0002'
+            ? 404
+            : error?.code === '22023'
+              ? 422
+              : 500;
+      const message = error?.code === '23505'
+        ? '订单号已存在，请重新生成'
+        : error?.code === 'P0002'
+          ? '关联订单不存在'
+          : '保存订单失败';
+      return NextResponse.json({ success: false, error: message }, { status });
     }
     return NextResponse.json({ success: true, data });
   } catch (error) {

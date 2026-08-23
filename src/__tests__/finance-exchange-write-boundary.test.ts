@@ -94,7 +94,8 @@ describe('finance and exchange database write boundary', () => {
     expect(itemRoute).not.toMatch(
       /\.from\('order_exchanges'\)[\s\S]{0,160}\.(?:insert|update)\(/,
     );
-    expect(orderDetailRoute).toContain("rpc('transition_order_exchange'");
+    expect(orderDetailRoute).toContain("rpc('transition_order_exchanges_for_order'");
+    expect(orderDetailRoute).toContain("rpc('transition_order_status_with_exchanges'");
     expect(orderDetailRoute).not.toMatch(
       /\.from\('order_exchanges'\)[\s\S]{0,260}\.update\(/,
     );
@@ -106,8 +107,8 @@ describe('finance and exchange database write boundary', () => {
     const basicOrderRoute = source('src/app/api/orders/basic/route.ts');
 
     expect(orderDetailRoute).toContain("rpc('finance_update_order_pricing'");
-    expect(orderTreeRoute).toContain("rpc('finance_update_order_pricing'");
-    expect(orderTreeRoute).toContain('nonFinancialOrderPayload');
+    expect(orderTreeRoute).toContain("rpc('save_order_tree'");
+    expect(orderTreeRoute).not.toContain('nonFinancialOrderPayload');
     expect(basicOrderRoute).toContain('basicOrderUpdatePayload');
   });
 });

@@ -31,6 +31,7 @@ export async function PATCH(request: Request, { params }: RouteContext) {
   try {
     const context = await getEnterpriseContext();
     requirePermission(context, 'wages.manage');
+    requirePermission(context, 'wages.read.all');
     const { id } = await parseParams(params, paramsSchema);
     const input = await parseJson(request, updateSchema);
     const supabase = await createClient();
@@ -72,6 +73,7 @@ export async function DELETE(request: Request, { params }: RouteContext) {
   try {
     const context = await getEnterpriseContext();
     requirePermission(context, 'wages.manage');
+    requirePermission(context, 'wages.read.all');
     const { id } = await parseParams(params, paramsSchema);
     const supabase = await createClient();
     const rpc = (functionName: string, args: Record<string, unknown>) => (supabase as unknown as RpcClient).rpc(functionName, args);

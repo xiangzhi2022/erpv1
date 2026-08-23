@@ -36,8 +36,8 @@ describe('Worker enums', () => {
     expect(WORKER_STATUSES).toHaveLength(3);
     const values = WORKER_STATUSES.map(s => s.value);
     expect(values).toContain('active');
-    expect(values).toContain('on_leave');
-    expect(values).toContain('resigned');
+    expect(values).toContain('inactive');
+    expect(values).toContain('departed');
   });
 
   it('should have labels and colors for all statuses', () => {
@@ -60,29 +60,29 @@ describe('Worker enums', () => {
 // ---------------------------------------------------------------------------
 describe('Worker status transitions', () => {
   const VALID_TRANSITIONS: Record<string, string[]> = {
-    active: ['on_leave', 'resigned'],
-    on_leave: ['active', 'resigned'],
-    resigned: [],
+    active: ['inactive', 'departed'],
+    inactive: ['active', 'departed'],
+    departed: [],
   };
 
-  it('should allow active -> on_leave', () => {
-    expect(VALID_TRANSITIONS.active).toContain('on_leave');
+  it('should allow active -> inactive', () => {
+    expect(VALID_TRANSITIONS.active).toContain('inactive');
   });
 
-  it('should allow active -> resigned', () => {
-    expect(VALID_TRANSITIONS.active).toContain('resigned');
+  it('should allow active -> departed', () => {
+    expect(VALID_TRANSITIONS.active).toContain('departed');
   });
 
-  it('should allow on_leave -> active', () => {
-    expect(VALID_TRANSITIONS.on_leave).toContain('active');
+  it('should allow inactive -> active', () => {
+    expect(VALID_TRANSITIONS.inactive).toContain('active');
   });
 
-  it('should allow on_leave -> resigned', () => {
-    expect(VALID_TRANSITIONS.on_leave).toContain('resigned');
+  it('should allow inactive -> departed', () => {
+    expect(VALID_TRANSITIONS.inactive).toContain('departed');
   });
 
-  it('should not allow transitions from resigned', () => {
-    expect(VALID_TRANSITIONS.resigned).toHaveLength(0);
+  it('should not allow transitions from departed', () => {
+    expect(VALID_TRANSITIONS.departed).toHaveLength(0);
   });
 
   it('should cover all defined statuses', () => {
@@ -133,14 +133,14 @@ describe('getStatusInfo', () => {
     expect(info.color).toContain('green');
   });
 
-  it('should return correct label and color for on_leave', () => {
-    const info = getStatusInfo('on_leave');
-    expect(info.label).toBe('请假');
+  it('should return correct label and color for inactive', () => {
+    const info = getStatusInfo('inactive');
+    expect(info.label).toBe('停用');
     expect(info.color).toContain('yellow');
   });
 
-  it('should return correct label and color for resigned', () => {
-    const info = getStatusInfo('resigned');
+  it('should return correct label and color for departed', () => {
+    const info = getStatusInfo('departed');
     expect(info.label).toBe('离职');
     expect(info.color).toContain('red');
   });
@@ -222,7 +222,7 @@ describe('workerFormSchema', () => {
   });
 
   it('should accept all valid statuses', () => {
-    const validStatuses = ['active', 'on_leave', 'resigned'] as const;
+    const validStatuses = ['active', 'inactive', 'departed'] as const;
     for (const status of validStatuses) {
       const result = workerFormSchema.safeParse({
         ...validForm,

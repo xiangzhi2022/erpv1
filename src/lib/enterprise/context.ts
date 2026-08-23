@@ -184,6 +184,13 @@ export function requirePermission(
   }
 }
 
+export function hasEnterprisePermission(
+  context: EnterpriseContext,
+  permission: EnterprisePermissionCode,
+): boolean {
+  return context.permissionScopes.get(permission)?.enterprise === true;
+}
+
 export function canAccessEnterpriseSite(
   context: EnterpriseContext,
   permission: EnterprisePermissionCode,
