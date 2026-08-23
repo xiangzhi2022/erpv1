@@ -43,4 +43,26 @@ describe('Supabase v2 Drizzle schema', () => {
     expectTypeOf<string>().not.toMatchTypeOf<EnterpriseId>();
     expectTypeOf<EnterpriseContextRef['enterpriseId']>().toEqualTypeOf<EnterpriseId>();
   });
+
+  it('exports only migrated application tables and no legacy password tables', async () => {
+    const schema = await import('@/db/schema');
+    const erpTableNames = [
+      'profiles',
+      'customers',
+      'orders',
+      'productionTasks',
+      'workOrders',
+      'tasks',
+    ] as const;
+
+    for (const tableName of erpTableNames) {
+      const columns = getTableColumns(schema[tableName]);
+      expect(columns.enterprise_id?.name).toBe('enterprise_id');
+      expect(columns).not.toHaveProperty('password');
+    }
+
+    expect(schema).not.toHaveProperty('users');
+    expect(schema).not.toHaveProperty('tenants');
+    expect(schema).not.toHaveProperty('permissions');
+  });
 });

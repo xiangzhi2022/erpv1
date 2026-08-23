@@ -35,6 +35,7 @@ export const enterprises = pgTable(
     code: text('code').notNull(),
     name: text('name').notNull(),
     status: text('status').notNull().default('active'),
+    enterpriseType: text('enterprise_type').notNull(),
     createdAt: timestamptz('created_at').notNull().defaultNow(),
     updatedAt: timestamptz('updated_at').notNull().defaultNow(),
   },
