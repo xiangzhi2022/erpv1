@@ -1,45 +1,17 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { consumeResetToken, updateUserPassword, updateUserPasswordInDB } from '@/lib/auth';
+import { resetPasswordSchema } from '@/lib/auth/schemas';
+import { createAuthService } from '@/lib/auth/service';
+import { authRouteError, authValidationError } from '@/lib/auth/route-response';
 
-export async function POST(request: NextRequest) {
+export async function POST(request: NextRequest): Promise<NextResponse> {
   try {
-    const body = await request.json();
-    const { token, password, confirmPassword } = body as {
-      token?: string;
-      password?: string;
-      confirmPassword?: string;
-    };
-
-    // 参数校验
-    if (!token) {
-      return NextResponse.json({ success: false, error: '缺少重置令牌' }, { status: 400 });
+    const parsed = resetPasswordSchema.safeParse(await request.json());
+    if (!parsed.success) {
+      return authValidationError(parsed.error.issues[0]?.message || '密码参数不正确');
     }
-    if (!password || !confirmPassword) {
-      return NextResponse.json({ success: false, error: '请输入新密码' }, { status: 400 });
-    }
-    if (password.length < 6) {
-      return NextResponse.json({ success: false, error: '密码长度不能少于6位' }, { status: 400 });
-    }
-    if (password !== confirmPassword) {
-      return NextResponse.json({ success: false, error: '两次输入的密码不一致' }, { status: 400 });
-    }
-
-    // 验证令牌
-    const email = consumeResetToken(token);
-    if (!email) {
-      return NextResponse.json({ success: false, error: '重置链接已过期或无效，请重新申请' }, { status: 400 });
-    }
-
-    // 更新密码（先尝试内存 store，再尝试数据库）
-    const memoryUpdated = updateUserPassword(email, password);
-    const dbUpdated = await updateUserPasswordInDB(email, password);
-
-    if (!memoryUpdated && !dbUpdated) {
-      return NextResponse.json({ success: false, error: '用户不存在' }, { status: 404 });
-    }
-
-    return NextResponse.json({ success: true, message: '密码重置成功，请使用新密码登录' });
-  } catch {
-    return NextResponse.json({ success: false, error: '服务器内部错误' }, { status: 500 });
+    await (await createAuthService()).updatePassword(parsed.data.password);
+    return NextResponse.json({ success: true, message: '密码已更新' });
+  } catch (error) {
+    return authRouteError(error);
   }
 }

@@ -13,7 +13,6 @@ export default function ForgotPasswordPage() {
   const [email, setEmail] = useState('');
   const [loading, setLoading] = useState(false);
   const [sent, setSent] = useState(false);
-  const [devResetUrl, setDevResetUrl] = useState('');
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -45,9 +44,6 @@ export default function ForgotPasswordPage() {
       }
 
       setSent(true);
-      if (data.devResetUrl) {
-        setDevResetUrl(data.devResetUrl);
-      }
       toast.success(data.message || '重置邮件已发送');
     } catch {
       toast.error('网络错误，请稍后重试');
@@ -125,25 +121,11 @@ export default function ForgotPasswordPage() {
               <p className="mt-1 text-xs text-slate-400">链接 30 分钟内有效</p>
             </div>
 
-            {/* 开发模式：显示重置链接 */}
-            {devResetUrl && (
-              <div className="rounded-lg bg-amber-50 border border-amber-200 p-4 space-y-2">
-                <p className="text-xs font-medium text-amber-800">开发模式 - 直接访问重置链接</p>
-                <a
-                  href={devResetUrl}
-                  className="text-xs text-amber-700 underline break-all hover:text-amber-900"
-                >
-                  {devResetUrl}
-                </a>
-              </div>
-            )}
-
             <div className="space-y-3">
               <Button
                 onClick={() => {
                   setSent(false);
                   setEmail('');
-                  setDevResetUrl('');
                 }}
                 variant="outline"
                 className="h-11 w-full rounded-lg border-slate-200"

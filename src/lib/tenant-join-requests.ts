@@ -1,7 +1,9 @@
 import { getSupabaseClient } from '@/db/client';
-import { hashPassword, type AuthUser } from '@/lib/auth';
+import type { User as SupabaseAuthUser } from '@supabase/supabase-js';
+import type { AuthUser } from '@/lib/auth';
 import { ensureTenantMembership, text } from '@/lib/employee-management';
 import { getUserPermissionKeys, isAdminRole, normalizeAccountRole } from '@/lib/role-access';
+import { createAdminClient } from '@/lib/supabase/admin';
 
 export type TenantJoinRequestType = 'employee_apply' | 'org_invite';
 export type TenantJoinRequestStatus = 'pending' | 'approved' | 'rejected' | 'canceled';
@@ -30,7 +32,6 @@ export interface TenantJoinRequestRow {
 interface UserRow {
   id: string;
   phone: string;
-  password: string;
   real_name?: string | null;
   nickname?: string | null;
   role?: string | null;
@@ -129,53 +130,38 @@ export function chooseEmployeeProfileWrite(input: EmployeeProfileWriteInput): Em
 }
 
 async function findUserByPhone(phone: string): Promise<UserRow | null> {
-  const { data, error } = await getSupabaseClient()
-    .from('users')
-    .select('id,phone,password,real_name,nickname,role,tenant_id,tenant_type,department')
-    .eq('phone', phone)
-    .maybeSingle();
+  const { data, error } = await createAdminClient().auth.admin.listUsers({ page: 1, perPage: 1000 });
   if (error) throw error;
-  return data as UserRow | null;
+  const identity = data.users.find((user) => user.phone === phone);
+  return identity ? authIdentityToUserRow(identity, phone) : null;
 }
 
 async function createUserForInvitation(request: TenantJoinRequestRow, tenant: TenantRow): Promise<UserRow> {
-  const passwordHash = hashPassword(request.phone.slice(-6).padStart(6, '0'));
-  const { data, error } = await getSupabaseClient()
-    .from('users')
-    .insert({
-      phone: request.phone,
-      password: passwordHash,
-      real_name: request.name || request.phone,
-      nickname: request.name || request.phone,
-      role: 'employee',
-      department: request.department || null,
-      tenant_id: tenant.id,
-      tenant_type: tenant.tenant_type || null,
-      is_active: true,
-      updated_at: new Date().toISOString(),
-    })
-    .select('id,phone,password,real_name,nickname,role,tenant_id,tenant_type,department')
-    .single();
-  if (error) throw error;
-  return data as UserRow;
+  const { data, error } = await createAdminClient().auth.admin.createUser({
+    phone: request.phone,
+    phone_confirm: false,
+    user_metadata: { display_name: request.name || request.phone },
+  });
+  if (error || !data.user) throw error || new Error('创建邀请身份失败');
+  return {
+    ...authIdentityToUserRow(data.user, request.phone),
+    tenant_id: tenant.id,
+    tenant_type: tenant.tenant_type || null,
+    department: request.department || null,
+  };
 }
 
-async function backfillExistingUserTenantContext(member: UserRow, request: TenantJoinRequestRow, tenant: TenantRow) {
-  const patch = buildExistingUserTenantPatch({
-    existingTenantId: member.tenant_id,
-    existingTenantType: member.tenant_type,
-    tenantId: request.tenant_id,
-    tenantType: tenant.tenant_type,
-    role: request.role || member.role || 'employee',
-    department: request.department || member.department || null,
-  });
-  if (Object.keys(patch).length === 0) return;
-
-  const { error } = await getSupabaseClient()
-    .from('users')
-    .update({ ...patch, updated_at: new Date().toISOString() })
-    .eq('id', member.id);
-  if (error) throw error;
+function authIdentityToUserRow(identity: SupabaseAuthUser, phoneFallback: string): UserRow {
+  const displayName = typeof identity.user_metadata.display_name === 'string'
+    ? identity.user_metadata.display_name
+    : null;
+  return {
+    id: identity.id,
+    phone: identity.phone || phoneFallback,
+    real_name: displayName,
+    nickname: displayName,
+    role: 'employee',
+  };
 }
 
 async function ensureEmployeeProfileForMembership(request: TenantJoinRequestRow, member: UserRow) {
@@ -224,11 +210,15 @@ export async function approveJoinRequest(request: TenantJoinRequestRow, actor: A
     .single();
   if (tenantError) throw tenantError;
 
-  let member = request.user_id
-    ? ((await supabase.from('users').select('id,phone,password,real_name,nickname,role,tenant_id,tenant_type,department').eq('id', request.user_id).single()).data as UserRow | null)
-    : await findUserByPhone(request.phone);
+  let member: UserRow | null;
+  if (request.user_id) {
+    const { data, error } = await createAdminClient().auth.admin.getUserById(request.user_id);
+    if (error) throw error;
+    member = data.user ? authIdentityToUserRow(data.user, request.phone) : null;
+  } else {
+    member = await findUserByPhone(request.phone);
+  }
   if (!member) member = await createUserForInvitation(request, tenant as TenantRow);
-  else await backfillExistingUserTenantContext(member, request, tenant as TenantRow);
 
   await ensureTenantMembership({
     tenantId: request.tenant_id,
@@ -237,7 +227,6 @@ export async function approveJoinRequest(request: TenantJoinRequestRow, actor: A
     name: request.name || member.real_name || member.nickname || request.phone,
     role: request.role || 'employee',
     department: request.department || null,
-    passwordHash: member.password,
   });
   await ensureEmployeeProfileForMembership(request, member);
 

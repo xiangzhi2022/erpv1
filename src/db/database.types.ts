@@ -2795,6 +2795,14 @@ export type Database = {
           workshop_ids: string[]
         }[]
       }
+      onboard_enterprise: {
+        Args: {
+          display_name: string
+          enterprise_name: string
+          enterprise_type: string
+        }
+        Returns: string
+      }
     }
     Enums: {
       membership_status: "invited" | "active" | "suspended"

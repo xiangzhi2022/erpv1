@@ -24,10 +24,10 @@ describe('LoginPage', () => {
 });
 
 describe('pages that read URL search parameters', () => {
-  it('shows a loading status while reset-password search parameters are unavailable', () => {
+  it('renders password recovery from the verified Supabase session without a custom token', () => {
     render(<ResetPasswordPage />);
 
-    expect(screen.getByRole('status', { name: '重置密码页面加载中' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: '重置密码' })).toBeInTheDocument();
   });
 
   it('shows a loading status while order search parameters are unavailable', () => {

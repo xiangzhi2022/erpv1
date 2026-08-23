@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseClient } from '@/db/client';
-import { hashPassword } from '@/lib/auth';
+import { createAdminClient } from '@/lib/supabase/admin';
 import {
   getAccountRoleTemplate,
   getDepartmentForPermissions,
@@ -206,11 +206,26 @@ export async function POST(request: NextRequest) {
       ? body.department.trim()
       : getDepartmentForPermissions(permissionKeys) || getAccountRoleTemplate(requestedRole)?.department || null;
 
+    const admin = createAdminClient();
+    const { data: authIdentity, error: authError } = await admin.auth.admin.createUser({
+      phone,
+      password,
+      phone_confirm: true,
+      user_metadata: { display_name: realName || phone },
+    });
+    if (authError || !authIdentity.user) {
+      const conflict = authError?.code === 'phone_exists' || authError?.code === 'user_already_exists';
+      return NextResponse.json(
+        { success: false, error: conflict ? '手机号已存在' : '创建认证账号失败' },
+        { status: conflict ? 409 : 503 },
+      );
+    }
+
     const { data, error } = await supabase
       .from('users')
       .insert({
+        id: authIdentity.user.id,
         phone,
-        password: hashPassword(password),
         real_name: realName || phone,
         nickname: realName || phone,
         role: requestedRole,
@@ -223,6 +238,7 @@ export async function POST(request: NextRequest) {
       .single();
 
     if (error || !data) {
+      await admin.auth.admin.deleteUser(authIdentity.user.id);
       return NextResponse.json({ success: false, error: error?.message || '创建用户失败' }, { status: 500 });
     }
 
@@ -288,7 +304,9 @@ export async function PUT(request: NextRequest) {
     if (body.name !== undefined) updateData.real_name = String(body.name || '').trim();
     if (body.role !== undefined) updateData.role = requestedRole;
     if (body.department !== undefined) updateData.department = String(body.department || '').trim() || null;
-    if (body.password) updateData.password = hashPassword(String(body.password));
+    const nextPassword = typeof body.password === 'string' && body.password
+      ? body.password
+      : null;
     const active = activeStatusFromBody(body);
     if (active !== undefined) updateData.is_active = active;
 
@@ -307,6 +325,15 @@ export async function PUT(request: NextRequest) {
 
     if (error || !data) {
       return NextResponse.json({ success: false, error: error?.message || '更新用户失败' }, { status: 500 });
+    }
+
+    if (nextPassword) {
+      const { error: passwordError } = await createAdminClient().auth.admin.updateUserById(id, {
+        password: nextPassword,
+      });
+      if (passwordError) {
+        return NextResponse.json({ success: false, error: '更新认证密码失败' }, { status: 503 });
+      }
     }
 
     if (permissionKeys) {

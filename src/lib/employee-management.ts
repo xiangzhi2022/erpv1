@@ -1,5 +1,6 @@
 import { getSupabaseClient } from '@/db/client';
-import { hashPassword, type AuthUser } from '@/lib/auth';
+import type { AuthUser } from '@/lib/auth';
+import { createAdminClient } from '@/lib/supabase/admin';
 import { DEFAULT_ROLES, defaultPermissionsForRole } from '@/lib/organization';
 import {
   canAssignPermissionKeys,
@@ -176,13 +177,11 @@ export async function ensureTenantMembership(input: {
   name?: string | null;
   role?: string | null;
   department?: string | null;
-  passwordHash?: string | null;
 }) {
-  if (!input.tenantId || !input.userId || !input.phone) return;
+  if (!input.tenantId || !input.userId) return;
   const supabase = getSupabaseClient();
-  const now = new Date().toISOString();
   const { data: existing, error: findError } = await supabase
-    .from('tenant_users')
+    .from('enterprise_memberships')
     .select('id')
     .eq('tenant_id', input.tenantId)
     .eq('user_id', input.userId)
@@ -190,24 +189,20 @@ export async function ensureTenantMembership(input: {
   if (findError) throw findError;
 
   const row = {
-    phone: input.phone,
-    name: input.name || input.phone,
-    role: input.role || 'employee',
-    department: input.department || null,
+    display_name: input.name || input.phone || '员工',
     status: 'active',
-    updated_at: now,
+    updated_at: new Date().toISOString(),
   };
 
   if (existing?.id) {
-    const { error } = await supabase.from('tenant_users').update(row).eq('id', existing.id);
+    const { error } = await supabase.from('enterprise_memberships').update(row).eq('id', existing.id);
     if (error) throw error;
     return;
   }
 
-  const { error } = await supabase.from('tenant_users').insert({
+  const { error } = await supabase.from('enterprise_memberships').insert({
     tenant_id: input.tenantId,
     user_id: input.userId,
-    password: input.passwordHash || '',
     ...row,
   });
   if (error) throw error;
@@ -219,10 +214,14 @@ export async function createOrReuseEmployeeLoginUser(body: Record<string, unknow
   if (!shouldCreate) return text(body.user_id);
   if (!phone) throw new Error('创建登录账号需要填写手机号');
 
-  const supabase = getSupabaseClient();
-  const { data: existing, error: findError } = await supabase.from('users').select('id,password').eq('phone', phone).maybeSingle();
+  const admin = createAdminClient();
+  const { data: listedUsers, error: findError } = await admin.auth.admin.listUsers({
+    page: 1,
+    perPage: 1000,
+  });
   if (findError) throw findError;
-  if (existing?.id) {
+  const existing = listedUsers.users.find((identity) => identity.phone === phone);
+  if (existing) {
     await ensureTenantMembership({
       tenantId: user.tenant_id,
       userId: existing.id,
@@ -230,41 +229,26 @@ export async function createOrReuseEmployeeLoginUser(body: Record<string, unknow
       name: text(body.name),
       role: 'employee',
       department: text(body.department_name),
-      passwordHash: existing.password,
     });
     return existing.id;
   }
 
-  const password = text(body.password) || phone.slice(-6).padStart(6, '0');
-  if (password.length < 6) throw new Error('登录密码至少 6 位');
-
-  const passwordHash = hashPassword(password);
-
-  const { data, error } = await supabase
-    .from('users')
-    .insert({
-      phone,
-      password: passwordHash,
-      real_name: text(body.name) || phone,
-      nickname: text(body.name) || phone,
-      role: 'employee',
-      department: text(body.department_name),
-      tenant_id: user.tenant_id || null,
-      tenant_type: user.tenant_type || null,
-      is_active: text(body.status) !== 'inactive',
-      updated_at: new Date().toISOString(),
-    })
-    .select('id')
-    .single();
-  if (error) throw error;
+  const password = text(body.password);
+  if (!password || password.length < 8) throw new Error('创建登录账号需要至少 8 位密码');
+  const { data, error } = await admin.auth.admin.createUser({
+    phone,
+    password,
+    phone_confirm: true,
+    user_metadata: { display_name: text(body.name) || phone },
+  });
+  if (error || !data.user) throw error || new Error('创建认证账号失败');
   await ensureTenantMembership({
     tenantId: user.tenant_id,
-    userId: data.id,
+    userId: data.user.id,
     phone,
     name: text(body.name),
     role: 'employee',
     department: text(body.department_name),
-    passwordHash,
   });
-  return data.id;
+  return data.user.id;
 }

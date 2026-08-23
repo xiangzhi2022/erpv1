@@ -1,7 +1,7 @@
 'use client';
 
-import { Suspense, useEffect, useState } from 'react';
-import { useRouter, useSearchParams } from 'next/navigation';
+import { Suspense, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { toast } from 'sonner';
 import { ArrowLeft, Eye, EyeOff, Loader2, ShieldCheck } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -10,25 +10,12 @@ import { Label } from '@/components/ui/label';
 
 function ResetPasswordPageContent() {
   const router = useRouter();
-  const searchParams = useSearchParams();
-
-  const [token, setToken] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirm, setShowConfirm] = useState(false);
   const [loading, setLoading] = useState(false);
   const [success, setSuccess] = useState(false);
-
-  useEffect(() => {
-    const t = searchParams.get('token');
-    if (!t) {
-      toast.error('缺少重置令牌，请从邮件中的链接访问');
-      router.push('/forgot-password');
-      return;
-    }
-    setToken(t);
-  }, [searchParams, router]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -37,8 +24,8 @@ function ResetPasswordPageContent() {
       toast.error('请输入新密码');
       return;
     }
-    if (password.length < 6) {
-      toast.error('密码长度不能少于6位');
+    if (password.length < 8) {
+      toast.error('密码长度不能少于 8 位');
       return;
     }
     if (password !== confirmPassword) {
@@ -51,7 +38,7 @@ function ResetPasswordPageContent() {
       const res = await fetch('/api/auth/reset-password', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ token, password, confirmPassword }),
+        body: JSON.stringify({ password, confirmPassword }),
       });
 
       const data = await res.json();
@@ -119,7 +106,7 @@ function ResetPasswordPageContent() {
                 <Input
                   id="password"
                   type={showPassword ? 'text' : 'password'}
-                  placeholder="请输入新密码（至少6位）"
+                  placeholder="请输入新密码（至少 8 位）"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   className="h-11 pr-10 rounded-lg border-slate-200 focus:border-slate-400 focus:ring-slate-400"

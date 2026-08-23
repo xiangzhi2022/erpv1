@@ -11,7 +11,6 @@ const PUBLIC_PAGES = new Set([
 ]);
 
 const PUBLIC_AUTH_API_PATHS = new Set([
-  '/api/auth/captcha',
   '/api/auth/email/send',
   '/api/auth/email/verify',
   '/api/auth/forgot-password',

@@ -145,9 +145,10 @@
 ## API 端点
 
 ### 认证
-- `POST /api/auth/login` - 登录（需验证码，开发环境设置 SKIP_CAPTCHA=1 跳过）
+- `POST /api/auth/login` - Supabase Auth 邮箱/手机号密码登录
 - `POST /api/auth/logout` - 登出
-- `GET /api/auth/captcha` - 获取验证码
+- `POST /api/auth/register` - Supabase Auth 注册与企业初始化
+- `GET /auth/confirm` - 邮箱验证/密码恢复/OAuth PKCE 回调
 
 ### 生产进度
 - `GET /api/progress/work-orders` - 工单列表（支持 status/workshop_id/priority/keyword 筛选）
@@ -157,9 +158,9 @@
 - `GET /api/progress/workshops` - 车间列表
 
 ### 认证方式
-- Cookie-based session (`auth_session`)
-- `getUserFromRequest(request)` 从 cookie 中解析当前用户
-- 内存会话存储（服务器重启后失效）
+- Supabase Auth Cookie/SSR Session（`@supabase/ssr`）
+- Proxy 先调用 `auth.getClaims()` 验证并刷新 Session
+- `getUserFromRequest(request)` 仅返回已验证 Supabase 身份
 
 ### 环境变量
 
@@ -169,7 +170,6 @@
 | NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY | Publishable Key |
 | SUPABASE_SECRET_KEY | 服务端 Secret Key |
 | APP_URL | 应用对外访问地址 |
-| SKIP_CAPTCHA | 跳过验证码校验（开发用） |
 | PORT | 服务端口（默认 5000） |
 
 ### 数据库工具

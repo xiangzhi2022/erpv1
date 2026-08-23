@@ -16,6 +16,7 @@
     "preinstall": "npx only-allow pnpm",
     "lint": "eslint",
     "lint:build": "eslint . --quiet",
+    "legacy-auth:report": "node scripts/report-legacy-identities.mjs",
     "start": "bash ./scripts/start.sh",
     "ts-check": "tsc -p tsconfig.json",
     "test": "vitest run",

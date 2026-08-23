@@ -1,10 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getSupabaseClient } from '@/db/client';
-import { hashPassword, isPlaintextPassword, verifyPassword } from '@/lib/auth';
 import { passwordSchema } from '@/app/settings/schemas';
+import { createAuthService } from '@/lib/auth/service';
+import { authRouteError } from '@/lib/auth/route-response';
 import { authFailed, requireSettingsUser } from '../_utils';
 
-export async function PUT(request: NextRequest) {
+export async function PUT(request: NextRequest): Promise<NextResponse> {
   try {
     const auth = await requireSettingsUser(request);
     if (authFailed(auth)) return auth.response;
@@ -12,43 +12,17 @@ export async function PUT(request: NextRequest) {
     const parsed = passwordSchema.safeParse(await request.json());
     if (!parsed.success) {
       return NextResponse.json(
-        { success: false, error: parsed.error.issues[0]?.message || '??????' },
-        { status: 400 }
+        { success: false, error: parsed.error.issues[0]?.message || '密码参数不正确' },
+        { status: 400 },
       );
     }
 
-    const supabase = getSupabaseClient();
-    const { data: userData, error: fetchError } = await supabase
-      .from('users')
-      .select('password')
-      .eq('id', auth.user.id)
-      .maybeSingle();
-
-    if (fetchError || !userData?.password) {
-      return NextResponse.json({ success: false, error: '?????' }, { status: 404 });
-    }
-
-    const { currentPassword, newPassword } = parsed.data;
-    const passwordMatches = isPlaintextPassword(userData.password)
-      ? userData.password === currentPassword
-      : verifyPassword(currentPassword, userData.password);
-
-    if (!passwordMatches) {
-      return NextResponse.json({ success: false, error: '???????' }, { status: 400 });
-    }
-
-    const { error } = await supabase
-      .from('users')
-      .update({ password: hashPassword(newPassword), updated_at: new Date().toISOString() })
-      .eq('id', auth.user.id);
-
-    if (error) {
-      return NextResponse.json({ success: false, error: '??????' }, { status: 500 });
-    }
-
-    return NextResponse.json({ success: true, message: '??????' });
+    await (await createAuthService()).changePassword(
+      parsed.data.currentPassword,
+      parsed.data.newPassword,
+    );
+    return NextResponse.json({ success: true, message: '密码修改成功' });
   } catch (error) {
-    console.error('update password failed:', error);
-    return NextResponse.json({ success: false, error: '??????' }, { status: 500 });
+    return authRouteError(error);
   }
 }

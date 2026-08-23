@@ -1,76 +1,16 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getSupabaseClient } from '@/db/client';
+import { phoneOtpSchema } from '@/lib/auth/schemas';
+import { createAuthService } from '@/lib/auth/service';
+import { authRouteError, authValidationError } from '@/lib/auth/route-response';
 
-export async function POST(request: NextRequest) {
+export async function POST(request: NextRequest): Promise<NextResponse> {
   try {
-    const { phone, code } = await request.json() as { phone?: string; code?: string };
-
-    if (!phone || !code) {
-      return NextResponse.json(
-        { success: false, error: '请提供手机号和验证码' },
-        { status: 400 }
-      );
-    }
-
-    if (!/^1[3-9]\d{9}$/.test(phone)) {
-      return NextResponse.json(
-        { success: false, error: '手机号格式不正确' },
-        { status: 400 }
-      );
-    }
-
-    if (!/^\d{6}$/.test(code)) {
-      return NextResponse.json(
-        { success: false, error: '验证码必须是6位数字' },
-        { status: 400 }
-      );
-    }
-
-    const supabase = getSupabaseClient();
-
-    // 查询最新未使用的验证码
-    const { data, error } = await supabase
-      .from('sms_codes')
-      .select('*')
-      .eq('phone', phone)
-      .eq('code', code)
-      .eq('used', false)
-      .eq('type', 'register')
-      .gte('expires_at', new Date().toISOString())
-      .order('created_at', { ascending: false })
-      .limit(1);
-
-    if (error) {
-      console.error('查询验证码失败:', error.message);
-      return NextResponse.json(
-        { success: false, error: '验证码验证失败' },
-        { status: 500 }
-      );
-    }
-
-    if (!data || data.length === 0) {
-      return NextResponse.json(
-        { success: false, error: '验证码错误或已过期' },
-        { status: 400 }
-      );
-    }
-
-    // 标记验证码已使用
-    await supabase
-      .from('sms_codes')
-      .update({ used: true })
-      .eq('id', data[0].id);
-
-    return NextResponse.json({
-      success: true,
-      message: '验证码验证成功',
-    });
+    const body = (await request.json()) as Record<string, unknown>;
+    const parsed = phoneOtpSchema.safeParse({ phone: body.phone, token: body.token || body.code });
+    if (!parsed.success) return authValidationError(parsed.error.issues[0]?.message || '验证参数不正确');
+    await (await createAuthService()).verifyPhoneOtp(parsed.data.phone, parsed.data.token);
+    return NextResponse.json({ success: true, message: '验证成功' });
   } catch (error) {
-    const message = error instanceof Error ? error.message : '未知错误';
-    console.error('验证验证码失败:', message);
-    return NextResponse.json(
-      { success: false, error: '验证失败，请稍后重试' },
-      { status: 500 }
-    );
+    return authRouteError(error);
   }
 }

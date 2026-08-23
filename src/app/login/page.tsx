@@ -1,6 +1,6 @@
 'use client';
 
-import { Suspense, useCallback, useEffect, useState } from 'react';
+import { Suspense, useEffect, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { toast } from 'sonner';
 import {
@@ -12,7 +12,6 @@ import {
   Loader2,
   Mail,
   Phone,
-  RefreshCw,
   ShieldCheck,
   Sparkles,
 } from 'lucide-react';
@@ -30,20 +29,6 @@ interface LoginResponse {
   error?: string;
   error_code?: string;
   redirectTo?: string;
-}
-
-interface CaptchaResponse {
-  captchaId?: string;
-  svg?: string;
-  skipCaptcha?: boolean;
-}
-
-function WechatIcon() {
-  return (
-    <svg viewBox="0 0 24 24" className="h-5 w-5" fill="currentColor" aria-hidden="true">
-      <path d="M8.691 2.188C3.891 2.188 0 5.476 0 9.53c0 2.212 1.17 4.203 3.002 5.55a.59.59 0 0 1 .213.665l-.39 1.48c-.019.07-.048.141-.048.213 0 .163.13.295.29.295a.326.326 0 0 0 .167-.054l1.903-1.114a.864.864 0 0 1 .717-.098 10.16 10.16 0 0 0 2.837.403c.276 0 .543-.027.811-.05a6.127 6.127 0 0 1-.253-1.726c0-3.573 3.26-6.47 7.278-6.47.122 0 .243.005.363.013C15.596 4.373 12.454 2.188 8.691 2.188zm-2.6 4.17a1.03 1.03 0 1 1 0 2.06 1.03 1.03 0 0 1 0-2.06zm5.2 0a1.03 1.03 0 1 1 0 2.06 1.03 1.03 0 0 1 0-2.06zM23.997 15.39c0-3.248-3.238-5.882-7.229-5.882-3.992 0-7.23 2.634-7.23 5.882 0 3.249 3.238 5.882 7.23 5.882.84 0 1.647-.118 2.398-.332a.72.72 0 0 1 .596.08l1.58.926a.27.27 0 0 0 .14.047c.133 0 .24-.11.24-.245 0-.06-.024-.118-.04-.177l-.323-1.229a.49.49 0 0 1 .177-.553c1.52-1.12 2.501-2.768 2.501-4.399zm-9.726-1.08a.857.857 0 1 1 0-1.714.857.857 0 0 1 0 1.714zm4.992 0a.857.857 0 1 1 0-1.714.857.857 0 0 1 0 1.714z" />
-    </svg>
-  );
 }
 
 function GithubIcon() {
@@ -71,10 +56,6 @@ function LoginPageContent() {
   const [mode, setMode] = useState<AuthMode>(searchParams.get('mode') === 'register' ? 'register' : 'login');
   const [account, setAccount] = useState('');
   const [password, setPassword] = useState('');
-  const [captchaCode, setCaptchaCode] = useState('');
-  const [captchaId, setCaptchaId] = useState('');
-  const [captchaSvg, setCaptchaSvg] = useState('');
-  const [captchaRequired, setCaptchaRequired] = useState(true);
   const [rememberMe, setRememberMe] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -90,6 +71,8 @@ function LoginPageContent() {
     confirmPassword: '',
   });
   const [showRegisterPassword, setShowRegisterPassword] = useState(false);
+  const [pendingPhone, setPendingPhone] = useState('');
+  const [verificationCode, setVerificationCode] = useState('');
 
   const oauthError = searchParams.get('error');
   const isPhone = /^1\d{10,}$/.test(account);
@@ -108,29 +91,6 @@ function LoginPageContent() {
     }
   }, []);
 
-  const fetchCaptcha = useCallback(async () => {
-    try {
-      const res = await fetch('/api/auth/captcha');
-      const data = await res.json() as CaptchaResponse;
-      const nextRequired = data.skipCaptcha !== true;
-      setCaptchaRequired(nextRequired);
-      if (!nextRequired) {
-        setCaptchaId('');
-        setCaptchaSvg('');
-        setCaptchaCode('');
-        return;
-      }
-      setCaptchaId(data.captchaId || '');
-      setCaptchaSvg(data.svg || '');
-    } catch {
-      toast.error('获取验证码失败');
-    }
-  }, []);
-
-  useEffect(() => {
-    fetchCaptcha();
-  }, [fetchCaptcha]);
-
   const switchMode = (nextMode: AuthMode) => {
     setMode(nextMode);
     setLoginError('');
@@ -144,8 +104,7 @@ function LoginPageContent() {
     if (account.includes('@') && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(account)) return '邮箱格式不正确';
     if (!/^1/.test(account) && !account.includes('@')) return '请输入有效的手机号或邮箱';
     if (!password) return '请输入密码';
-    if (password.length < 6) return '密码长度不能少于 6 位';
-    if (captchaRequired && !captchaCode.trim()) return '请输入验证码';
+    if (password.length < 8) return '密码长度不能少于 8 位';
     return null;
   };
 
@@ -167,9 +126,6 @@ function LoginPageContent() {
         body: JSON.stringify({
           account: account.trim(),
           password,
-          captchaId,
-          captchaCode: captchaCode.trim(),
-          rememberMe,
         }),
       });
       const data = await res.json() as LoginResponse;
@@ -178,8 +134,6 @@ function LoginPageContent() {
         const message = data.error || '登录失败';
         setLoginError(message);
         toast.error(message);
-        setCaptchaCode('');
-        if (captchaRequired) fetchCaptcha();
         return;
       }
 
@@ -196,8 +150,6 @@ function LoginPageContent() {
       const message = '网络错误，请检查网络连接';
       setLoginError(message);
       toast.error(message);
-      setCaptchaCode('');
-      if (captchaRequired) fetchCaptcha();
     } finally {
       setLoading(false);
     }
@@ -207,7 +159,7 @@ function LoginPageContent() {
     if (!/^1[3-9]\d{9}$/.test(registerForm.phone)) return '请输入正确的 11 位手机号';
     if (!registerForm.companyName.trim()) return '请输入企业名称';
     if (!registerForm.contactPerson.trim()) return '请输入管理员姓名';
-    if (registerForm.password.length < 6) return '密码至少 6 位';
+    if (registerForm.password.length < 8) return '密码至少 8 位';
     if (registerForm.password !== registerForm.confirmPassword) return '两次输入的密码不一致';
     return null;
   };
@@ -242,12 +194,42 @@ function LoginPageContent() {
         return;
       }
 
-      toast.success('注册成功，请使用新账号登录');
+      toast.success(data.message || '注册申请已提交');
+      if (data.requiresVerification) {
+        setPendingPhone(registerForm.phone);
+        return;
+      }
       setAccount(registerForm.phone);
       setPassword('');
-      setCaptchaCode('');
       switchMode('login');
-      if (captchaRequired) fetchCaptcha();
+    } catch {
+      toast.error('网络错误，请稍后重试');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleVerifyPhone = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!/^\d{6}$/.test(verificationCode)) {
+      toast.error('请输入 6 位短信验证码');
+      return;
+    }
+    setLoading(true);
+    try {
+      const response = await fetch('/api/auth/sms/verify', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ phone: pendingPhone, code: verificationCode }),
+      });
+      const payload = await response.json() as { success?: boolean; error?: string };
+      if (!response.ok || !payload.success) {
+        toast.error(payload.error || '验证失败');
+        return;
+      }
+      toast.success('手机号验证成功');
+      router.replace('/onboarding');
+      router.refresh();
     } catch {
       toast.error('网络错误，请稍后重试');
     } finally {
@@ -336,10 +318,7 @@ function LoginPageContent() {
 
               {mode === 'login' ? (
                 <form onSubmit={handleLogin} className="space-y-5">
-                  <div className="grid grid-cols-3 gap-3">
-                    <Button type="button" variant="outline" className="h-11 rounded-xl" onClick={() => handleOAuthLogin('wechat')}>
-                      <WechatIcon />
-                    </Button>
+                  <div className="grid grid-cols-2 gap-3">
                     <Button type="button" variant="outline" className="h-11 rounded-xl" onClick={() => handleOAuthLogin('github')}>
                       <GithubIcon />
                     </Button>
@@ -398,38 +377,6 @@ function LoginPageContent() {
                     </div>
                   </div>
 
-                  {captchaRequired ? (
-                    <div className="space-y-2">
-                      <Label htmlFor="captcha">验证码</Label>
-                      <div className="flex gap-3">
-                        <Input
-                          id="captcha"
-                          value={captchaCode}
-                          onChange={(event) => {
-                            setCaptchaCode(event.target.value);
-                            setLoginError('');
-                          }}
-                          placeholder="请输入验证码"
-                          maxLength={4}
-                          autoComplete="off"
-                          className="h-11 rounded-xl"
-                        />
-                        <button
-                          type="button"
-                          onClick={fetchCaptcha}
-                          className="flex h-11 min-w-[118px] items-center justify-center overflow-hidden rounded-xl border bg-slate-50 transition hover:bg-slate-100"
-                          title="点击刷新验证码"
-                        >
-                          {captchaSvg ? <span dangerouslySetInnerHTML={{ __html: captchaSvg }} /> : <RefreshCw className="h-4 w-4 text-slate-400" />}
-                        </button>
-                      </div>
-                    </div>
-                  ) : (
-                    <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700">
-                      开发环境已跳过验证码，可直接登录。
-                    </div>
-                  )}
-
                   <div className="flex items-center gap-2">
                     <Checkbox id="remember" checked={rememberMe} onCheckedChange={(checked) => setRememberMe(checked === true)} />
                     <Label htmlFor="remember" className="cursor-pointer text-sm text-slate-600">
@@ -446,6 +393,39 @@ function LoginPageContent() {
                   <Button type="submit" disabled={loading} className="h-11 w-full rounded-xl bg-slate-950 text-white hover:bg-slate-800">
                     {loading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <ArrowRight className="mr-2 h-4 w-4" />}
                     登录并进入系统
+                  </Button>
+                </form>
+              ) : pendingPhone ? (
+                <form onSubmit={handleVerifyPhone} className="space-y-5">
+                  <div className="rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-800">
+                    验证码已发送至 {pendingPhone}，验证后继续初始化企业。
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="phone-verification-code">短信验证码</Label>
+                    <Input
+                      id="phone-verification-code"
+                      inputMode="numeric"
+                      autoComplete="one-time-code"
+                      value={verificationCode}
+                      onChange={(event) => setVerificationCode(event.target.value.replace(/\D/g, '').slice(0, 6))}
+                      placeholder="6 位验证码"
+                      className="h-11 rounded-xl"
+                    />
+                  </div>
+                  <Button type="submit" disabled={loading} className="h-11 w-full rounded-xl bg-slate-950 text-white hover:bg-slate-800">
+                    {loading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+                    验证并继续
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="h-11 w-full rounded-xl"
+                    onClick={() => {
+                      setPendingPhone('');
+                      setVerificationCode('');
+                    }}
+                  >
+                    返回修改注册信息
                   </Button>
                 </form>
               ) : (
@@ -525,7 +505,7 @@ function LoginPageContent() {
                         type={showRegisterPassword ? 'text' : 'password'}
                         value={registerForm.password}
                         onChange={(event) => setRegisterForm((form) => ({ ...form, password: event.target.value }))}
-                        placeholder="至少 6 位"
+                        placeholder="至少 8 位"
                         className="h-11 rounded-xl pr-10"
                       />
                       <button
@@ -551,7 +531,7 @@ function LoginPageContent() {
 
                   <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-xs text-amber-800">
                     <CheckCircle2 className="mr-2 inline h-4 w-4" />
-                    注册成功后不会自动登录，请使用新账号登录进入系统。
+                    如需验证手机号，请按提示完成验证后再登录。
                   </div>
 
                   <Button type="submit" disabled={loading} className="h-11 w-full rounded-xl bg-slate-950 text-white hover:bg-slate-800">
@@ -561,11 +541,6 @@ function LoginPageContent() {
                 </form>
               )}
 
-              <div className="mt-6 rounded-2xl bg-slate-50 p-4 text-xs text-slate-500">
-                <p className="font-medium text-slate-700">演示账号</p>
-                <p className="mt-1">邮箱: demo@example.com / 手机: 13800138000</p>
-                <p>密码: demo123</p>
-              </div>
             </div>
           </div>
         </section>
