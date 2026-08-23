@@ -1,45 +1,21 @@
-import { parseJsonObject } from '@/lib/api/request';
-import { NextResponse } from "next/server";
-import { getCategories, createCategory } from "@/app/actions/categories";
+import { withApiHandler } from '@/lib/api/handler';
+import { parseJson } from '@/lib/api/request';
+import { apiSuccess } from '@/lib/api/response';
+import {
+  categoryCreateSchema,
+  insertCategory,
+  listCategories,
+} from '@/lib/categories/service';
 
-// GET /api/categories - 查询所有分类
-export async function GET() {
-  try {
-    const categories = await getCategories();
-    return NextResponse.json({ success: true, data: categories });
-  } catch (e: unknown) {
-    const message = e instanceof Error ? e.message : "查询分类失败";
-    return NextResponse.json({ success: false, error: message }, { status: 500 });
-  }
-}
+export const GET = withApiHandler(
+  { policy: 'enterprise', permission: 'catalog.read' },
+  async ({ enterprise }) => apiSuccess(await listCategories({ context: enterprise })),
+);
 
-// POST /api/categories - 创建分类
-export async function POST(request: Request) {
-  try {
-    const body = await parseJsonObject(request);
-    const { name, color, description } = body;
-    if (!name || typeof name !== "string" || name.trim().length === 0) {
-      return NextResponse.json(
-        { success: false, error: "分类名称不能为空" },
-        { status: 400 }
-      );
-    }
-    // Validate color format (hex color)
-    const finalColor = color ?? "#6366f1";
-    if (typeof finalColor !== "string" || !/^#[0-9a-fA-F]{6}$/.test(finalColor)) {
-      return NextResponse.json(
-        { success: false, error: "颜色格式无效，请使用 #RRGGBB 格式" },
-        { status: 400 }
-      );
-    }
-    const category = await createCategory({
-      name: name.trim(),
-      color: finalColor,
-      description: typeof description === "string" ? description : null,
-    });
-    return NextResponse.json({ success: true, data: category }, { status: 201 });
-  } catch (e: unknown) {
-    const message = e instanceof Error ? e.message : "创建分类失败";
-    return NextResponse.json({ success: false, error: message }, { status: 500 });
-  }
-}
+export const POST = withApiHandler(
+  { policy: 'enterprise', permission: 'catalog.manage' },
+  async ({ request, enterprise }) => {
+    const input = await parseJson(request, categoryCreateSchema);
+    return apiSuccess(await insertCategory(input, { context: enterprise }), { status: 201 });
+  },
+);

@@ -1,91 +1,43 @@
-import { parseJsonObject } from '@/lib/api/request';
-import { NextResponse } from "next/server";
+import { withApiHandler, type ApiHandlerContext } from '@/lib/api/handler';
+import { parseJson, parseParams } from '@/lib/api/request';
+import { apiSuccess } from '@/lib/api/response';
 import {
-  getCategoryById,
-  updateCategory,
-  deleteCategory,
-} from "@/app/actions/categories";
+  categoryParamsSchema,
+  categoryUpdateSchema,
+  editCategory,
+  readCategory,
+  removeCategory,
+} from '@/lib/categories/service';
 
-// GET /api/categories/[id] - 查询单个分类
-export async function GET(
-  _request: Request,
-  { params }: { params: Promise<{ id: string }> }
-) {
-  try {
-    const { id } = await params;
-    const category = await getCategoryById(id);
-    if (!category) {
-      return NextResponse.json(
-        { success: false, error: "分类不存在" },
-        { status: 404 }
-      );
-    }
-    return NextResponse.json({ success: true, data: category });
-  } catch (e: unknown) {
-    const message = e instanceof Error ? e.message : "查询分类失败";
-    return NextResponse.json({ success: false, error: message }, { status: 500 });
-  }
+export const GET = withApiHandler(
+  { policy: 'enterprise', permission: 'catalog.read' },
+  async ({ params, enterprise }) => {
+    const { id } = await parseParams(params, categoryParamsSchema);
+    return apiSuccess(await readCategory(id, { context: enterprise }));
+  },
+);
+
+async function updateHandler({ request, params, enterprise }: ApiHandlerContext) {
+  const { id } = await parseParams(params, categoryParamsSchema);
+  const input = await parseJson(request, categoryUpdateSchema);
+  return apiSuccess(await editCategory(id, input, { context: enterprise }));
 }
 
-// PUT /api/categories/[id] - 更新分类
-export async function PUT(
-  request: Request,
-  { params }: { params: Promise<{ id: string }> }
-) {
-  try {
-    const { id } = await params;
-    const body = await parseJsonObject(request);
-    // Whitelist allowed update fields
-    const allowedFields = ["name", "color", "description"];
-    const updateData: Record<string, unknown> = {};
-    for (const key of allowedFields) {
-      if (key in body) {
-        updateData[key] = body[key];
-      }
-    }
-    const category = await updateCategory(id, updateData);
-    return NextResponse.json({ success: true, data: category });
-  } catch (e: unknown) {
-    const message = e instanceof Error ? e.message : "更新分类失败";
-    return NextResponse.json({ success: false, error: message }, { status: 500 });
-  }
-}
+export const PUT = withApiHandler(
+  { policy: 'enterprise', permission: 'catalog.manage' },
+  updateHandler,
+);
 
-// PATCH /api/categories/[id] - 部分更新分类
-export async function PATCH(
-  request: Request,
-  { params }: { params: Promise<{ id: string }> }
-) {
-  try {
-    const { id } = await params;
-    const body = await parseJsonObject(request);
-    // Whitelist allowed update fields
-    const allowedFields = ["name", "color", "description"];
-    const updateData: Record<string, unknown> = {};
-    for (const key of allowedFields) {
-      if (key in body) {
-        updateData[key] = body[key];
-      }
-    }
-    const category = await updateCategory(id, updateData);
-    return NextResponse.json({ success: true, data: category });
-  } catch (e: unknown) {
-    const message = e instanceof Error ? e.message : "更新分类失败";
-    return NextResponse.json({ success: false, error: message }, { status: 500 });
-  }
-}
+export const PATCH = withApiHandler(
+  { policy: 'enterprise', permission: 'catalog.manage' },
+  updateHandler,
+);
 
-// DELETE /api/categories/[id] - 删除分类
-export async function DELETE(
-  _request: Request,
-  { params }: { params: Promise<{ id: string }> }
-) {
-  try {
-    const { id } = await params;
-    await deleteCategory(id);
-    return NextResponse.json({ success: true });
-  } catch (e: unknown) {
-    const message = e instanceof Error ? e.message : "删除分类失败";
-    return NextResponse.json({ success: false, error: message }, { status: 500 });
-  }
-}
+export const DELETE = withApiHandler(
+  { policy: 'enterprise', permission: 'catalog.manage' },
+  async ({ params, enterprise }) => {
+    const { id } = await parseParams(params, categoryParamsSchema);
+    await removeCategory(id, { context: enterprise });
+    return apiSuccess({ deleted: true });
+  },
+);
