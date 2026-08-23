@@ -20,8 +20,8 @@ const basicOrderSchema = z.object({
 export async function POST(request: NextRequest) {
   try {
     const context = await getEnterpriseContext();
-    requirePermission(context, 'orders.create');
     const input = await parseJson(request, basicOrderSchema);
+    requirePermission(context, input.existing_order_id ? 'orders.update' : 'orders.create');
     const flowAllowed = input.order_flow === 'dealer_to_factory'
       ? context.enterpriseType === 'dealer'
       : context.enterpriseType === 'manufacturer';

@@ -53,7 +53,7 @@ describe('API route policy manifest', () => {
     });
     expect(getApiRoutePolicy('/api/orders/123', 'PATCH')).toMatchObject({
       access: 'enterprise',
-      permission: 'orders.manage',
+      permission: 'orders.update',
     });
     expect(getApiRoutePolicy('/api/factory/workshops/123', 'GET')).toMatchObject({
       access: 'enterprise',
@@ -64,6 +64,38 @@ describe('API route policy manifest', () => {
       permission: 'production.manage',
     });
     expect(getApiRoutePolicy('/api/not-declared', 'GET')).toBeNull();
+  });
+
+  it('prefers concrete routes and exposes any-of permissions for mixed mutations', () => {
+    expect(getApiRoutePolicy('/api/dealer/orders/create', 'POST')).toMatchObject({
+      permission: 'orders.create',
+    });
+    expect(getApiRoutePolicy('/api/supplier/orders', 'GET')).toMatchObject({
+      permission: 'orders.read',
+    });
+    expect(getApiRoutePolicy('/api/factory/orders', 'POST')).toMatchObject({
+      permission: 'orders.accept',
+    });
+    expect(getApiRoutePolicy('/api/order-exchanges', 'POST')).toMatchObject({
+      permission: 'orders.submit',
+    });
+    expect(getApiRoutePolicy('/api/order-exchanges/exchange-id', 'PATCH')?.permissions).toEqual([
+      'orders.update',
+      'orders.accept',
+    ]);
+    expect(getApiRoutePolicy('/api/orders/basic', 'POST')?.permissions).toEqual([
+      'orders.create',
+      'orders.update',
+    ]);
+    expect(getApiRoutePolicy('/api/orders', 'POST')?.permissions).toEqual([
+      'orders.create',
+      'orders.update',
+    ]);
+    expect(getApiRoutePolicy('/api/orders/generate', 'POST')).toMatchObject({ permission: 'orders.create' });
+    expect(getApiRoutePolicy('/api/orders/sequence', 'GET')).toMatchObject({ permission: 'orders.create' });
+    expect(getApiRoutePolicy('/api/orders/prefix', 'GET')).toMatchObject({ permission: 'catalog.read' });
+    expect(getApiRoutePolicy('/api/orders/123/spaces', 'POST')).toMatchObject({ permission: 'orders.update' });
+    expect(getApiRoutePolicy('/api/spaces/123/products', 'POST')).toMatchObject({ permission: 'orders.update' });
   });
 
   it('rejects raw JSON parsing in mutation route handlers', () => {
@@ -172,9 +204,12 @@ describe('API route policy manifest', () => {
       resolve(API_ROOT, 'dealer/orders/route.ts'),
       resolve(API_ROOT, 'dealer/orders/[id]/route.ts'),
       resolve(API_ROOT, 'dealer/orders/create/route.ts'),
+      resolve(API_ROOT, 'factory/orders/route.ts'),
       resolve(API_ROOT, 'order-exchanges/route.ts'),
       resolve(API_ROOT, 'order-exchanges/[id]/route.ts'),
       resolve(API_ROOT, 'supplier/orders/route.ts'),
+      resolve(API_ROOT, 'orders/route.ts'),
+      resolve(API_ROOT, 'orders/[id]/route.ts'),
       resolve(API_ROOT, 'orders/generate/route.ts'),
       resolve(API_ROOT, 'orders/basic/route.ts'),
       resolve(API_ROOT, 'orders/prefix/route.ts'),

@@ -6,6 +6,8 @@ export interface ApiRoutePolicy {
   access: ApiRouteAccess;
   readPermission?: EnterprisePermissionCode;
   mutationPermission?: EnterprisePermissionCode;
+  readPermissions?: readonly EnterprisePermissionCode[];
+  mutationPermissions?: readonly EnterprisePermissionCode[];
 }
 
 type PolicyEntry = readonly [string, ApiRoutePolicy];
@@ -17,7 +19,24 @@ const enterpriseRoutes = (
   paths: readonly string[],
   readPermission: EnterprisePermissionCode,
   mutationPermission: EnterprisePermissionCode = readPermission,
-): PolicyEntry[] => paths.map((path) => [path, { access: 'enterprise', readPermission, mutationPermission }]);
+): PolicyEntry[] => paths.map((path) => [path, {
+  access: 'enterprise',
+  readPermission,
+  mutationPermission,
+  readPermissions: [readPermission],
+  mutationPermissions: [mutationPermission],
+}]);
+const enterpriseRoutesWithMutationPermissions = (
+  paths: readonly string[],
+  readPermission: EnterprisePermissionCode,
+  mutationPermissions: readonly EnterprisePermissionCode[],
+): PolicyEntry[] => paths.map((path) => [path, {
+  access: 'enterprise',
+  readPermission,
+  mutationPermission: mutationPermissions[0],
+  readPermissions: [readPermission],
+  mutationPermissions,
+}]);
 
 export const API_ROUTE_POLICY_ENTRIES: readonly PolicyEntry[] = [
   ...publicRoutes([
@@ -69,31 +88,49 @@ export const API_ROUTE_POLICY_ENTRIES: readonly PolicyEntry[] = [
     '/api/supplier/create',
     '/api/supplier/delete',
     '/api/supplier/list',
-    '/api/supplier/orders',
     '/api/supplier/update',
   ], 'partners.read', 'partners.manage'),
   ...enterpriseRoutes([
-    '/api/order-exchanges/[id]',
+    '/api/supplier/orders',
+  ], 'orders.read'),
+  ...enterpriseRoutes([
     '/api/order-exchanges',
-  ], 'orders.read', 'orders.update'),
+  ], 'orders.read', 'orders.submit'),
+  ...enterpriseRoutesWithMutationPermissions([
+    '/api/order-exchanges/[id]',
+  ], 'orders.read', ['orders.update', 'orders.accept']),
   ...enterpriseRoutes([
     '/api/order-partners',
   ], 'orders.create'),
   ...enterpriseRoutes([
     '/api/dealer/orders/[id]',
-    '/api/dealer/orders/create',
     '/api/dealer/orders',
+  ], 'orders.read'),
+  ...enterpriseRoutes([
+    '/api/dealer/orders/create',
+  ], 'orders.read', 'orders.create'),
+  ...enterpriseRoutes([
     '/api/factory/orders',
+  ], 'orders.read', 'orders.accept'),
+  ...enterpriseRoutes([
     '/api/orders/[id]',
     '/api/orders/[id]/spaces',
-    '/api/orders/basic',
-    '/api/orders/generate',
-    '/api/orders/prefix',
-    '/api/orders/sequence',
-    '/api/orders',
     '/api/spaces/[id]/products',
     '/api/spaces/[id]',
-  ], 'orders.read', 'orders.manage'),
+  ], 'orders.read', 'orders.update'),
+  ...enterpriseRoutesWithMutationPermissions([
+    '/api/orders/basic',
+    '/api/orders',
+  ], 'orders.read', ['orders.create', 'orders.update']),
+  ...enterpriseRoutes([
+    '/api/orders/generate',
+  ], 'orders.read', 'orders.create'),
+  ...enterpriseRoutes([
+    '/api/orders/prefix',
+  ], 'catalog.read'),
+  ...enterpriseRoutes([
+    '/api/orders/sequence',
+  ], 'orders.create'),
   ...enterpriseRoutes([
     '/api/orders/[id]/split/confirm',
   ], 'production.read', 'production.plan'),
@@ -211,18 +248,28 @@ function routePattern(path: string): RegExp {
 }
 
 const COMPILED_POLICIES = API_ROUTE_POLICY_ENTRIES.map(([path, policy]) => ({
+  path,
   pattern: routePattern(path),
   policy,
-}));
+  dynamicSegments: path.split('/').filter((segment) => segment.startsWith('[')).length,
+})).sort((left, right) => (
+  left.dynamicSegments - right.dynamicSegments
+  || right.path.length - left.path.length
+));
 
 export function getApiRoutePolicy(pathname: string, method = 'GET'): (ApiRoutePolicy & {
   permission?: EnterprisePermissionCode;
+  permissions?: readonly EnterprisePermissionCode[];
 }) | null {
   const match = COMPILED_POLICIES.find((entry) => entry.pattern.test(pathname));
   if (!match) return null;
   const isMutation = !['GET', 'HEAD', 'OPTIONS'].includes(method.toUpperCase());
+  const permissions = isMutation
+    ? match.policy.mutationPermissions ?? (match.policy.mutationPermission ? [match.policy.mutationPermission] : undefined)
+    : match.policy.readPermissions ?? (match.policy.readPermission ? [match.policy.readPermission] : undefined);
   return {
     ...match.policy,
-    permission: isMutation ? match.policy.mutationPermission : match.policy.readPermission,
+    permission: permissions?.[0],
+    permissions,
   };
 }

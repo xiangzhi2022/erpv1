@@ -48,8 +48,10 @@ export async function proxy(request: NextRequest): Promise<NextResponse> {
       const { data, error } = await client.rpc('current_enterprise_grants', {
         target_tenant_id: enterpriseId,
       });
-      const allowed = !error && policy.permission && data?.some(
-        (grant) => grant.permission === policy.permission,
+      const requiredPermissions = policy.permissions
+        ?? (policy.permission ? [policy.permission] : []);
+      const allowed = !error && requiredPermissions.length > 0 && data?.some(
+        (grant) => requiredPermissions.includes(grant.permission as typeof requiredPermissions[number]),
       );
       if (!allowed) {
         return NextResponse.json(

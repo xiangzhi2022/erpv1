@@ -219,4 +219,22 @@ describe('Supabase session proxy', () => {
       error: { code: 'ENTERPRISE_PERMISSION_DENIED' },
     });
   });
+
+  it('allows mixed mutations when the enterprise has any declared operation grant', async () => {
+    mocks.createServerClient.mockReturnValue({
+      auth: {
+        getClaims: mocks.getClaims.mockResolvedValue({ data: { claims: { sub: 'user-1' } }, error: null }),
+        getSession: mocks.getSession,
+      },
+      rpc: mocks.rpc.mockResolvedValue({ data: [{ permission: 'orders.update' }], error: null }),
+    });
+    const { proxy } = await import('@/proxy');
+
+    const response = await proxy(new NextRequest('https://erp.example.com/api/orders', {
+      method: 'POST',
+      headers: { cookie: 'erp_active_enterprise=11111111-1111-4111-8111-111111111111' },
+    }));
+
+    expect(response.status).toBe(200);
+  });
 });
