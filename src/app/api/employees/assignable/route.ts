@@ -1,6 +1,5 @@
-import { getSupabaseClient } from '@/db/client';
-import { getUserFromRequest } from '@/lib/auth';
-import { canManageProduction } from '@/lib/four-level-order';
+import { getEnterpriseContext, requirePermission } from '@/lib/enterprise/context';
+import { createClient } from '@/lib/supabase/server';
 
 function jsonError(error: string, status: number) {
   return Response.json({ success: false, error }, { status });
@@ -8,26 +7,24 @@ function jsonError(error: string, status: number) {
 
 export async function GET(request: Request) {
   try {
-    const user = await getUserFromRequest(request);
-    if (!user) return jsonError('请先登录', 401);
-    if (!canManageProduction(user)) return jsonError('无权查看可分配员工', 403);
-
-    const supabase = getSupabaseClient();
+    const context = await getEnterpriseContext();
+    requirePermission(context, 'production.read');
+    const supabase = await createClient();
     const { searchParams } = new URL(request.url);
     const processName = (searchParams.get('processName') || '').toLowerCase();
-    let employeeQuery = supabase
+    const employeeQuery = supabase
       .from('employees')
       .select('*, department:departments(id,name,code), primary_position:positions(*)')
+      .eq('enterprise_id', context.enterpriseId)
       .eq('status', 'active')
       .order('employee_no', { ascending: true });
-    if (user.tenant_id) employeeQuery = employeeQuery.or(`tenant_id.is.null,tenant_id.eq.${user.tenant_id}`);
 
     const { data: employees, error } = await employeeQuery;
-    if (error) return jsonError(error.message, 500);
+    if (error) return jsonError('获取可分配员工失败', 500);
     const rows = (employees || []) as Record<string, unknown>[];
     const positionIds = rows.map((row) => String(row.primary_position_id || '')).filter(Boolean);
     const positionsRes = positionIds.length
-      ? await supabase.from('positions').select('*').in('id', positionIds)
+      ? await supabase.from('positions').select('*').eq('enterprise_id', context.enterpriseId).in('id', positionIds)
       : { data: [] };
     const positionMap = new Map(((positionsRes.data || []) as Record<string, unknown>[]).map((row) => [String(row.id), row]));
     const assignable = rows

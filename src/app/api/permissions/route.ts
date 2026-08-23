@@ -1,80 +1,36 @@
-import { getSupabaseClient } from '@/db/client';
-import { getUserFromRequest } from '@/lib/auth';
-import {
-  PERMISSION_TEMPLATES,
-  canAccessPath,
-  getAssignablePermissionKeys,
-  getRoleManagementBusinessType,
-  isSuperAdmin,
-} from '@/lib/role-access';
+import { getEnterpriseContext, requirePermission } from '@/lib/enterprise/context';
+import { createClient } from '@/lib/supabase/server';
 
-function jsonError(error: string, status: number) {
-  return Response.json({ success: false, error }, { status });
-}
-
-interface PermissionRow {
-  id: string;
-  code: string;
-  name: string;
-  module?: string;
-  permission_type?: string;
-  description?: string | null;
-}
-
-function mergePermissionRows(rows: PermissionRow[] | null | undefined, fallbackRows: PermissionRow[]): PermissionRow[] {
-  const map = new Map<string, PermissionRow>();
-  for (const row of fallbackRows) map.set(row.code, row);
-  for (const row of rows || []) map.set(row.code, row);
-  return Array.from(map.values());
-}
-
-export async function GET(request: Request) {
+export async function GET() {
   try {
-    const user = await getUserFromRequest(request);
-    if (!user) return jsonError('请先登录', 401);
-    if (!canAccessPath(user, '/settings/roles')) return jsonError('无权查看权限', 403);
-    if (!isSuperAdmin(user) && !user.tenant_id) return jsonError('当前管理员未关联企业', 403);
-
-    const allowedCodes = new Set(getAssignablePermissionKeys(user));
-    const templateRows = PERMISSION_TEMPLATES
-      .filter((permission) => isSuperAdmin(user) || allowedCodes.has(permission.key))
-      .map((permission) => ({
-        id: permission.key,
-        code: permission.key,
-        name: permission.label,
-        module: permission.businessType,
-        permission_type: 'route',
-        description: permission.description,
-      }));
-    const scope = {
-      is_super_admin: isSuperAdmin(user),
-      tenant_id: user.tenant_id || null,
-      business_type: getRoleManagementBusinessType(user) || 'platform',
-    };
-    if (!isSuperAdmin(user) && allowedCodes.size === 0) {
-      return Response.json({ success: true, data: templateRows, scope });
-    }
-
-    const supabase = getSupabaseClient();
-    let query = supabase.from('permissions').select('*').order('module', { ascending: true });
-    if (!isSuperAdmin(user)) query = query.in('code', Array.from(allowedCodes));
-    const { data, error } = await query;
+    const context = await getEnterpriseContext();
+    requirePermission(context, 'roles.manage');
+    const client = await createClient();
+    const { data, error } = await client
+      .from('permission_catalog')
+      .select('code,description,created_at')
+      .order('code', { ascending: true });
     if (error) {
-      return Response.json({
-        success: true,
-        data: templateRows,
-        warning: error.message,
-        scope,
-      });
+      return Response.json({ success: false, error: '获取权限失败' }, { status: 500 });
     }
-    const rows = mergePermissionRows((data || []) as PermissionRow[], templateRows);
     return Response.json({
       success: true,
-      data: rows,
-      scope,
+      data: (data ?? []).map((permission) => ({
+        id: permission.code,
+        code: permission.code,
+        name: permission.description,
+        module: permission.code.split('.')[0],
+        permission_type: 'operation',
+        description: permission.description,
+      })),
+      scope: {
+        is_super_admin: false,
+        tenant_id: context.enterpriseId,
+        business_type: context.enterpriseType,
+      },
     });
   } catch (error) {
-    console.error('get permissions failed:', error);
-    return jsonError('获取权限失败', 500);
+    console.error('get permission catalog failed:', error);
+    return Response.json({ success: false, error: '获取权限失败' }, { status: 500 });
   }
 }

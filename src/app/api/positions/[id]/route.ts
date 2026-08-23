@@ -1,21 +1,15 @@
 import { parseJsonObject } from '@/lib/api/request';
-import { getSupabaseClient } from '@/db/client';
-import { getUserFromRequest } from '@/lib/auth';
-import { getUserPermissionKeys, isAdminRole } from '@/lib/role-access';
+import { getEnterpriseContext, requirePermission } from '@/lib/enterprise/context';
+import { createClient } from '@/lib/supabase/server';
 
 function jsonError(error: string, status: number) {
   return Response.json({ success: false, error }, { status });
 }
 
-function canManageOrganization(user: NonNullable<Awaited<ReturnType<typeof getUserFromRequest>>>): boolean {
-  return isAdminRole(user) || getUserPermissionKeys(user).includes('factory_boss');
-}
-
 export async function PATCH(request: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
-    const user = await getUserFromRequest(request);
-    if (!user) return jsonError('请先登录', 401);
-    if (!canManageOrganization(user)) return jsonError('无权修改岗位', 403);
+    const context = await getEnterpriseContext();
+    requirePermission(context, 'organization.manage');
 
     const { id } = await params;
     const body = (await parseJsonObject(request)) as Record<string, unknown>;
@@ -35,11 +29,10 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
     ]) {
       if (body[key] !== undefined) updateData[key] = body[key];
     }
-    const supabase = getSupabaseClient();
-    let query = supabase.from('positions').update(updateData).eq('id', id);
-    if (user.tenant_id) query = query.or(`tenant_id.is.null,tenant_id.eq.${user.tenant_id}`);
+    const supabase = await createClient();
+    const query = supabase.from('positions').update(updateData).eq('enterprise_id', context.enterpriseId).eq('id', id);
     const { data, error } = await query.select().single();
-    if (error) return jsonError(error.message, 500);
+    if (error) return jsonError('修改岗位失败', 500);
     return Response.json({ success: true, data });
   } catch (error) {
     console.error('update position failed:', error);

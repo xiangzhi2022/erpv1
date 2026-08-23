@@ -16,6 +16,18 @@ export async function createManagedIdentity(input: CreateManagedIdentityInput) {
   });
 }
 
+export async function findManagedIdentityByPhone(phone: string) {
+  const { data, error } = await createAdminClient().auth.admin.listUsers({
+    page: 1,
+    perPage: 1000,
+  });
+  if (error) return { identity: null, error };
+  return {
+    identity: data.users.find((candidate) => candidate.phone === phone) ?? null,
+    error: null,
+  };
+}
+
 export async function updateManagedIdentityPassword(userId: string, password: string) {
   return createAdminClient().auth.admin.updateUserById(userId, { password });
 }

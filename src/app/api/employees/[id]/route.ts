@@ -1,43 +1,36 @@
 import { parseJsonObject } from '@/lib/api/request';
-import { getSupabaseClient } from '@/db/client';
-import { getUserFromRequest } from '@/lib/auth';
+import { getEnterpriseContext, requirePermission } from '@/lib/enterprise/context';
+import { createClient } from '@/lib/supabase/server';
 import {
   replaceEmployeeRelations,
   stringArray,
-  syncEmployeeUserPermissions,
+  syncEmployeeRoleBindings,
   text,
   type EmployeeRoleRow,
 } from '@/lib/employee-management';
-import { canAccessPath, getUserPermissionKeys, isAdminRole } from '@/lib/role-access';
-
-type AuthUser = NonNullable<Awaited<ReturnType<typeof getUserFromRequest>>>;
 
 function jsonError(error: string, status: number) {
   return Response.json({ success: false, error }, { status });
 }
 
-function canManageOrganization(user: AuthUser): boolean {
-  return isAdminRole(user) || getUserPermissionKeys(user).includes('factory_boss');
-}
-
 export async function GET(request: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
-    const user = await getUserFromRequest(request);
-    if (!user) return jsonError('请先登录', 401);
-    if (!canAccessPath(user, '/employees')) return jsonError('无权查看员工', 403);
+    void request;
+    const context = await getEnterpriseContext();
+    requirePermission(context, 'members.read');
     const { id } = await params;
-    const supabase = getSupabaseClient();
-    let query = supabase
+    const supabase = await createClient();
+    const query = supabase
       .from('employees')
       .select('*, department:departments(*), primary_position:positions(*)')
+      .eq('enterprise_id', context.enterpriseId)
       .eq('id', id);
-    if (user.tenant_id) query = query.or(`tenant_id.is.null,tenant_id.eq.${user.tenant_id}`);
     const employeeRes = await query.maybeSingle();
-    if (employeeRes.error) return jsonError(employeeRes.error.message, 500);
+    if (employeeRes.error) return jsonError('获取员工失败', 500);
     if (!employeeRes.data) return jsonError('员工不存在', 404);
     const [positionsRes, rolesRes] = await Promise.all([
-      supabase.from('employee_positions').select('*, position:positions(*)').eq('employee_id', id),
-      supabase.from('employee_roles').select('*, role:roles(*)').eq('employee_id', id),
+      supabase.from('employee_positions').select('*, position:positions(*)').eq('enterprise_id', context.enterpriseId).eq('employee_id', id),
+      supabase.from('employee_roles').select('*, role:roles(*)').eq('enterprise_id', context.enterpriseId).eq('employee_id', id),
     ]);
     return Response.json({
       success: true,
@@ -55,9 +48,8 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
 
 export async function PATCH(request: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
-    const user = await getUserFromRequest(request);
-    if (!user) return jsonError('请先登录', 401);
-    if (!canManageOrganization(user)) return jsonError('无权修改员工', 403);
+    const context = await getEnterpriseContext();
+    requirePermission(context, 'members.manage');
     const { id } = await params;
     const body = (await parseJsonObject(request)) as Record<string, unknown>;
     const updateData: Record<string, unknown> = { updated_at: new Date().toISOString() };
@@ -69,19 +61,18 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
     if (body.department_id !== undefined) updateData.department_id = text(body.department_id);
     if (body.primary_position_id !== undefined) updateData.primary_position_id = text(body.primary_position_id);
 
-    const supabase = getSupabaseClient();
-    let query = supabase.from('employees').update(updateData).eq('id', id);
-    if (user.tenant_id) query = query.or(`tenant_id.is.null,tenant_id.eq.${user.tenant_id}`);
+    const supabase = await createClient();
+    const query = supabase.from('employees').update(updateData).eq('enterprise_id', context.enterpriseId).eq('id', id);
     const { data, error } = await query.select().single();
-    if (error) return jsonError(error.message, 500);
+    if (error) return jsonError('修改员工失败', 500);
 
     let syncedRoles: EmployeeRoleRow[] | null = null;
     if (body.position_ids !== undefined || body.role_ids !== undefined) {
       const existingPositions = body.position_ids === undefined
-        ? await supabase.from('employee_positions').select('position_id').eq('employee_id', id)
+        ? await supabase.from('employee_positions').select('position_id').eq('enterprise_id', context.enterpriseId).eq('employee_id', id)
         : null;
       const existingRoles = body.role_ids === undefined
-        ? await supabase.from('employee_roles').select('role:roles(id,code,name,description,tenant_id)').eq('employee_id', id)
+        ? await supabase.from('employee_roles').select('role:roles(id,code,name,description,tenant_id)').eq('enterprise_id', context.enterpriseId).eq('employee_id', id)
         : null;
       const positionIds = body.position_ids !== undefined
         ? stringArray(body.position_ids)
@@ -92,12 +83,12 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
             .map((row) => (Array.isArray(row.role) ? row.role[0]?.id : row.role?.id))
             .filter((value): value is string => Boolean(value));
       const primaryPositionId = text(body.primary_position_id) || String(data.primary_position_id || '') || positionIds[0] || null;
-      syncedRoles = await replaceEmployeeRelations(id, roleIds, positionIds, primaryPositionId, user);
+      syncedRoles = await replaceEmployeeRelations(id, roleIds, positionIds, primaryPositionId, context);
     }
 
     if (body.user_id !== undefined || body.role_ids !== undefined) {
       const userId = text(body.user_id) || String(data.user_id || '') || null;
-      if (syncedRoles) await syncEmployeeUserPermissions(userId, user.tenant_id || null, syncedRoles, user.id);
+      if (syncedRoles) await syncEmployeeRoleBindings(userId, syncedRoles, context);
     }
 
     return Response.json({ success: true, data });
@@ -109,36 +100,31 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
 
 export async function DELETE(request: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
-    const user = await getUserFromRequest(request);
-    if (!user) return jsonError('请先登录', 401);
-    if (!canManageOrganization(user)) return jsonError('无权删除员工', 403);
+    const context = await getEnterpriseContext();
+    requirePermission(context, 'members.manage');
     const { id } = await params;
     const hard = new URL(request.url).searchParams.get('hard') === '1';
-    const supabase = getSupabaseClient();
+    const supabase = await createClient();
 
-    let existingQuery = supabase.from('employees').select('id,user_id,tenant_id,status').eq('id', id);
-    if (user.tenant_id) existingQuery = existingQuery.or(`tenant_id.is.null,tenant_id.eq.${user.tenant_id}`);
+    const existingQuery = supabase.from('employees').select('id,user_id,enterprise_id,status').eq('enterprise_id', context.enterpriseId).eq('id', id);
     const { data: existing, error: existingError } = await existingQuery.maybeSingle();
-    if (existingError) return jsonError(existingError.message, 500);
+    if (existingError) return jsonError('删除员工失败', 500);
     if (!existing) return jsonError('员工不存在', 404);
 
     if (!hard) {
       const { error } = await supabase
         .from('employees')
         .update({ status: 'inactive', leave_date: new Date().toISOString().slice(0, 10), updated_at: new Date().toISOString() })
+        .eq('enterprise_id', context.enterpriseId)
         .eq('id', id);
-      if (error) return jsonError(error.message, 500);
-      if (existing.user_id) {
-        await supabase.from('users').update({ is_active: false, updated_at: new Date().toISOString() }).eq('id', existing.user_id);
-      }
+      if (error) return jsonError('停用员工失败', 500);
       return Response.json({ success: true, mode: 'inactive' });
     }
 
-    await supabase.from('employee_positions').delete().eq('employee_id', id);
-    await supabase.from('employee_roles').delete().eq('employee_id', id);
-    if (existing.user_id) await supabase.from('user_permissions').delete().eq('user_id', existing.user_id);
-    const { error } = await supabase.from('employees').delete().eq('id', id);
-    if (error) return jsonError(error.message, 500);
+    await supabase.from('employee_positions').delete().eq('enterprise_id', context.enterpriseId).eq('employee_id', id);
+    await supabase.from('employee_roles').delete().eq('enterprise_id', context.enterpriseId).eq('employee_id', id);
+    const { error } = await supabase.from('employees').delete().eq('enterprise_id', context.enterpriseId).eq('id', id);
+    if (error) return jsonError('删除员工失败', 500);
     return Response.json({ success: true, mode: 'deleted' });
   } catch (error) {
     console.error('delete employee failed:', error);

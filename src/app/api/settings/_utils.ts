@@ -1,16 +1,18 @@
 import { NextResponse } from 'next/server';
-import { getSupabaseClient } from '@/db/client';
-import { getUserFromRequest, type AuthUser } from '@/lib/auth';
+import { getCurrentAuthUser, type AuthUser } from '@/lib/auth';
+import { getEnterpriseContext, type EnterpriseContext } from '@/lib/enterprise/context';
+import { createClient } from '@/lib/supabase/server';
 import { isAdminRole } from '@/lib/role-access';
 
-export type SettingsAuthResult = { user: AuthUser } | { response: NextResponse };
+export type SettingsAuthResult = { user: AuthUser; context: EnterpriseContext } | { response: NextResponse };
 
 export async function requireSettingsUser(request: Request): Promise<SettingsAuthResult> {
-  const user = await getUserFromRequest(request);
+  void request;
+  const [user, context] = await Promise.all([getCurrentAuthUser(), getEnterpriseContext()]);
   if (!user) {
-    return { response: NextResponse.json({ success: false, error: '????' }, { status: 401 }) };
+    return { response: NextResponse.json({ success: false, error: '请先登录' }, { status: 401 }) };
   }
-  return { user };
+  return { user, context };
 }
 
 export function authFailed(result: SettingsAuthResult): result is { response: NextResponse } {
@@ -26,10 +28,10 @@ export function stringifySettingValue(value: unknown): string {
   return JSON.stringify(value ?? '');
 }
 
-export function settingsRowsToObject(rows: Array<{ setting_key: string; setting_value: string | null }> | null | undefined) {
+export function settingsRowsToObject(rows: Array<{ key: string; value: unknown }> | null | undefined) {
   const settings: Record<string, string> = {};
   for (const row of rows || []) {
-    settings[row.setting_key] = row.setting_value ?? '';
+    settings[row.key] = typeof row.value === 'string' ? row.value : JSON.stringify(row.value ?? '');
   }
   return settings;
 }
@@ -67,11 +69,13 @@ export function normalizeTenant<T extends {
   };
 }
 
-export async function loadUserSettings(userId: string) {
-  const supabase = getSupabaseClient();
-  const { data, error } = await supabase
+export async function loadUserSettings(userId: string, enterpriseId?: string) {
+  const context = enterpriseId ? null : await getEnterpriseContext();
+  const client = await createClient();
+  const { data, error } = await client
     .from('user_settings')
-    .select('setting_key, setting_value')
+    .select('key, value')
+    .eq('enterprise_id', enterpriseId ?? context!.enterpriseId)
     .eq('user_id', userId);
 
   if (error) throw error;

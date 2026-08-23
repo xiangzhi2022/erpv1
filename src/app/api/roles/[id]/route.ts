@@ -1,67 +1,45 @@
-import { parseJsonObject } from '@/lib/api/request';
-import { getSupabaseClient } from '@/db/client';
-import { getUserFromRequest } from '@/lib/auth';
-import { defaultPermissionsForRole } from '@/lib/organization';
-import {
-  canAssignPermissionKeys,
-  getUserPermissionKeys,
-  isAdminRole,
-  isSuperAdmin,
-  type AccessUser,
-} from '@/lib/role-access';
+import { z } from 'zod';
+import { parseJson } from '@/lib/api/request';
+import { getEnterpriseContext, requirePermission } from '@/lib/enterprise/context';
+import { createClient } from '@/lib/supabase/server';
 
-interface RoleRow {
-  id: string;
-  code: string;
-  tenant_id: string | null;
-}
+const updateRoleSchema = z.object({
+  name: z.string().trim().min(1).max(100).optional(),
+  code: z.string().trim().min(1).max(80).regex(/^[a-z][a-z0-9_.-]*$/).optional(),
+  description: z.string().trim().max(500).nullable().optional(),
+});
 
 function jsonError(error: string, status: number) {
   return Response.json({ success: false, error }, { status });
 }
 
-function canManageOrganization(user: NonNullable<Awaited<ReturnType<typeof getUserFromRequest>>>): boolean {
-  return isAdminRole(user) || getUserPermissionKeys(user).includes('factory_boss');
-}
-
-function canManageRole(user: AccessUser, role: RoleRow): boolean {
-  if (isSuperAdmin(user)) return true;
-  if (!user.tenant_id || role.tenant_id !== user.tenant_id) return false;
-  const defaultPermissions = defaultPermissionsForRole(role.code);
-  return defaultPermissions.length === 0 || canAssignPermissionKeys(user, defaultPermissions);
-}
-
 export async function PATCH(request: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
-    const user = await getUserFromRequest(request);
-    if (!user) return jsonError('请先登录', 401);
-    if (!canManageOrganization(user)) return jsonError('无权修改角色', 403);
+    const context = await getEnterpriseContext();
+    requirePermission(context, 'roles.manage');
     const { id } = await params;
-    const body = (await parseJsonObject(request)) as Record<string, unknown>;
-    const updateData: Record<string, unknown> = { updated_at: new Date().toISOString() };
-    for (const key of ['name', 'code', 'description', 'status']) {
-      if (body[key] !== undefined) updateData[key] = body[key];
-    }
-    if (!isSuperAdmin(user) && updateData.code !== undefined) {
-      const defaultPermissions = defaultPermissionsForRole(String(updateData.code));
-      if (defaultPermissions.length > 0 && !canAssignPermissionKeys(user, defaultPermissions)) {
-        return jsonError('不能改成其他企业类型的角色', 403);
-      }
-    }
-    const supabase = getSupabaseClient();
-    const { data: existing, error: existingError } = await supabase
+    const body = await parseJson(request, updateRoleSchema);
+    if (Object.keys(body).length === 0) return jsonError('没有可更新的角色信息', 400);
+    const client = await createClient();
+    const { data: existing, error: existingError } = await client
       .from('roles')
-      .select('id, code, tenant_id')
+      .select('id,is_system')
+      .eq('tenant_id', context.enterpriseId)
       .eq('id', id)
       .maybeSingle();
     if (existingError || !existing) return jsonError('角色不存在', 404);
-    if (!canManageRole(user, existing as RoleRow)) return jsonError('无权修改该角色', 403);
-
-    const { data, error } = await supabase.from('roles').update(updateData).eq('id', id).select().single();
-    if (error) return jsonError(error.message, 500);
-    return Response.json({ success: true, data });
+    if (existing.is_system && body.code) return jsonError('系统角色编码不可修改', 409);
+    const { data, error } = await client
+      .from('roles')
+      .update({ ...body, updated_at: new Date().toISOString() })
+      .eq('tenant_id', context.enterpriseId)
+      .eq('id', id)
+      .select('id,name,code,description,is_system,tenant_id,created_at,updated_at')
+      .maybeSingle();
+    if (error || !data) return jsonError('修改角色失败', 500);
+    return Response.json({ success: true, data: { ...data, status: 'active' } });
   } catch (error) {
-    console.error('update role failed:', error);
+    console.error('update enterprise role failed:', error);
     return jsonError('修改角色失败', 500);
   }
 }

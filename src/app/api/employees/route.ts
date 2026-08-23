@@ -1,32 +1,23 @@
 import { parseJsonObject } from '@/lib/api/request';
-import { getSupabaseClient } from '@/db/client';
-import { getUserFromRequest } from '@/lib/auth';
+import { getEnterpriseContext, requirePermission } from '@/lib/enterprise/context';
+import { createClient } from '@/lib/supabase/server';
 import {
   createOrReuseEmployeeLoginUser,
   replaceEmployeeRelations,
   stringArray,
-  syncEmployeeUserPermissions,
+  syncEmployeeRoleBindings,
   text,
 } from '@/lib/employee-management';
-import { canAccessPath, getUserPermissionKeys, isAdminRole } from '@/lib/role-access';
-
-type AuthUser = NonNullable<Awaited<ReturnType<typeof getUserFromRequest>>>;
 
 function jsonError(error: string, status: number) {
   return Response.json({ success: false, error }, { status });
 }
 
-function canManageOrganization(user: AuthUser): boolean {
-  return isAdminRole(user) || getUserPermissionKeys(user).includes('factory_boss');
-}
-
 export async function GET(request: Request) {
   try {
-    const user = await getUserFromRequest(request);
-    if (!user) return jsonError('请先登录', 401);
-    if (!canAccessPath(user, '/employees')) return jsonError('无权查看员工', 403);
-
-    const supabase = getSupabaseClient();
+    const context = await getEnterpriseContext();
+    requirePermission(context, 'members.read');
+    const supabase = await createClient();
     const { searchParams } = new URL(request.url);
     const keyword = (searchParams.get('keyword') || '').trim();
     const status = searchParams.get('status');
@@ -35,23 +26,23 @@ export async function GET(request: Request) {
     let query = supabase
       .from('employees')
       .select('*, department:departments(id,name,code), primary_position:positions(id,name,code,position_type,can_receive_production_task,can_calculate_piece_wage,can_review_task,can_assign_task)')
+      .eq('enterprise_id', context.enterpriseId)
       .order('created_at', { ascending: false });
-    if (user.tenant_id) query = query.or(`tenant_id.is.null,tenant_id.eq.${user.tenant_id}`);
     if (status && status !== 'all') query = query.eq('status', status);
     if (departmentId && departmentId !== 'all') query = query.eq('department_id', departmentId);
     if (positionId && positionId !== 'all') query = query.eq('primary_position_id', positionId);
     if (keyword) query = query.or(`name.ilike.%${keyword}%,employee_no.ilike.%${keyword}%,phone.ilike.%${keyword}%`);
     const { data, error } = await query;
-    if (error) return jsonError(error.message, 500);
+    if (error) return jsonError('获取员工失败', 500);
 
     const rows = data || [];
     const employeeIds = rows.map((row) => row.id).filter(Boolean);
     const [positionsRes, rolesRes] = await Promise.all([
       employeeIds.length
-        ? supabase.from('employee_positions').select('employee_id, position:positions(id,name,code)').in('employee_id', employeeIds)
+        ? supabase.from('employee_positions').select('employee_id, position:positions(id,name,code)').eq('enterprise_id', context.enterpriseId).in('employee_id', employeeIds)
         : Promise.resolve({ data: [] }),
       employeeIds.length
-        ? supabase.from('employee_roles').select('employee_id, role:roles(id,name,code)').in('employee_id', employeeIds)
+        ? supabase.from('employee_roles').select('employee_id, role:roles(id,name,code)').eq('enterprise_id', context.enterpriseId).in('employee_id', employeeIds)
         : Promise.resolve({ data: [] }),
     ]);
 
@@ -80,9 +71,8 @@ export async function GET(request: Request) {
 
 export async function POST(request: Request) {
   try {
-    const user = await getUserFromRequest(request);
-    if (!user) return jsonError('请先登录', 401);
-    if (!canManageOrganization(user)) return jsonError('无权创建员工', 403);
+    const context = await getEnterpriseContext();
+    requirePermission(context, 'members.manage');
 
     const body = (await parseJsonObject(request)) as Record<string, unknown>;
     const name = text(body.name);
@@ -91,9 +81,9 @@ export async function POST(request: Request) {
     const positionIds = stringArray(body.position_ids);
     const roleIds = stringArray(body.role_ids);
     const primaryPositionId = text(body.primary_position_id) || positionIds[0] || null;
-    const userId = await createOrReuseEmployeeLoginUser(body, user);
+    const userId = await createOrReuseEmployeeLoginUser(body, context);
 
-    const supabase = getSupabaseClient();
+    const supabase = await createClient();
     const { data, error } = await supabase
       .from('employees')
       .insert({
@@ -109,17 +99,17 @@ export async function POST(request: Request) {
         status: text(body.status) || 'active',
         hire_date: text(body.hire_date),
         leave_date: text(body.leave_date),
-        base_salary: body.base_salary ?? 0,
-        tenant_id: user.tenant_id || null,
+        base_salary: typeof body.base_salary === 'number' ? body.base_salary : Number(body.base_salary || 0),
+        enterprise_id: context.enterpriseId,
         remark: text(body.remark),
       })
       .select()
       .single();
-    if (error) return jsonError(error.message, 500);
+    if (error) return jsonError('创建员工失败', 500);
 
     const employeeId = String(data.id);
-    const roles = await replaceEmployeeRelations(employeeId, roleIds, positionIds, primaryPositionId, user);
-    await syncEmployeeUserPermissions(userId, user.tenant_id || null, roles, user.id);
+    const roles = await replaceEmployeeRelations(employeeId, roleIds, positionIds, primaryPositionId, context);
+    await syncEmployeeRoleBindings(userId, roles, context);
 
     return Response.json({ success: true, data: { ...data, role_ids: roles.map((role) => role.id) } });
   } catch (error) {

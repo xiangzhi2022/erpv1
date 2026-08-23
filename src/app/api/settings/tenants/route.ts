@@ -1,69 +1,48 @@
-import { parseJsonObject } from '@/lib/api/request';
 import { NextRequest, NextResponse } from 'next/server';
-import { getSupabaseClient } from '@/db/client';
+import { z } from 'zod';
+import { parseJson } from '@/lib/api/request';
 import { authFailed, normalizeTenant, requireSettingsUser } from '../_utils';
+import { createClient } from '@/lib/supabase/server';
 
-function requireSuperAdmin(role: string) {
-  return role === 'super_admin';
-}
+const updateEnterpriseSchema = z.object({
+  name: z.string().trim().min(1).max(100).optional(),
+  company_name: z.string().trim().min(1).max(100).optional(),
+  enterprise_type: z.string().trim().min(1).max(40).optional(),
+  tenant_type: z.string().trim().min(1).max(40).optional(),
+});
 
 export async function GET(request: NextRequest) {
   try {
     const auth = await requireSettingsUser(request);
     if (authFailed(auth)) return auth.response;
-    if (!requireSuperAdmin(auth.user.role)) {
-      return NextResponse.json({ success: false, error: '?????????' }, { status: 403 });
+    const client = await createClient();
+    const [{ data, error }, { data: prefix }] = await Promise.all([
+      client
+        .from('enterprises')
+        .select('id,name,enterprise_type,status,created_at,updated_at')
+        .eq('id', auth.context.enterpriseId)
+        .maybeSingle(),
+      client
+        .from('order_prefixes')
+        .select('prefix')
+        .eq('enterprise_id', auth.context.enterpriseId)
+        .order('created_at', { ascending: true })
+        .limit(1)
+        .maybeSingle(),
+    ]);
+    if (error || !data) {
+      return NextResponse.json({ success: false, error: '获取企业信息失败' }, { status: 500 });
     }
-
-    const { data, error } = await getSupabaseClient()
-      .from('tenants')
-      .select('id, name, company_name, tenant_type, prefix, status, created_at, updated_at')
-      .order('created_at', { ascending: false });
-
-    if (error) return NextResponse.json({ success: false, error: '????????' }, { status: 500 });
-    return NextResponse.json({ success: true, tenants: (data || []).map(normalizeTenant) });
+    const tenant = normalizeTenant({
+      ...data,
+      tenant_type: data.enterprise_type,
+      company_name: data.name,
+      prefix: prefix?.prefix ?? '',
+    });
+    return NextResponse.json({ success: true, tenants: [tenant] });
   } catch (error) {
-    console.error('get tenants failed:', error);
-    return NextResponse.json({ success: false, error: '????????' }, { status: 500 });
-  }
-}
-
-export async function POST(request: NextRequest) {
-  try {
-    const auth = await requireSettingsUser(request);
-    if (authFailed(auth)) return auth.response;
-    if (!requireSuperAdmin(auth.user.role)) {
-      return NextResponse.json({ success: false, error: '???????????' }, { status: 403 });
-    }
-
-    const body = await parseJsonObject(request);
-    const tenantType = body.tenant_type;
-    const companyName = body.company_name || body.name;
-    if (!tenantType || !companyName) {
-      return NextResponse.json({ success: false, error: '???????????' }, { status: 400 });
-    }
-
-    const supabase = getSupabaseClient();
-    if (body.prefix) {
-      const { data: existing } = await supabase
-        .from('tenants')
-        .select('id')
-        .eq('prefix', body.prefix)
-        .maybeSingle();
-      if (existing) return NextResponse.json({ success: false, error: '???????' }, { status: 400 });
-    }
-
-    const { data, error } = await supabase
-      .from('tenants')
-      .insert({ name: companyName, company_name: companyName, tenant_type: tenantType, prefix: body.prefix || null, status: body.status || 'active' })
-      .select('id, name, company_name, tenant_type, prefix, status, created_at, updated_at')
-      .single();
-
-    if (error) return NextResponse.json({ success: false, error: '??????' }, { status: 500 });
-    return NextResponse.json({ success: true, tenant: normalizeTenant(data) });
-  } catch (error) {
-    console.error('create tenant failed:', error);
-    return NextResponse.json({ success: false, error: '??????' }, { status: 500 });
+    console.error('get enterprise settings failed:', error);
+    return NextResponse.json({ success: false, error: '获取企业信息失败' }, { status: 500 });
   }
 }
 
@@ -71,70 +50,44 @@ export async function PUT(request: NextRequest) {
   try {
     const auth = await requireSettingsUser(request);
     if (authFailed(auth)) return auth.response;
-    if (!requireSuperAdmin(auth.user.role)) {
-      return NextResponse.json({ success: false, error: '???????????' }, { status: 403 });
+    const body = await parseJson(request, updateEnterpriseSchema);
+    const name = body.company_name ?? body.name;
+    const enterpriseType = body.enterprise_type ?? body.tenant_type;
+    if (!name && !enterpriseType) {
+      return NextResponse.json({ success: false, error: '没有可更新的企业信息' }, { status: 400 });
     }
-
-    const body = await parseJsonObject(request);
-    if (!body.id) return NextResponse.json({ success: false, error: '??ID??' }, { status: 400 });
-
-    const supabase = getSupabaseClient();
-    if (body.prefix) {
-      const { data: existing } = await supabase
-        .from('tenants')
-        .select('id')
-        .eq('prefix', body.prefix)
-        .neq('id', body.id)
-        .maybeSingle();
-      if (existing) return NextResponse.json({ success: false, error: '???????????' }, { status: 400 });
+    const client = await createClient();
+    const { data, error } = await client
+      .from('enterprises')
+      .update({
+        ...(name ? { name } : {}),
+        ...(enterpriseType ? { enterprise_type: enterpriseType } : {}),
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', auth.context.enterpriseId)
+      .select('id,name,enterprise_type,status,created_at,updated_at')
+      .maybeSingle();
+    if (error || !data) {
+      return NextResponse.json({ success: false, error: '更新企业信息失败' }, { status: 500 });
     }
-
-    const updateData: Record<string, unknown> = { updated_at: new Date().toISOString() };
-    if (body.company_name !== undefined || body.name !== undefined) {
-      updateData.name = body.company_name || body.name;
-      updateData.company_name = body.company_name || body.name;
-    }
-    if (body.tenant_type !== undefined) updateData.tenant_type = body.tenant_type;
-    if (body.prefix !== undefined) updateData.prefix = body.prefix || null;
-    if (body.status !== undefined) updateData.status = body.status;
-
-    const { data, error } = await supabase
-      .from('tenants')
-      .update(updateData)
-      .eq('id', body.id)
-      .select('id, name, company_name, tenant_type, prefix, status, created_at, updated_at')
-      .single();
-
-    if (error) return NextResponse.json({ success: false, error: '??????' }, { status: 500 });
-    return NextResponse.json({ success: true, tenant: normalizeTenant(data) });
+    return NextResponse.json({
+      success: true,
+      tenant: normalizeTenant({
+        ...data,
+        tenant_type: data.enterprise_type,
+        company_name: data.name,
+      }),
+    });
   } catch (error) {
-    console.error('update tenant failed:', error);
-    return NextResponse.json({ success: false, error: '??????' }, { status: 500 });
+    console.error('update enterprise settings failed:', error);
+    return NextResponse.json({ success: false, error: '更新企业信息失败' }, { status: 500 });
   }
 }
 
-export async function DELETE(request: NextRequest) {
-  try {
-    const auth = await requireSettingsUser(request);
-    if (authFailed(auth)) return auth.response;
-    if (!requireSuperAdmin(auth.user.role)) {
-      return NextResponse.json({ success: false, error: '???????????' }, { status: 403 });
-    }
+export function POST() {
+  return NextResponse.json({ success: false, error: '请通过企业入驻流程创建企业' }, { status: 405 });
+}
 
-    const id = new URL(request.url).searchParams.get('id');
-    if (!id) return NextResponse.json({ success: false, error: '??ID??' }, { status: 400 });
-
-    const supabase = getSupabaseClient();
-    const { data: tenant } = await supabase.from('tenants').select('tenant_type').eq('id', id).maybeSingle();
-    if (tenant?.tenant_type === 'official') {
-      return NextResponse.json({ success: false, error: '????????' }, { status: 400 });
-    }
-
-    const { error } = await supabase.from('tenants').delete().eq('id', id);
-    if (error) return NextResponse.json({ success: false, error: '??????' }, { status: 500 });
-    return NextResponse.json({ success: true });
-  } catch (error) {
-    console.error('delete tenant failed:', error);
-    return NextResponse.json({ success: false, error: '??????' }, { status: 500 });
-  }
+export function DELETE() {
+  return NextResponse.json({ success: false, error: '不支持通过设置页面删除企业' }, { status: 405 });
 }

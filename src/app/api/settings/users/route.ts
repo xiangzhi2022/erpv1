@@ -1,161 +1,119 @@
-import { parseJsonObject } from '@/lib/api/request';
 import { NextRequest, NextResponse } from 'next/server';
-import { getSupabaseClient } from '@/db/client';
+import { z } from 'zod';
+import { parseJson } from '@/lib/api/request';
 import {
   createManagedIdentity,
-  deleteManagedIdentity,
+  findManagedIdentityByPhone,
   updateManagedIdentityPassword,
 } from '@/lib/admin/user-identities';
-import {
-  getAccountRoleTemplate,
-  getDepartmentForPermissions,
-  getPermissionTemplate,
-  isSuperAdmin,
-  normalizeAccountRole,
-  canAssignPermissionKeys,
-  type AccountRole,
-  type PermissionKey,
-} from '@/lib/role-access';
-import { authFailed, isSettingsAdmin, normalizeTenant, requireSettingsUser } from '../_utils';
+import { createClient } from '@/lib/supabase/server';
+import { authFailed, requireSettingsUser } from '../_utils';
 
-interface UserRow {
-  id: string;
-  phone: string;
-  real_name: string | null;
-  nickname: string | null;
-  role: string;
-  department: string | null;
-  is_active: boolean;
-  tenant_id: string | null;
-  tenant_type: string | null;
-  created_at: string | null;
-}
+const createUserSchema = z.object({
+  phone: z.string().regex(/^1[3-9]\d{9}$/, '手机号格式不正确'),
+  password: z.string().min(8, '密码至少 8 位'),
+  real_name: z.string().trim().min(1).max(100).optional(),
+  name: z.string().trim().min(1).max(100).optional(),
+  role: z.string().trim().regex(/^[A-Za-z0-9_.-]+$/).optional(),
+});
 
-interface PermissionRow {
-  user_id: string;
-  permission_key: string | null;
-}
+const updateUserSchema = z.object({
+  real_name: z.string().trim().min(1).max(100).optional(),
+  name: z.string().trim().min(1).max(100).optional(),
+  role: z.string().trim().regex(/^[A-Za-z0-9_.-]+$/).optional(),
+  status: z.enum(['active', 'inactive', 'suspended']).optional(),
+  password: z.string().min(8).optional(),
+});
 
-function normalizeBodyRole(value: unknown): AccountRole {
-  const role = typeof value === 'string' ? normalizeAccountRole(value) : 'employee';
-  return role === 'guest' ? 'employee' : role;
-}
-
-function sanitizePermissionKeys(value: unknown): PermissionKey[] {
-  if (!Array.isArray(value)) return [];
-  return Array.from(
-    new Set(
-      value
-        .filter((key): key is string => typeof key === 'string' && Boolean(getPermissionTemplate(key)))
-        .map((key) => key as PermissionKey)
-    )
-  );
-}
-
-function activeStatusFromBody(body: Record<string, unknown>): boolean | undefined {
-  if (typeof body.is_active === 'boolean') return body.is_active;
-  if (body.status === 'active') return true;
-  if (body.status === 'inactive') return false;
-  return undefined;
-}
-
-function canManageUser(authUser: { role: string; tenant_id?: string }, target: Pick<UserRow, 'role' | 'tenant_id'>): boolean {
-  if (isSuperAdmin(authUser)) return true;
-  return normalizeAccountRole(target.role) === 'employee' && Boolean(authUser.tenant_id) && target.tenant_id === authUser.tenant_id;
-}
-
-async function loadPermissionsForUsers(userIds: string[]): Promise<Map<string, PermissionKey[]>> {
-  const map = new Map<string, PermissionKey[]>();
-  if (userIds.length === 0) return map;
-
-  const { data } = await getSupabaseClient()
-    .from('user_permissions')
-    .select('user_id, permission_key')
-    .in('user_id', userIds);
-
-  for (const row of (data || []) as PermissionRow[]) {
-    if (!row.permission_key || !getPermissionTemplate(row.permission_key)) continue;
-    const values = map.get(row.user_id) || [];
-    values.push(row.permission_key as PermissionKey);
-    map.set(row.user_id, values);
+async function resolveEnterpriseRole(roleIdOrCode: string | undefined, enterpriseId: string) {
+  const client = await createClient();
+  const normalizedRole = !roleIdOrCode || roleIdOrCode === 'employee' ? 'worker' : roleIdOrCode;
+  let query = client
+    .from('roles')
+    .select('id,code,name')
+    .eq('tenant_id', enterpriseId);
+  if (/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(normalizedRole)) {
+    query = query.eq('id', normalizedRole);
+  } else {
+    query = query.eq('code', normalizedRole);
   }
-  return map;
-}
-
-async function replaceUserPermissions(userId: string, tenantId: string | null, permissionKeys: PermissionKey[], assignedBy: string) {
-  const supabase = getSupabaseClient();
-  await supabase.from('user_permissions').delete().eq('user_id', userId);
-  if (permissionKeys.length === 0) return;
-
-  const inserts = permissionKeys.map((permissionKey) => ({
-    user_id: userId,
-    tenant_id: tenantId,
-    permission_key: permissionKey,
-    assigned_by: assignedBy,
-  }));
-  const { error } = await supabase.from('user_permissions').insert(inserts);
+  const { data, error } = await query.limit(1).maybeSingle();
   if (error) throw error;
+  return data;
 }
 
 export async function GET(request: NextRequest) {
   try {
     const auth = await requireSettingsUser(request);
     if (authFailed(auth)) return auth.response;
-    if (!isSettingsAdmin(auth.user)) {
-      return NextResponse.json({ success: false, error: '无权限访问用户管理' }, { status: 403 });
-    }
-
-    const supabase = getSupabaseClient();
-    const tenantId = new URL(request.url).searchParams.get('tenant_id');
-    let query = supabase
-      .from('users')
-      .select('id, phone, real_name, nickname, role, department, is_active, tenant_id, tenant_type, created_at')
+    const client = await createClient();
+    const { data: memberships, error } = await client
+      .from('enterprise_memberships')
+      .select('id,user_id,display_name,status,created_at')
+      .eq('tenant_id', auth.context.enterpriseId)
       .order('created_at', { ascending: false });
+    if (error) return NextResponse.json({ success: false, error: '获取用户列表失败' }, { status: 500 });
 
-    if (isSuperAdmin(auth.user)) {
-      if (tenantId) query = query.eq('tenant_id', tenantId);
-    } else {
-      if (!auth.user.tenant_id) {
-        return NextResponse.json({ success: false, error: '当前管理员未关联企业' }, { status: 403 });
-      }
-      query = query.eq('tenant_id', auth.user.tenant_id);
+    const userIds = (memberships ?? []).map((membership) => membership.user_id);
+    const membershipIds = (memberships ?? []).map((membership) => membership.id);
+    const [{ data: profiles }, { data: bindings }] = await Promise.all([
+      userIds.length
+        ? client
+            .from('profiles')
+            .select('id,phone,display_name,avatar_url')
+            .eq('enterprise_id', auth.context.enterpriseId)
+            .in('id', userIds)
+        : Promise.resolve({ data: [] }),
+      membershipIds.length
+        ? client
+            .from('role_bindings')
+            .select('membership_id,role:roles(id,code,name)')
+            .eq('tenant_id', auth.context.enterpriseId)
+            .eq('scope_kind', 'enterprise')
+            .in('membership_id', membershipIds)
+        : Promise.resolve({ data: [] }),
+    ]);
+    const profileMap = new Map((profiles ?? []).map((profile) => [profile.id, profile]));
+    const bindingMap = new Map((bindings ?? []).map((binding) => [binding.membership_id, binding.role]));
+    const roleIds = (bindings ?? []).flatMap((binding) => binding.role ? [binding.role.id] : []);
+    const { data: permissionRows } = roleIds.length
+      ? await client
+          .from('role_permissions')
+          .select('role_id,permission_code')
+          .eq('tenant_id', auth.context.enterpriseId)
+          .in('role_id', roleIds)
+      : { data: [] };
+    const permissionMap = new Map<string, string[]>();
+    for (const row of permissionRows ?? []) {
+      permissionMap.set(row.role_id, [...(permissionMap.get(row.role_id) ?? []), row.permission_code]);
     }
 
-    const { data, error } = await query;
-    if (error) {
-      return NextResponse.json({ success: false, error: error.message }, { status: 500 });
-    }
-
-    const rows = (data || []) as UserRow[];
-    const permissionMap = await loadPermissionsForUsers(rows.map((row) => row.id));
-    const tenantIds = Array.from(new Set(rows.map((row) => row.tenant_id).filter((id): id is string => Boolean(id))));
-    const tenantMap = new Map<string, ReturnType<typeof normalizeTenant>>();
-
-    if (tenantIds.length > 0) {
-      const { data: tenants } = await supabase
-        .from('tenants')
-        .select('id, name, company_name, tenant_type, prefix, status, created_at, updated_at')
-        .in('id', tenantIds);
-      for (const tenant of tenants || []) tenantMap.set(tenant.id, normalizeTenant(tenant));
-    }
-
-    const users = rows.map((row) => {
-      const permissions = permissionMap.get(row.id) || [];
-      const tenant = row.tenant_id ? tenantMap.get(row.tenant_id) : null;
+    const users = (memberships ?? []).map((membership) => {
+      const profile = profileMap.get(membership.user_id);
+      const role = bindingMap.get(membership.id);
+      const permissions = role ? permissionMap.get(role.id) ?? [] : [];
       return {
-        ...row,
-        nickname: row.nickname || row.real_name || row.phone,
-        status: row.is_active ? 'active' : 'inactive',
+        id: membership.user_id,
+        membership_id: membership.id,
+        phone: profile?.phone ?? '',
+        real_name: profile?.display_name ?? membership.display_name,
+        nickname: profile?.display_name ?? membership.display_name,
+        role: role?.code ?? 'employee',
+        role_id: role?.id ?? null,
+        department: null,
+        is_active: membership.status === 'active',
+        status: membership.status,
+        tenant_id: auth.context.enterpriseId,
+        tenant_type: auth.context.enterpriseType,
+        tenant_name: auth.context.enterpriseName,
+        created_at: membership.created_at,
         permissions,
-        permission_labels: permissions.map((key) => getPermissionTemplate(key)?.label || key),
-        tenant_type: tenant?.tenant_type || row.tenant_type || '',
-        tenant_name: tenant?.company_name || '',
+        permission_labels: permissions,
       };
     });
-
     return NextResponse.json({ success: true, users });
   } catch (error) {
-    console.error('get users failed:', error);
+    console.error('get enterprise users failed:', error);
     return NextResponse.json({ success: false, error: '获取用户列表失败' }, { status: 500 });
   }
 }
@@ -164,99 +122,84 @@ export async function POST(request: NextRequest) {
   try {
     const auth = await requireSettingsUser(request);
     if (authFailed(auth)) return auth.response;
-    if (!isSettingsAdmin(auth.user)) {
-      return NextResponse.json({ success: false, error: '无权限创建用户' }, { status: 403 });
+    const body = await parseJson(request, createUserSchema);
+    const role = await resolveEnterpriseRole(body.role, auth.context.enterpriseId);
+    if (!role) return NextResponse.json({ success: false, error: '角色不存在' }, { status: 400 });
+
+    const found = await findManagedIdentityByPhone(body.phone);
+    if (found.error) return NextResponse.json({ success: false, error: '查询认证账号失败' }, { status: 503 });
+    let userId = found.identity?.id ?? null;
+    let createdIdentity = false;
+    if (!userId) {
+      const result = await createManagedIdentity({
+        phone: body.phone,
+        password: body.password,
+        displayName: body.real_name ?? body.name ?? body.phone,
+      });
+      if (result.error || !result.data.user) {
+        return NextResponse.json({ success: false, error: '创建认证账号失败' }, { status: 503 });
+      }
+      userId = result.data.user.id;
+      createdIdentity = true;
     }
 
-    const body = (await parseJsonObject(request)) as Record<string, unknown>;
-    const phone = typeof body.phone === 'string' ? body.phone.trim() : '';
-    const password = typeof body.password === 'string' ? body.password : '';
-    const realName = typeof body.real_name === 'string' ? body.real_name.trim() : '';
-    const requestedRole = normalizeBodyRole(body.role);
-    const permissionKeys = requestedRole === 'employee' ? sanitizePermissionKeys(body.permissions) : [];
-
-    if (!phone || !password) {
-      return NextResponse.json({ success: false, error: '请输入手机号和密码' }, { status: 400 });
+    const client = await createClient();
+    const displayName = body.real_name ?? body.name ?? body.phone;
+    const { data: existing } = await client
+      .from('enterprise_memberships')
+      .select('id')
+      .eq('tenant_id', auth.context.enterpriseId)
+      .eq('user_id', userId)
+      .maybeSingle();
+    if (existing) {
+      return NextResponse.json({ success: false, error: '该账号已属于当前企业' }, { status: 409 });
     }
-    if (!/^1\d{10}$/.test(phone)) {
-      return NextResponse.json({ success: false, error: '手机号格式不正确' }, { status: 400 });
-    }
-    if (password.length < 6) {
-      return NextResponse.json({ success: false, error: '密码至少 6 位' }, { status: 400 });
-    }
-    if (!isSuperAdmin(auth.user) && requestedRole !== 'employee') {
-      return NextResponse.json({ success: false, error: '二级管理员只能创建员工账号' }, { status: 403 });
-    }
-    if (requestedRole === 'super_admin') {
-      return NextResponse.json({ success: false, error: '不能通过此入口创建超级管理员' }, { status: 400 });
-    }
-    if (permissionKeys.length > 0 && !canAssignPermissionKeys(auth.user, permissionKeys)) {
-      return NextResponse.json({ success: false, error: '包含不可分配的权限' }, { status: 403 });
-    }
-
-    const tenantId = isSuperAdmin(auth.user)
-      ? (typeof body.tenant_id === 'string' && body.tenant_id ? body.tenant_id : null)
-      : auth.user.tenant_id || null;
-    if (!isSuperAdmin(auth.user) && !tenantId) {
-      return NextResponse.json({ success: false, error: '当前管理员未关联企业' }, { status: 403 });
-    }
-
-    const supabase = getSupabaseClient();
-    const { data: existingUser } = await supabase.from('users').select('id').eq('phone', phone).maybeSingle();
-    if (existingUser) {
-      return NextResponse.json({ success: false, error: '手机号已存在' }, { status: 400 });
-    }
-
-    const department = typeof body.department === 'string' && body.department.trim()
-      ? body.department.trim()
-      : getDepartmentForPermissions(permissionKeys) || getAccountRoleTemplate(requestedRole)?.department || null;
-
-    const { data: authIdentity, error: authError } = await createManagedIdentity({
-      phone,
-      password,
-      displayName: realName || phone,
-    });
-    if (authError || !authIdentity.user) {
-      const conflict = authError?.code === 'phone_exists' || authError?.code === 'user_already_exists';
-      return NextResponse.json(
-        { success: false, error: conflict ? '手机号已存在' : '创建认证账号失败' },
-        { status: conflict ? 409 : 503 },
-      );
-    }
-
-    const { data, error } = await supabase
-      .from('users')
+    const { data: membership, error: membershipError } = await client
+      .from('enterprise_memberships')
       .insert({
-        id: authIdentity.user.id,
-        phone,
-        real_name: realName || phone,
-        nickname: realName || phone,
-        role: requestedRole,
-        department,
-        tenant_id: tenantId,
-        is_active: true,
-        updated_at: new Date().toISOString(),
+        tenant_id: auth.context.enterpriseId,
+        user_id: userId,
+        display_name: displayName,
+        status: 'active',
       })
-      .select('id, phone, real_name, nickname, role, department, is_active, tenant_id, tenant_type, created_at')
+      .select('id,user_id,display_name,status,created_at')
       .single();
-
-    if (error || !data) {
-      await deleteManagedIdentity(authIdentity.user.id);
-      return NextResponse.json({ success: false, error: error?.message || '创建用户失败' }, { status: 500 });
+    if (membershipError) {
+      return NextResponse.json({ success: false, error: '创建企业成员失败' }, { status: 500 });
     }
-
-    await replaceUserPermissions(data.id, data.tenant_id || tenantId, permissionKeys, auth.user.id);
-
+    await client.from('profiles').upsert({
+      id: userId,
+      enterprise_id: auth.context.enterpriseId,
+      phone: body.phone,
+      display_name: displayName,
+      updated_at: new Date().toISOString(),
+    }, { onConflict: 'id' });
+    const { error: bindingError } = await client.from('role_bindings').insert({
+      tenant_id: auth.context.enterpriseId,
+      membership_id: membership.id,
+      role_id: role.id,
+      scope_kind: 'enterprise',
+    });
+    if (bindingError) {
+      await client.from('enterprise_memberships').delete().eq('tenant_id', auth.context.enterpriseId).eq('id', membership.id);
+      return NextResponse.json({ success: false, error: '分配企业角色失败' }, { status: 500 });
+    }
     return NextResponse.json({
       success: true,
       user: {
-        ...data,
-        status: data.is_active ? 'active' : 'inactive',
-        permissions: permissionKeys,
+        id: userId,
+        membership_id: membership.id,
+        phone: body.phone,
+        real_name: displayName,
+        role: role.code,
+        status: 'active',
+        is_active: true,
+        tenant_id: auth.context.enterpriseId,
+        created_identity: createdIdentity,
       },
-    });
+    }, { status: 201 });
   } catch (error) {
-    console.error('create user failed:', error);
+    console.error('create enterprise user failed:', error);
     return NextResponse.json({ success: false, error: '创建用户失败' }, { status: 500 });
   }
 }
@@ -265,101 +208,53 @@ export async function PUT(request: NextRequest) {
   try {
     const auth = await requireSettingsUser(request);
     if (authFailed(auth)) return auth.response;
-    if (!isSettingsAdmin(auth.user)) {
-      return NextResponse.json({ success: false, error: '无权限更新用户' }, { status: 403 });
-    }
-
-    const id = new URL(request.url).searchParams.get('id');
-    if (!id) return NextResponse.json({ success: false, error: '缺少用户 ID' }, { status: 400 });
-
-    const supabase = getSupabaseClient();
-    const { data: existing, error: existingError } = await supabase
-      .from('users')
-      .select('id, role, tenant_id')
-      .eq('id', id)
+    const userId = request.nextUrl.searchParams.get('id');
+    if (!userId) return NextResponse.json({ success: false, error: '缺少用户 ID' }, { status: 400 });
+    const body = await parseJson(request, updateUserSchema);
+    const client = await createClient();
+    const { data: membership } = await client
+      .from('enterprise_memberships')
+      .select('id,display_name,status')
+      .eq('tenant_id', auth.context.enterpriseId)
+      .eq('user_id', userId)
       .maybeSingle();
-
-    if (existingError || !existing) {
-      return NextResponse.json({ success: false, error: '用户不存在' }, { status: 404 });
+    if (!membership) return NextResponse.json({ success: false, error: '用户不存在' }, { status: 404 });
+    const displayName = body.real_name ?? body.name;
+    const membershipStatus = body.status === 'inactive' ? 'suspended' : body.status;
+    if (displayName || membershipStatus) {
+      const { error } = await client
+        .from('enterprise_memberships')
+        .update({
+          ...(displayName ? { display_name: displayName } : {}),
+          ...(membershipStatus ? { status: membershipStatus } : {}),
+          updated_at: new Date().toISOString(),
+        })
+        .eq('tenant_id', auth.context.enterpriseId)
+        .eq('id', membership.id);
+      if (error) return NextResponse.json({ success: false, error: '更新用户失败' }, { status: 500 });
     }
-    if (!canManageUser(auth.user, existing as UserRow)) {
-      return NextResponse.json({ success: false, error: '无权管理该用户' }, { status: 403 });
+    if (displayName) {
+      await client.from('profiles').update({ display_name: displayName }).eq('enterprise_id', auth.context.enterpriseId).eq('id', userId);
     }
-
-    const body = (await parseJsonObject(request)) as Record<string, unknown>;
-    const updateData: Record<string, unknown> = { updated_at: new Date().toISOString() };
-    const requestedRole = body.role !== undefined ? normalizeBodyRole(body.role) : normalizeBodyRole(existing.role);
-    const permissionKeys = body.permissions !== undefined && requestedRole === 'employee'
-      ? sanitizePermissionKeys(body.permissions)
-      : null;
-
-    if (!isSuperAdmin(auth.user) && requestedRole !== 'employee') {
-      return NextResponse.json({ success: false, error: '二级管理员只能分配员工角色' }, { status: 403 });
+    if (body.role) {
+      const role = await resolveEnterpriseRole(body.role, auth.context.enterpriseId);
+      if (!role) return NextResponse.json({ success: false, error: '角色不存在' }, { status: 400 });
+      await client.from('role_bindings').delete().eq('tenant_id', auth.context.enterpriseId).eq('membership_id', membership.id).eq('scope_kind', 'enterprise');
+      const { error } = await client.from('role_bindings').insert({
+        tenant_id: auth.context.enterpriseId,
+        membership_id: membership.id,
+        role_id: role.id,
+        scope_kind: 'enterprise',
+      });
+      if (error) return NextResponse.json({ success: false, error: '更新角色失败' }, { status: 500 });
     }
-    if (requestedRole === 'super_admin' && !isSuperAdmin(auth.user)) {
-      return NextResponse.json({ success: false, error: '无权分配超级管理员' }, { status: 403 });
+    if (body.password) {
+      const { error } = await updateManagedIdentityPassword(userId, body.password);
+      if (error) return NextResponse.json({ success: false, error: '更新认证密码失败' }, { status: 503 });
     }
-    if (permissionKeys && !canAssignPermissionKeys(auth.user, permissionKeys)) {
-      return NextResponse.json({ success: false, error: '包含不可分配的权限' }, { status: 403 });
-    }
-
-    if (body.real_name !== undefined) updateData.real_name = String(body.real_name || '').trim();
-    if (body.name !== undefined) updateData.real_name = String(body.name || '').trim();
-    if (body.role !== undefined) updateData.role = requestedRole;
-    if (body.department !== undefined) updateData.department = String(body.department || '').trim() || null;
-    const nextPassword = typeof body.password === 'string' && body.password
-      ? body.password
-      : null;
-    const active = activeStatusFromBody(body);
-    if (active !== undefined) updateData.is_active = active;
-
-    let tenantId = existing.tenant_id as string | null;
-    if (isSuperAdmin(auth.user) && body.tenant_id !== undefined) {
-      tenantId = typeof body.tenant_id === 'string' && body.tenant_id ? body.tenant_id : null;
-      updateData.tenant_id = tenantId;
-    }
-
-    const { data, error } = await supabase
-      .from('users')
-      .update(updateData)
-      .eq('id', id)
-      .select('id, phone, real_name, nickname, role, department, is_active, tenant_id, tenant_type, created_at')
-      .single();
-
-    if (error || !data) {
-      return NextResponse.json({ success: false, error: error?.message || '更新用户失败' }, { status: 500 });
-    }
-
-    if (nextPassword) {
-      const { error: passwordError } = await updateManagedIdentityPassword(id, nextPassword);
-      if (passwordError) {
-        return NextResponse.json({ success: false, error: '更新认证密码失败' }, { status: 503 });
-      }
-    }
-
-    if (permissionKeys) {
-      const nextDepartment = getDepartmentForPermissions(permissionKeys);
-      await replaceUserPermissions(id, tenantId, permissionKeys, auth.user.id);
-      if (!updateData.department && nextDepartment) {
-        await supabase.from('users').update({ department: nextDepartment }).eq('id', id);
-        data.department = nextDepartment;
-      }
-    } else if (requestedRole !== 'employee') {
-      await replaceUserPermissions(id, tenantId, [], auth.user.id);
-    }
-
-    const permissions = permissionKeys || (await loadPermissionsForUsers([id])).get(id) || [];
-
-    return NextResponse.json({
-      success: true,
-      user: {
-        ...data,
-        status: data.is_active ? 'active' : 'inactive',
-        permissions,
-      },
-    });
+    return NextResponse.json({ success: true });
   } catch (error) {
-    console.error('update user failed:', error);
+    console.error('update enterprise user failed:', error);
     return NextResponse.json({ success: false, error: '更新用户失败' }, { status: 500 });
   }
 }
@@ -368,28 +263,28 @@ export async function DELETE(request: NextRequest) {
   try {
     const auth = await requireSettingsUser(request);
     if (authFailed(auth)) return auth.response;
-    if (!isSettingsAdmin(auth.user)) {
-      return NextResponse.json({ success: false, error: '无权限删除用户' }, { status: 403 });
+    const userId = request.nextUrl.searchParams.get('id');
+    if (!userId) return NextResponse.json({ success: false, error: '缺少用户 ID' }, { status: 400 });
+    if (userId === auth.user.id) {
+      return NextResponse.json({ success: false, error: '不能移除当前登录账号' }, { status: 400 });
     }
-
-    const id = new URL(request.url).searchParams.get('id');
-    if (!id) return NextResponse.json({ success: false, error: '缺少用户 ID' }, { status: 400 });
-    if (id === auth.user.id) return NextResponse.json({ success: false, error: '不能删除当前登录账号' }, { status: 400 });
-
-    const supabase = getSupabaseClient();
-    const { data: existing } = await supabase.from('users').select('id, role, tenant_id').eq('id', id).maybeSingle();
-    if (!existing) return NextResponse.json({ success: false, error: '用户不存在' }, { status: 404 });
-    if (!canManageUser(auth.user, existing as UserRow)) {
-      return NextResponse.json({ success: false, error: '无权删除该用户' }, { status: 403 });
-    }
-
-    await supabase.from('user_permissions').delete().eq('user_id', id);
-    const { error } = await supabase.from('users').delete().eq('id', id);
-    if (error) return NextResponse.json({ success: false, error: error.message }, { status: 500 });
-
+    const client = await createClient();
+    const { data: membership } = await client
+      .from('enterprise_memberships')
+      .select('id')
+      .eq('tenant_id', auth.context.enterpriseId)
+      .eq('user_id', userId)
+      .maybeSingle();
+    if (!membership) return NextResponse.json({ success: false, error: '用户不存在' }, { status: 404 });
+    const { error } = await client
+      .from('enterprise_memberships')
+      .delete()
+      .eq('tenant_id', auth.context.enterpriseId)
+      .eq('id', membership.id);
+    if (error) return NextResponse.json({ success: false, error: '移除企业成员失败' }, { status: 500 });
     return NextResponse.json({ success: true });
   } catch (error) {
-    console.error('delete user failed:', error);
-    return NextResponse.json({ success: false, error: '删除用户失败' }, { status: 500 });
+    console.error('remove enterprise user failed:', error);
+    return NextResponse.json({ success: false, error: '移除企业成员失败' }, { status: 500 });
   }
 }

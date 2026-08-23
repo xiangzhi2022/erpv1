@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getSupabaseClient } from '@/db/client';
+import { createClient } from '@/lib/supabase/server';
 import { authFailed, isSettingsAdmin, loadUserSettings, requireSettingsUser } from '../_utils';
 
 export async function GET(request: NextRequest) {
@@ -7,8 +7,8 @@ export async function GET(request: NextRequest) {
     const auth = await requireSettingsUser(request);
     if (authFailed(auth)) return auth.response;
 
-    const supabase = getSupabaseClient();
-    const settings: Record<string, string> = await loadUserSettings(auth.user.id).catch(() => ({}));
+    const supabase = await createClient();
+    const settings: Record<string, string> = await loadUserSettings(auth.user.id, auth.context.enterpriseId).catch(() => ({}));
     const isAdmin = isSettingsAdmin(auth.user);
 
     let prefixes: Array<{ prefix: string; company_name: string | null; phone: string | null; address: string | null }> = [];
@@ -16,6 +16,7 @@ export async function GET(request: NextRequest) {
       const { data, error } = await supabase
         .from('order_prefixes')
         .select('prefix, company_name, phone, address')
+        .eq('enterprise_id', auth.context.enterpriseId)
         .order('created_at', { ascending: false });
       if (error) {
         console.warn('load order prefixes failed:', error);

@@ -36,6 +36,7 @@ export const API_ROUTE_POLICY_ENTRIES: readonly PolicyEntry[] = [
     '/api/auth/logout',
     '/api/auth/onboarding',
     '/api/organization-requests',
+    '/api/organization-requests/[id]',
     '/api/organizations',
   ]),
   ...developmentRoutes([
@@ -101,16 +102,16 @@ export const API_ROUTE_POLICY_ENTRIES: readonly PolicyEntry[] = [
   ], 'organization.read', 'organization.manage'),
   ...enterpriseRoutes([
     '/api/employees/[id]',
-    '/api/employees/assignable',
     '/api/employees',
     '/api/workers/[id]',
     '/api/workers/[id]/wages',
     '/api/workers/stats',
     '/api/workers',
+    '/api/settings/users',
   ], 'members.read', 'members.manage'),
   ...enterpriseRoutes([
-    '/api/organization-requests/[id]',
-  ], 'members.read', 'members.manage'),
+    '/api/employees/assignable',
+  ], 'production.read'),
   ...enterpriseRoutes([
     '/api/permissions',
     '/api/roles/[id]/permissions',
@@ -181,7 +182,6 @@ export const API_ROUTE_POLICY_ENTRIES: readonly PolicyEntry[] = [
     '/api/settings/profile',
     '/api/settings/save',
     '/api/settings/tenants',
-    '/api/settings/users',
     '/api/settings/verify-prefix',
   ], 'settings.read', 'settings.manage'),
 ];

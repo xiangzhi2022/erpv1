@@ -1,24 +1,16 @@
-import { getSupabaseClient } from '@/db/client';
-import type { AuthUser } from '@/lib/auth';
-import { createAdminClient } from '@/lib/supabase/admin';
-import { DEFAULT_ROLES, defaultPermissionsForRole } from '@/lib/organization';
+import type { EnterpriseContext } from '@/lib/enterprise/context';
 import {
-  canAssignPermissionKeys,
-  isSuperAdmin,
-  type PermissionKey,
-} from '@/lib/role-access';
+  createManagedIdentity,
+  findManagedIdentityByPhone,
+} from '@/lib/admin/user-identities';
+import { createClient } from '@/lib/supabase/server';
 
 export interface EmployeeRoleRow {
   id: string;
   code: string;
   name: string;
-  description?: string | null;
-  tenant_id?: string | null;
-}
-
-interface RolePermissionRow {
-  role_id: string;
-  permission?: { code?: string | null } | null;
+  description: string | null;
+  tenant_id: string;
 }
 
 export function text(value: unknown): string | null {
@@ -32,7 +24,9 @@ export function normalizeEmployeeAccountPhone(value: unknown): string | null {
 
 export function stringArray(value: unknown): string[] {
   return Array.isArray(value)
-    ? Array.from(new Set(value.filter((item): item is string => typeof item === 'string' && item.trim().length > 0)))
+    ? Array.from(new Set(value.filter(
+        (item): item is string => typeof item === 'string' && item.trim().length > 0,
+      )))
     : [];
 }
 
@@ -40,76 +34,32 @@ function isUuid(value: string): boolean {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
 }
 
-export async function ensureEmployeeRoleRows(roleIdsOrCodes: string[], user: AuthUser): Promise<EmployeeRoleRow[]> {
-  const supabase = getSupabaseClient();
+export async function ensureEmployeeRoleRows(
+  roleIdsOrCodes: string[],
+  context: EnterpriseContext,
+): Promise<EmployeeRoleRow[]> {
+  if (roleIdsOrCodes.length === 0) return [];
+  const client = await createClient();
   const ids = roleIdsOrCodes.filter(isUuid);
   const codes = roleIdsOrCodes.filter((value) => !isUuid(value));
-  const rows: EmployeeRoleRow[] = [];
-
-  if (ids.length > 0) {
-    let query = supabase.from('roles').select('*').in('id', ids);
-    if (!isSuperAdmin(user) && user.tenant_id) query = query.eq('tenant_id', user.tenant_id);
-    const { data, error } = await query;
-    if (error) throw error;
-    rows.push(...((data || []) as EmployeeRoleRow[]));
+  let query = client
+    .from('roles')
+    .select('id,code,name,description,tenant_id')
+    .eq('tenant_id', context.enterpriseId);
+  if (ids.length > 0 && codes.length > 0) {
+    query = query.or(`id.in.(${ids.join(',')}),code.in.(${codes.join(',')})`);
+  } else if (ids.length > 0) {
+    query = query.in('id', ids);
+  } else {
+    query = query.in('code', codes);
   }
-
-  for (const code of codes) {
-    let query = supabase.from('roles').select('*').eq('code', code);
-    if (!isSuperAdmin(user) && user.tenant_id) query = query.eq('tenant_id', user.tenant_id);
-    const { data: existing, error } = await query.maybeSingle();
-    if (error) throw error;
-    if (existing) {
-      rows.push(existing as EmployeeRoleRow);
-      continue;
-    }
-
-    const fallback = DEFAULT_ROLES.find((role) => role.code === code);
-    if (!fallback) continue;
-    const permissions = defaultPermissionsForRole(code);
-    if (!isSuperAdmin(user) && permissions.length > 0 && !canAssignPermissionKeys(user, permissions)) continue;
-
-    const { data: created, error: createError } = await supabase
-      .from('roles')
-      .insert({
-        code: fallback.code,
-        name: fallback.name,
-        description: fallback.description,
-        status: 'active',
-        tenant_id: isSuperAdmin(user) ? null : user.tenant_id || null,
-      })
-      .select('*')
-      .single();
-    if (createError) throw createError;
-    rows.push(created as EmployeeRoleRow);
+  const { data, error } = await query;
+  if (error) throw error;
+  const rows = data ?? [];
+  if (rows.length !== roleIdsOrCodes.length) {
+    throw new Error('包含无效或无权分配的角色');
   }
-
-  const seen = new Set<string>();
-  return rows.filter((row) => {
-    if (seen.has(row.id)) return false;
-    seen.add(row.id);
-    return true;
-  });
-}
-
-async function permissionKeysForRoles(roles: EmployeeRoleRow[]): Promise<PermissionKey[]> {
-  const roleIds = roles.map((role) => role.id);
-  const permissionKeys = new Set<PermissionKey>();
-  for (const role of roles) {
-    for (const key of defaultPermissionsForRole(role.code)) permissionKeys.add(key);
-  }
-  if (roleIds.length === 0) return Array.from(permissionKeys);
-
-  const { data } = await getSupabaseClient()
-    .from('role_permissions')
-    .select('role_id, permission:permissions(code)')
-    .in('role_id', roleIds);
-
-  for (const row of (data || []) as RolePermissionRow[]) {
-    const code = row.permission?.code;
-    if (code) permissionKeys.add(code as PermissionKey);
-  }
-  return Array.from(permissionKeys);
+  return rows;
 }
 
 export async function replaceEmployeeRelations(
@@ -117,15 +67,21 @@ export async function replaceEmployeeRelations(
   roleIdsOrCodes: string[],
   positionIds: string[],
   primaryPositionId: string | null,
-  user: AuthUser,
-) {
-  const supabase = getSupabaseClient();
-  const roles = await ensureEmployeeRoleRows(roleIdsOrCodes, user);
+  context: EnterpriseContext,
+): Promise<EmployeeRoleRow[]> {
+  const client = await createClient();
+  const roles = await ensureEmployeeRoleRows(roleIdsOrCodes, context);
 
-  await supabase.from('employee_positions').delete().eq('employee_id', employeeId);
+  const { error: clearPositionsError } = await client
+    .from('employee_positions')
+    .delete()
+    .eq('enterprise_id', context.enterpriseId)
+    .eq('employee_id', employeeId);
+  if (clearPositionsError) throw clearPositionsError;
   if (positionIds.length > 0) {
-    const { error } = await supabase.from('employee_positions').insert(
+    const { error } = await client.from('employee_positions').insert(
       positionIds.map((positionId) => ({
+        enterprise_id: context.enterpriseId,
         employee_id: employeeId,
         position_id: positionId,
         is_primary: positionId === primaryPositionId,
@@ -134,10 +90,19 @@ export async function replaceEmployeeRelations(
     if (error) throw error;
   }
 
-  await supabase.from('employee_roles').delete().eq('employee_id', employeeId);
+  const { error: clearRolesError } = await client
+    .from('employee_roles')
+    .delete()
+    .eq('enterprise_id', context.enterpriseId)
+    .eq('employee_id', employeeId);
+  if (clearRolesError) throw clearRolesError;
   if (roles.length > 0) {
-    const { error } = await supabase.from('employee_roles').insert(
-      roles.map((role) => ({ employee_id: employeeId, role_id: role.id })),
+    const { error } = await client.from('employee_roles').insert(
+      roles.map((role) => ({
+        enterprise_id: context.enterpriseId,
+        employee_id: employeeId,
+        role_id: role.id,
+      })),
     );
     if (error) throw error;
   }
@@ -145,28 +110,76 @@ export async function replaceEmployeeRelations(
   return roles;
 }
 
-export async function syncEmployeeUserPermissions(
+export async function syncEmployeeRoleBindings(
   userId: string | null,
-  tenantId: string | null,
   roles: EmployeeRoleRow[],
-  assignedBy: string,
-) {
+  context: EnterpriseContext,
+): Promise<void> {
   if (!userId) return;
-  const supabase = getSupabaseClient();
-  const permissionKeys = await permissionKeysForRoles(roles);
-  let deleteQuery = supabase.from('user_permissions').delete().eq('user_id', userId);
-  deleteQuery = tenantId ? deleteQuery.eq('tenant_id', tenantId) : deleteQuery.is('tenant_id', null);
-  await deleteQuery;
-  if (permissionKeys.length === 0) return;
+  const client = await createClient();
+  const { data: membership, error: membershipError } = await client
+    .from('enterprise_memberships')
+    .select('id')
+    .eq('tenant_id', context.enterpriseId)
+    .eq('user_id', userId)
+    .maybeSingle();
+  if (membershipError) throw membershipError;
+  if (!membership) throw new Error('员工登录账号尚未加入当前企业');
 
-  const { error } = await supabase.from('user_permissions').insert(
-    permissionKeys.map((permissionKey) => ({
-      user_id: userId,
-      tenant_id: tenantId,
-      permission_key: permissionKey,
-      assigned_by: assignedBy,
+  const { error: clearError } = await client
+    .from('role_bindings')
+    .delete()
+    .eq('tenant_id', context.enterpriseId)
+    .eq('membership_id', membership.id)
+    .eq('scope_kind', 'enterprise');
+  if (clearError) throw clearError;
+  if (roles.length === 0) return;
+
+  const { error } = await client.from('role_bindings').insert(
+    roles.map((role) => ({
+      tenant_id: context.enterpriseId,
+      membership_id: membership.id,
+      role_id: role.id,
+      scope_kind: 'enterprise',
     })),
   );
+  if (error) throw error;
+}
+
+async function ensureEnterpriseMembership(input: {
+  context: EnterpriseContext;
+  userId: string;
+  phone: string;
+  name: string | null;
+}): Promise<void> {
+  const client = await createClient();
+  const { data: existing, error: findError } = await client
+    .from('enterprise_memberships')
+    .select('id')
+    .eq('tenant_id', input.context.enterpriseId)
+    .eq('user_id', input.userId)
+    .maybeSingle();
+  if (findError) throw findError;
+
+  const row = {
+    display_name: input.name || input.phone,
+    status: 'active' as const,
+    updated_at: new Date().toISOString(),
+  };
+  if (existing) {
+    const { error } = await client
+      .from('enterprise_memberships')
+      .update(row)
+      .eq('tenant_id', input.context.enterpriseId)
+      .eq('id', existing.id);
+    if (error) throw error;
+    return;
+  }
+  const { error } = await client.from('enterprise_memberships').insert({
+    tenant_id: input.context.enterpriseId,
+    user_id: input.userId,
+    ...row,
+  });
   if (error) throw error;
 }
 
@@ -177,78 +190,63 @@ export async function ensureTenantMembership(input: {
   name?: string | null;
   role?: string | null;
   department?: string | null;
-}) {
+}): Promise<void> {
   if (!input.tenantId || !input.userId) return;
-  const supabase = getSupabaseClient();
-  const { data: existing, error: findError } = await supabase
+  const client = await createClient();
+  const { data: existing, error: findError } = await client
     .from('enterprise_memberships')
     .select('id')
     .eq('tenant_id', input.tenantId)
     .eq('user_id', input.userId)
     .maybeSingle();
   if (findError) throw findError;
-
   const row = {
     display_name: input.name || input.phone || '员工',
-    status: 'active',
+    status: 'active' as const,
     updated_at: new Date().toISOString(),
   };
-
-  if (existing?.id) {
-    const { error } = await supabase.from('enterprise_memberships').update(row).eq('id', existing.id);
-    if (error) throw error;
-    return;
-  }
-
-  const { error } = await supabase.from('enterprise_memberships').insert({
-    tenant_id: input.tenantId,
-    user_id: input.userId,
-    ...row,
-  });
+  const mutation = existing
+    ? client.from('enterprise_memberships').update(row).eq('tenant_id', input.tenantId).eq('id', existing.id)
+    : client.from('enterprise_memberships').insert({
+        tenant_id: input.tenantId,
+        user_id: input.userId,
+        ...row,
+      });
+  const { error } = await mutation;
   if (error) throw error;
 }
 
-export async function createOrReuseEmployeeLoginUser(body: Record<string, unknown>, user: AuthUser): Promise<string | null> {
+export async function createOrReuseEmployeeLoginUser(
+  body: Record<string, unknown>,
+  context: EnterpriseContext,
+): Promise<string | null> {
   const shouldCreate = body.create_account === true || Boolean(text(body.password));
   const phone = normalizeEmployeeAccountPhone(body.phone);
   if (!shouldCreate) return text(body.user_id);
-  if (!phone) throw new Error('创建登录账号需要填写手机号');
+  if (!phone) throw new Error('创建登录账号需要填写有效手机号');
 
-  const admin = createAdminClient();
-  const { data: listedUsers, error: findError } = await admin.auth.admin.listUsers({
-    page: 1,
-    perPage: 1000,
-  });
-  if (findError) throw findError;
-  const existing = listedUsers.users.find((identity) => identity.phone === phone);
-  if (existing) {
-    await ensureTenantMembership({
-      tenantId: user.tenant_id,
-      userId: existing.id,
+  const found = await findManagedIdentityByPhone(phone);
+  if (found.error) throw found.error;
+  let userId = found.identity?.id ?? null;
+  if (!userId) {
+    const password = text(body.password);
+    if (!password || password.length < 8) throw new Error('创建登录账号需要至少 8 位密码');
+    const created = await createManagedIdentity({
       phone,
-      name: text(body.name),
-      role: 'employee',
-      department: text(body.department_name),
+      password,
+      displayName: text(body.name) || phone,
     });
-    return existing.id;
+    if (created.error || !created.data.user) {
+      throw created.error || new Error('创建认证账号失败');
+    }
+    userId = created.data.user.id;
   }
 
-  const password = text(body.password);
-  if (!password || password.length < 8) throw new Error('创建登录账号需要至少 8 位密码');
-  const { data, error } = await admin.auth.admin.createUser({
-    phone,
-    password,
-    phone_confirm: true,
-    user_metadata: { display_name: text(body.name) || phone },
-  });
-  if (error || !data.user) throw error || new Error('创建认证账号失败');
-  await ensureTenantMembership({
-    tenantId: user.tenant_id,
-    userId: data.user.id,
+  await ensureEnterpriseMembership({
+    context,
+    userId,
     phone,
     name: text(body.name),
-    role: 'employee',
-    department: text(body.department_name),
   });
-  return data.user.id;
+  return userId;
 }

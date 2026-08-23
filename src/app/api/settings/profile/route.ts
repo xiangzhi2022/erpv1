@@ -1,6 +1,6 @@
 import { parseJsonObject } from '@/lib/api/request';
 import { NextRequest, NextResponse } from 'next/server';
-import { getSupabaseClient } from '@/db/client';
+import { createClient } from '@/lib/supabase/server';
 import { profileSchema } from '@/app/settings/schemas';
 import { authFailed, loadUserSettings, normalizeTenant, requireSettingsUser } from '../_utils';
 
@@ -9,10 +9,11 @@ export async function GET(request: NextRequest) {
     const auth = await requireSettingsUser(request);
     if (authFailed(auth)) return auth.response;
 
-    const supabase = getSupabaseClient();
+    const supabase = await createClient();
     const { data: userData, error: userError } = await supabase
-      .from('users')
-      .select('id, phone, real_name, role, tenant_id, is_active, department, created_at')
+      .from('profiles')
+      .select('id, phone, display_name, avatar_url, enterprise_id, created_at')
+      .eq('enterprise_id', auth.context.enterpriseId)
       .eq('id', auth.user.id)
       .maybeSingle();
 
@@ -20,34 +21,45 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ success: false, error: '????????' }, { status: 500 });
     }
 
-    let tenant = null;
-    if (userData?.tenant_id) {
-      const { data } = await supabase
-        .from('tenants')
-        .select('id, name, company_name, tenant_type, prefix, status, created_at, updated_at')
-        .eq('id', userData.tenant_id)
-        .maybeSingle();
-      tenant = data ? normalizeTenant(data) : null;
-    }
+    const [{ data: enterprise }, { data: prefixRow }] = await Promise.all([
+      supabase
+        .from('enterprises')
+        .select('id,name,enterprise_type,status,created_at,updated_at')
+        .eq('id', auth.context.enterpriseId)
+        .maybeSingle(),
+      supabase
+        .from('order_prefixes')
+        .select('prefix')
+        .eq('enterprise_id', auth.context.enterpriseId)
+        .order('created_at', { ascending: true })
+        .limit(1)
+        .maybeSingle(),
+    ]);
+    const tenant = enterprise ? normalizeTenant({
+      ...enterprise,
+      tenant_type: enterprise.enterprise_type,
+      company_name: enterprise.name,
+      prefix: prefixRow?.prefix ?? '',
+    }) : null;
 
-    const preferences = await loadUserSettings(auth.user.id).catch(() => ({}));
+    const preferences = await loadUserSettings(auth.user.id, auth.context.enterpriseId).catch(() => ({}));
 
     return NextResponse.json({
       success: true,
       profile: {
         id: userData?.id || auth.user.id,
         phone: userData?.phone || auth.user.phone || '',
-        nickname: userData?.real_name || auth.user.nickname || auth.user.name || '',
-        realName: userData?.real_name || auth.user.name || '',
-        role: userData?.role || auth.user.role,
-        tenantId: userData?.tenant_id || auth.user.tenant_id || null,
+        nickname: userData?.display_name || auth.user.nickname || auth.user.name || '',
+        realName: userData?.display_name || auth.user.name || '',
+        role: auth.user.role,
+        tenantId: auth.context.enterpriseId,
         tenantType: tenant?.tenant_type || auth.user.tenant_type || '',
         tenantName: tenant?.company_name || '',
         orderPrefix: tenant?.prefix || '',
-        avatarUrl: '',
+        avatarUrl: userData?.avatar_url || '',
         bio: '',
-        department: userData?.department || auth.user.department || '',
-        status: userData?.is_active === false ? 'inactive' : 'active',
+        department: auth.user.department || '',
+        status: 'active',
         createdAt: userData?.created_at || null,
       },
       tenant,
@@ -72,11 +84,12 @@ export async function PUT(request: NextRequest) {
       );
     }
 
-    const supabase = getSupabaseClient();
+    const supabase = await createClient();
     const { nickname } = parsed.data;
     const { error } = await supabase
-      .from('users')
-      .update({ real_name: nickname, updated_at: new Date().toISOString() })
+      .from('profiles')
+      .update({ display_name: nickname, updated_at: new Date().toISOString() })
+      .eq('enterprise_id', auth.context.enterpriseId)
       .eq('id', auth.user.id);
 
     if (error) {

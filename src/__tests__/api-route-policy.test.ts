@@ -104,4 +104,23 @@ describe('API route policy manifest', () => {
 
     expect(offenders).toEqual([]);
   });
+
+  it('uses request-scoped Supabase access for migrated identity and admin APIs', () => {
+    const adminRoots = [
+      'departments',
+      'employees',
+      'organization-requests',
+      'permissions',
+      'positions',
+      'roles',
+      'settings',
+    ].map((directory) => resolve(API_ROOT, directory));
+    const files = adminRoots.flatMap((root) => routeFiles(root));
+    const offenders = files.filter((file) => {
+      const source = readFileSync(file, 'utf8');
+      return /@\/db\/client|getSupabaseClient\s*\(|createAdminClient\s*\(/.test(source);
+    }).map((file) => relative(process.cwd(), file));
+
+    expect(offenders).toEqual([]);
+  });
 });
