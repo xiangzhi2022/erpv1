@@ -55,6 +55,14 @@ describe('API route policy manifest', () => {
       access: 'enterprise',
       permission: 'orders.manage',
     });
+    expect(getApiRoutePolicy('/api/factory/workshops/123', 'GET')).toMatchObject({
+      access: 'enterprise',
+      permission: 'production.read',
+    });
+    expect(getApiRoutePolicy('/api/factory/workshops/123', 'PUT')).toMatchObject({
+      access: 'enterprise',
+      permission: 'production.manage',
+    });
     expect(getApiRoutePolicy('/api/not-declared', 'GET')).toBeNull();
   });
 
@@ -140,6 +148,20 @@ describe('API route policy manifest', () => {
     const offenders = files.filter((file) => {
       const source = readFileSync(file, 'utf8');
       return /@\/db\/client|getSupabaseClient\s*\(|\btenant_id\b/.test(source);
+    }).map((file) => relative(process.cwd(), file));
+
+    expect(offenders).toEqual([]);
+  });
+
+  it('keeps factory workshop access enterprise-scoped and out of admin REST helpers', () => {
+    const files = [
+      resolve(API_ROOT, 'factory/workshops/route.ts'),
+      resolve(API_ROOT, 'factory/workshops/[id]/route.ts'),
+    ];
+    const offenders = files.filter((file) => {
+      const source = readFileSync(file, 'utf8');
+      return /getFactoryWorkshopAdmin|getUserFromRequest|@\/db\/client|getSupabaseClient\s*\(/.test(source)
+        || !/enterprise_id/.test(source);
     }).map((file) => relative(process.cwd(), file));
 
     expect(offenders).toEqual([]);

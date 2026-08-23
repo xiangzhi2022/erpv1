@@ -103,11 +103,13 @@ export const API_ROUTE_POLICY_ENTRIES: readonly PolicyEntry[] = [
   ...enterpriseRoutes([
     '/api/departments/[id]',
     '/api/departments',
-    '/api/factory/workshops/[id]',
-    '/api/factory/workshops',
     '/api/positions/[id]',
     '/api/positions',
   ], 'organization.read', 'organization.manage'),
+  ...enterpriseRoutes([
+    '/api/factory/workshops/[id]',
+    '/api/factory/workshops',
+  ], 'production.read', 'production.manage'),
   ...enterpriseRoutes([
     '/api/employees/[id]',
     '/api/employees',

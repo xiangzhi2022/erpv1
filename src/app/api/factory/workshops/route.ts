@@ -1,259 +1,124 @@
-import { parseJsonObject } from '@/lib/api/request';
-import { NextResponse } from "next/server";
-import {
-  getFactoryWorkshopAdminHeaders,
-  getFactoryWorkshopAdminUrl,
-} from '@/lib/admin/factory-workshops';
-import { getUserFromRequest } from "@/lib/auth";
-import { canAccessPath, isSuperAdmin } from "@/lib/role-access";
+import { NextResponse, type NextRequest } from 'next/server';
+import { z } from 'zod';
+import { isApiError } from '@/lib/api/errors';
+import { parseJson, parseQuery } from '@/lib/api/request';
+import { getEnterpriseContext, requirePermission } from '@/lib/enterprise/context';
+import { isEnterpriseAccessError } from '@/lib/enterprise/errors';
+import { createClient } from '@/lib/supabase/server';
 
-/** 合法的车间状态值 */
-const VALID_STATUSES = ["normal", "maintenance", "stopped"] as const;
-type ValidStatus = (typeof VALID_STATUSES)[number];
+const statusSchema = z.enum(['normal', 'maintenance', 'stopped']);
+const filterSchema = z.object({
+  status: z.union([statusSchema, z.literal('all')]).optional(),
+  keyword: z.string().trim().max(64)
+    .regex(/^[\p{L}\p{N}\s_-]+$/u, '关键词包含不支持的字符')
+    .optional(),
+});
+const createWorkshopSchema = z.object({
+  factory_code: z.string().trim().regex(/^[A-Za-z]+-[A-Za-z0-9]+$/),
+  name: z.string().trim().min(1).max(100),
+  location: z.string().trim().max(200).nullable().optional(),
+  manager: z.string().trim().max(100).nullable().optional(),
+  capacity: z.coerce.number().int().nonnegative().default(0),
+  current_load: z.coerce.number().int().nonnegative().default(0),
+  status: statusSchema.default('normal'),
+  description: z.string().trim().max(1000).nullable().optional(),
+}).refine((input) => input.current_load <= input.capacity, {
+  message: '当前负荷不能超过产能',
+  path: ['current_load'],
+});
 
-/**
- * 计算负荷百分比，上限 100
- */
 function calcLoadPercentage(currentLoad: number, capacity: number): number {
-  if (!capacity || capacity <= 0) return 0;
+  if (capacity <= 0) return 0;
   return Math.min(Math.round((currentLoad / capacity) * 100), 100);
 }
 
-/**
- * GET /api/factory/workshops
- * 获取车间列表，支持按状态、名称搜索过滤
- */
-export async function GET(request: Request) {
+function errorResponse(error: unknown, message: string) {
+  if (isEnterpriseAccessError(error) || isApiError(error)) {
+    return NextResponse.json({ success: false, error: error.message }, { status: error.status });
+  }
+  console.error('factory_workshops.request_failed', { error });
+  return NextResponse.json({ success: false, error: message }, { status: 500 });
+}
+
+export async function GET(request: NextRequest) {
   try {
-    const user = await getUserFromRequest(request);
-
-    if (!user) {
-      return NextResponse.json(
-        { success: false, error: "请先登录" },
-        { status: 401 }
-      );
+    const context = await getEnterpriseContext();
+    requirePermission(context, 'production.read');
+    const filters = parseQuery(request, filterSchema);
+    const supabase = await createClient();
+    let query = supabase
+      .from('factory_workshops')
+      .select('id,factory_code,name,location,manager,capacity,current_load,status,description,created_at,updated_at')
+      .eq('enterprise_id', context.enterpriseId)
+      .order('created_at', { ascending: true });
+    if (filters.status && filters.status !== 'all') query = query.eq('status', filters.status);
+    if (filters.keyword) {
+      const pattern = `%${filters.keyword}%`;
+      query = query.or(`name.ilike.${pattern},factory_code.ilike.${pattern},manager.ilike.${pattern},location.ilike.${pattern}`);
     }
-
-    if (!canAccessPath(user, "/factory") && !canAccessPath(user, "/progress")) {
-      return NextResponse.json(
-        { success: false, error: "无权限访问" },
-        { status: 403 }
-      );
-    }
-
-    const { searchParams } = new URL(request.url);
-    const status = searchParams.get("status");
-    const keyword = searchParams.get("keyword");
-
-    // 校验 status 参数合法性
-    if (status && status !== "all" && !VALID_STATUSES.includes(status as ValidStatus)) {
-      return NextResponse.json(
-        { success: false, error: `无效的状态筛选值: ${status}` },
-        { status: 400 }
-      );
-    }
-
-    // 构建查询参数
-    const queryParams = new URLSearchParams({
-      select: "*",
-      order: "created_at.asc",
-    });
-
-    if (status && status !== "all") {
-      queryParams.set("status", `eq.${status}`);
-    }
-
-    if (keyword) {
-      queryParams.set(
-        "or",
-        `(name.ilike.%${keyword}%,factory_code.ilike.%${keyword}%,manager.ilike.%${keyword}%,location.ilike.%${keyword}%)`
-      );
-    }
-
-    const apiUrl = `${getFactoryWorkshopAdminUrl()}/factory_workshops?${queryParams.toString()}`;
-    const response = await fetch(apiUrl, {
-      headers: getFactoryWorkshopAdminHeaders(),
-    });
-
-    if (!response.ok) {
-      const error = await response.text();
-      throw new Error(`查询失败: ${error}`);
-    }
-
-    const workshops = (await response.json()) as Record<string, unknown>[];
-
-    // 计算负荷率（上限 100）
-    const enriched: Record<string, unknown>[] = (workshops || []).map((w) => ({
-      ...w,
-      load_percentage: calcLoadPercentage(
-        Number(w.current_load || 0),
-        Number(w.capacity || 0)
-      ),
+    const { data, error } = await query;
+    if (error) throw error;
+    const workshops = (data ?? []).map((workshop) => ({
+      ...workshop,
+      load_percentage: calcLoadPercentage(workshop.current_load, workshop.capacity),
     }));
-
-    // 统计数据
-    const stats = {
-      total: enriched.length,
-      normal: enriched.filter((w) => w.status === "normal").length,
-      maintenance: enriched.filter((w) => w.status === "maintenance").length,
-      stopped: enriched.filter((w) => w.status === "stopped").length,
-      totalCapacity: enriched.reduce(
-        (sum, w) => sum + Number(w.capacity || 0),
-        0
-      ),
-      totalLoad: enriched.reduce(
-        (sum, w) => sum + Number(w.current_load || 0),
-        0
-      ),
-    };
-
     return NextResponse.json({
       success: true,
-      workshops: enriched,
-      stats,
+      workshops,
+      stats: {
+        total: workshops.length,
+        normal: workshops.filter((workshop) => workshop.status === 'normal').length,
+        maintenance: workshops.filter((workshop) => workshop.status === 'maintenance').length,
+        stopped: workshops.filter((workshop) => workshop.status === 'stopped').length,
+        totalCapacity: workshops.reduce((sum, workshop) => sum + workshop.capacity, 0),
+        totalLoad: workshops.reduce((sum, workshop) => sum + workshop.current_load, 0),
+      },
     });
   } catch (error) {
-    console.error("获取车间列表失败:", error);
-    return NextResponse.json(
-      { success: false, error: "服务器错误" },
-      { status: 500 }
-    );
+    return errorResponse(error, '获取车间列表失败');
   }
 }
 
-/**
- * POST /api/factory/workshops
- * 新增车间
- */
-export async function POST(request: Request) {
+export async function POST(request: NextRequest) {
   try {
-    const user = await getUserFromRequest(request);
-
-    if (!user) {
-      return NextResponse.json(
-        { success: false, error: "请先登录" },
-        { status: 401 }
-      );
+    const context = await getEnterpriseContext();
+    requirePermission(context, 'production.manage');
+    const input = await parseJson(request, createWorkshopSchema);
+    const supabase = await createClient();
+    const { data: duplicate, error: duplicateError } = await supabase
+      .from('factory_workshops')
+      .select('id')
+      .eq('enterprise_id', context.enterpriseId)
+      .eq('factory_code', input.factory_code)
+      .maybeSingle();
+    if (duplicateError) throw duplicateError;
+    if (duplicate) {
+      return NextResponse.json({ success: false, error: '该车间编号已存在' }, { status: 409 });
     }
-
-    if (!isSuperAdmin(user) && user.role !== "factory_admin") {
-      return NextResponse.json(
-        { success: false, error: "无权限操作" },
-        { status: 403 }
-      );
-    }
-
-    const body = await parseJsonObject(request);
-    const { factory_code, name, location, manager, capacity, current_load, status, description } =
-      body;
-
-    if (typeof factory_code !== 'string' || typeof name !== 'string' || !factory_code || !name) {
-      return NextResponse.json(
-        { success: false, error: "车间编号和名称为必填项" },
-        { status: 400 }
-      );
-    }
-
-    // 编号格式校验：字母+数字+连字符
-    const codeRegex = /^[A-Za-z]+-[A-Za-z0-9]+$/;
-    if (!codeRegex.test(factory_code)) {
-      return NextResponse.json(
-        {
-          success: false,
-          error: "车间编号格式不正确，需为字母-数字格式，如 WH-A01",
-        },
-        { status: 400 }
-      );
-    }
-
-    // 产能与负荷校验
-    const cap = Number(capacity) || 0;
-    const load = Number(current_load) || 0;
-    if (cap < 0) {
-      return NextResponse.json(
-        { success: false, error: "产能不能为负数" },
-        { status: 400 }
-      );
-    }
-    if (load < 0) {
-      return NextResponse.json(
-        { success: false, error: "负荷不能为负数" },
-        { status: 400 }
-      );
-    }
-    if (load > cap) {
-      return NextResponse.json(
-        { success: false, error: "当前负荷不能超过产能" },
-        { status: 400 }
-      );
-    }
-
-    // 状态校验
-    const initialStatus = status && VALID_STATUSES.includes(status as ValidStatus)
-      ? status
-      : "normal";
-
-    // 检查编号是否重复
-    const checkParams = new URLSearchParams({
-      select: "id",
-      factory_code: `eq.${factory_code}`,
-    });
-    const checkUrl = `${getFactoryWorkshopAdminUrl()}/factory_workshops?${checkParams.toString()}`;
-    const checkResponse = await fetch(checkUrl, {
-      headers: getFactoryWorkshopAdminHeaders(),
-    });
-    const existing = (await checkResponse.json()) as Record<string, unknown>[];
-
-    if (existing && existing.length > 0) {
-      return NextResponse.json(
-        { success: false, error: "该车间编号已存在" },
-        { status: 409 }
-      );
-    }
-
-    // 插入数据
-    const insertPayload = {
-      factory_code,
-      name,
-      location: location || null,
-      manager: manager || null,
-      capacity: cap,
-      current_load: load,
-      status: initialStatus,
-      description: description || null,
-    };
-
-    const insertUrl = `${getFactoryWorkshopAdminUrl()}/factory_workshops`;
-    const insertResponse = await fetch(insertUrl, {
-      method: "POST",
-      headers: getFactoryWorkshopAdminHeaders(),
-      body: JSON.stringify(insertPayload),
-    });
-
-    if (!insertResponse.ok) {
-      const error = await insertResponse.text();
-      throw new Error(`创建失败: ${error}`);
-    }
-
-    const workshop = (await insertResponse.json()) as Record<string, unknown>;
-    // POST with return=representation returns array or single object
-    const result = Array.isArray(workshop) ? workshop[0] : workshop;
-
-    // 补充负荷率字段
-    const enrichedResult = {
-      ...result,
-      load_percentage: calcLoadPercentage(
-        Number(result.current_load || 0),
-        Number(result.capacity || 0)
-      ),
-    };
-
-    return NextResponse.json({ success: true, workshop: enrichedResult }, { status: 201 });
+    const { data, error } = await supabase
+      .from('factory_workshops')
+      .insert({
+        enterprise_id: context.enterpriseId,
+        factory_code: input.factory_code,
+        name: input.name,
+        location: input.location || null,
+        manager: input.manager || null,
+        capacity: input.capacity,
+        current_load: input.current_load,
+        status: input.status,
+        description: input.description || null,
+      })
+      .select('id,factory_code,name,location,manager,capacity,current_load,status,description,created_at,updated_at')
+      .single();
+    if (error || !data) throw error ?? new Error('Missing inserted workshop');
+    return NextResponse.json({
+      success: true,
+      workshop: {
+        ...data,
+        load_percentage: calcLoadPercentage(data.current_load, data.capacity),
+      },
+    }, { status: 201 });
   } catch (error) {
-    console.error("创建车间失败:", error);
-    return NextResponse.json(
-      { success: false, error: "服务器错误" },
-      { status: 500 }
-    );
+    return errorResponse(error, '创建车间失败');
   }
 }
