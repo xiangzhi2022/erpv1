@@ -1,39 +1,42 @@
-import { getSupabaseClient } from '@/db/client';
-import { getUserFromRequest } from '@/lib/auth';
-import { canManageProduction, canViewFinancialFields } from '@/lib/four-level-order';
+import { getEnterpriseContext, requirePermission } from '@/lib/enterprise/context';
+import { createClient } from '@/lib/supabase/server';
+import { numeric, performanceError } from '../_lib';
 
-function jsonError(error: string, status: number) {
-  return Response.json({ success: false, error }, { status });
-}
-
-function num(value: unknown): number {
-  const parsed = typeof value === 'number' ? value : Number(value || 0);
-  return Number.isFinite(parsed) ? parsed : 0;
-}
-
-export async function GET(request: Request) {
+export async function GET() {
   try {
-    const user = await getUserFromRequest(request);
-    if (!user) return jsonError('请先登录', 401);
-    if (!canManageProduction(user) && !canViewFinancialFields(user)) return jsonError('无权查看订单绩效', 403);
-    const supabase = getSupabaseClient();
-    let query = supabase.from('orders').select('*').order('created_at', { ascending: false });
-    if (user.tenant_id) query = query.eq('tenant_id', user.tenant_id);
-    const [ordersRes, tasksRes, wagesRes] = await Promise.all([
-      query,
-      user.tenant_id ? supabase.from('production_tasks').select('order_id,status').eq('tenant_id', user.tenant_id) : supabase.from('production_tasks').select('order_id,status'),
-      supabase.from('worker_wage_records').select('order_id,wage_amount,status'),
+    const context = await getEnterpriseContext();
+    requirePermission(context, 'orders.read');
+    requirePermission(context, 'production.read');
+    requirePermission(context, 'wages.read.all');
+    const supabase = await createClient();
+    const [ordersResult, tasksResult, wagesResult] = await Promise.all([
+      supabase.from('orders')
+        .select('id,order_no,customer_name,dealer_id,status,delivery_date,updated_at,total_amount')
+        .eq('enterprise_id', context.enterpriseId)
+        .order('created_at', { ascending: false }),
+      supabase.from('production_tasks')
+        .select('order_id,status')
+        .eq('enterprise_id', context.enterpriseId),
+      supabase.from('worker_wage_records')
+        .select('order_id,wage_amount,status')
+        .eq('enterprise_id', context.enterpriseId),
     ]);
-    if (ordersRes.error) return jsonError(ordersRes.error.message, 500);
-    if (tasksRes.error) return jsonError(tasksRes.error.message, 500);
-    if (wagesRes.error) return jsonError(wagesRes.error.message, 500);
-    const tasks = (tasksRes.data || []) as Record<string, unknown>[];
-    const wages = (wagesRes.data || []) as Record<string, unknown>[];
-    const rows = ((ordersRes.data || []) as Record<string, unknown>[]).map((order) => {
+    if (ordersResult.error || tasksResult.error || wagesResult.error) {
+      console.error('performance.orders_query_failed', {
+        orders: ordersResult.error?.code,
+        tasks: tasksResult.error?.code,
+        wages: wagesResult.error?.code,
+      });
+      return Response.json({ success: false, error: '获取订单绩效失败' }, { status: 500 });
+    }
+    const tasks = tasksResult.data ?? [];
+    const wages = wagesResult.data ?? [];
+    const rows = (ordersResult.data ?? []).map((order) => {
       const orderTasks = tasks.filter((task) => task.order_id === order.id);
       const completed = orderTasks.filter((task) => task.status === 'completed').length;
-      const abnormal = orderTasks.filter((task) => ['abnormal', 'quality_failed', 'reworking'].includes(String(task.status))).length;
-      const laborCost = wages.filter((wage) => wage.order_id === order.id).reduce((sum, wage) => sum + num(wage.wage_amount), 0);
+      const abnormal = orderTasks.filter((task) => (
+        ['abnormal', 'quality_failed', 'reworking'].includes(task.status)
+      )).length;
       return {
         id: order.id,
         order_no: order.order_no,
@@ -45,13 +48,14 @@ export async function GET(request: Request) {
         actual_completed_at: order.updated_at,
         delayed: false,
         abnormal_count: abnormal,
-        labor_cost: laborCost,
-        order_output: num(order.total_amount),
+        labor_cost: wages
+          .filter((wage) => wage.order_id === order.id)
+          .reduce((sum, wage) => sum + numeric(wage.wage_amount), 0),
+        order_output: numeric(order.total_amount),
       };
     });
     return Response.json({ success: true, data: rows });
   } catch (error) {
-    console.error('get order performance failed:', error);
-    return jsonError('获取订单绩效失败', 500);
+    return performanceError(error, '获取订单绩效失败');
   }
 }
