@@ -1,5 +1,6 @@
 import type { AccessUser, PermissionKey } from '@/lib/role-access';
 import { getPermissionTemplate, getUserPermissionKeys } from '@/lib/role-access';
+import type { EnterprisePermissionCode } from '@/lib/enterprise/permissions';
 
 export interface DefaultDepartment {
   code: string;
@@ -29,6 +30,7 @@ export interface EmployeeLike {
   id?: string;
   role?: string;
   permissions?: string[];
+  grants?: ReadonlySet<EnterprisePermissionCode>;
   roles?: Array<string | { code?: string | null }>;
   positions?: Array<{
     code?: string | null;
@@ -130,6 +132,9 @@ export function hasRole(userOrEmployee: EmployeeLike | AccessUser | null | undef
 
 export function hasPermission(userOrEmployee: EmployeeLike | AccessUser | null | undefined, permissionCode: string): boolean {
   if (!userOrEmployee) return false;
+  if (userOrEmployee.grants instanceof Set) {
+    return userOrEmployee.grants.has(permissionCode as EnterprisePermissionCode);
+  }
   if ((userOrEmployee.permissions || []).includes(permissionCode)) return true;
   if (getPermissionTemplate(permissionCode)) {
     return getUserPermissionKeys(userOrEmployee as AccessUser).includes(permissionCode as PermissionKey);

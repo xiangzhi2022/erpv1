@@ -21,12 +21,10 @@ import {
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import {
-  getAccountRoleLabel,
   getNavigationForUser,
-  getUserPermissionKeys,
-  getPermissionLabel,
   type AccessUser,
 } from '@/lib/role-access';
+import type { EnterpriseContext } from '@/lib/enterprise/context';
 
 function getDisplayName(user?: AccessUser | null): string {
   return user?.nickname || user?.name || user?.phone || '当前账号';
@@ -53,23 +51,31 @@ function SidebarToggle() {
 
 interface AppSidebarProps {
   user?: AccessUser | null;
+  context: EnterpriseContext;
 }
 
 interface OrganizationOption {
-  tenant_id: string;
-  tenant_name: string;
-  tenant_type?: string;
-  role?: string;
-  department?: string;
+  enterpriseId: string;
+  enterpriseName: string;
+  enterpriseType?: string;
 }
 
-export function AppSidebar({ user }: AppSidebarProps) {
+export function AppSidebar({ user, context }: AppSidebarProps) {
   const pathname = usePathname();
   const router = useRouter();
   const [organizations, setOrganizations] = useState<OrganizationOption[]>([]);
-  const [activeTenantId, setActiveTenantId] = useState(user?.tenant_id || '');
+  const [activeTenantId, setActiveTenantId] = useState<string>(context.enterpriseId);
   const [switchingTenant, setSwitchingTenant] = useState(false);
-  const navigation = getNavigationForUser(user);
+  const accessUser: AccessUser = {
+    ...user,
+    name: context.displayName,
+    tenant_id: context.enterpriseId,
+    tenant_name: context.enterpriseName,
+    tenant_type: context.enterpriseType,
+    enterpriseType: context.enterpriseType,
+    grants: context.grants,
+  };
+  const navigation = getNavigationForUser(accessUser);
   const groupedItems = navigation.reduce<Record<string, typeof navigation>>((groups, item) => {
     const key = item.group;
     groups[key] = groups[key] || [];
@@ -84,10 +90,7 @@ export function AppSidebar({ user }: AppSidebarProps) {
     admin: '管理中心',
   };
 
-  const permissionText = getUserPermissionKeys(user)
-    .slice(0, 2)
-    .map(getPermissionLabel)
-    .join('、');
+  const permissionText = `已授权 ${context.grants.size} 项`;
 
   useEffect(() => {
     let mounted = true;
@@ -96,18 +99,18 @@ export function AppSidebar({ user }: AppSidebarProps) {
       .then((json) => {
         if (!mounted || !json.success) return;
         setOrganizations(json.organizations || []);
-        setActiveTenantId(json.active_tenant_id || user?.tenant_id || '');
+        setActiveTenantId(json.activeEnterpriseId || context.enterpriseId);
       })
       .catch(() => null);
     return () => {
       mounted = false;
     };
-  }, [user?.tenant_id]);
+  }, [context.enterpriseId]);
 
   const activeOrganizationName = useMemo(() => {
-    const active = organizations.find((item) => item.tenant_id === activeTenantId);
-    return active?.tenant_name || user?.tenant_name || '未选择组织';
-  }, [activeTenantId, organizations, user?.tenant_name]);
+    const active = organizations.find((item) => item.enterpriseId === activeTenantId);
+    return active?.enterpriseName || context.enterpriseName || '未选择企业';
+  }, [activeTenantId, context.enterpriseName, organizations]);
 
   const switchOrganization = async (tenantId: string) => {
     if (!tenantId || tenantId === activeTenantId) return;
@@ -116,7 +119,7 @@ export function AppSidebar({ user }: AppSidebarProps) {
       const res = await fetch('/api/organizations', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ tenant_id: tenantId }),
+        body: JSON.stringify({ enterpriseId: tenantId, idempotencyKey: crypto.randomUUID() }),
       });
       const json = await res.json();
       if (!json.success) return;
@@ -150,18 +153,17 @@ export function AppSidebar({ user }: AppSidebarProps) {
               className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-primary text-sm font-semibold text-primary-foreground transition-opacity hover:opacity-90"
               title="个人资料"
             >
-              {getInitial(user)}
+              {getInitial(accessUser)}
             </Link>
             <div className="min-w-0 flex-1 group-data-[collapsible=icon]:hidden">
               <Link href="/profile" className="block truncate text-sm font-medium hover:underline">
-                {getDisplayName(user)}
+                {getDisplayName(accessUser)}
               </Link>
               <div className="truncate text-xs text-muted-foreground">
-                {user?.phone || '已登录'}
+                {user?.phone || context.enterpriseName}
               </div>
               <div className="mt-1 truncate text-[11px] text-muted-foreground">
-                {getAccountRoleLabel(user?.role)}
-                {permissionText ? ` · ${permissionText}` : ''}
+                {permissionText}
               </div>
             </div>
           </div>
@@ -174,10 +176,10 @@ export function AppSidebar({ user }: AppSidebarProps) {
                 </SelectTrigger>
                 <SelectContent>
                   {organizations.map((organization) => (
-                    <SelectItem key={organization.tenant_id} value={organization.tenant_id}>
+                    <SelectItem key={organization.enterpriseId} value={organization.enterpriseId}>
                       <span className="flex flex-col">
-                        <span>{organization.tenant_name}</span>
-                        <span className="text-xs text-muted-foreground">{getAccountRoleLabel(organization.role)}</span>
+                        <span>{organization.enterpriseName}</span>
+                        <span className="text-xs text-muted-foreground">{organization.enterpriseType || '企业'}</span>
                       </span>
                     </SelectItem>
                   ))}

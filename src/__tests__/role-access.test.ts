@@ -8,6 +8,31 @@ import {
 } from '@/lib/role-access';
 
 describe('role access rules', () => {
+  it('builds navigation only from authoritative enterprise grants', () => {
+    const subject = {
+      role: 'super_admin',
+      grants: new Set(['orders.read', 'finance.read']),
+    } as const;
+
+    const hrefs = getNavigationForUser(subject).map((item) => item.href);
+
+    expect(hrefs).toContain('/orders');
+    expect(hrefs).toContain('/finance');
+    expect(hrefs).not.toContain('/settings');
+    expect(hrefs).not.toContain('/employees');
+    expect(canAccessPath(subject, '/orders/123')).toBe(true);
+    expect(canAccessPath(subject, '/settings')).toBe(false);
+    expect(getLandingPath(subject)).toBe('/orders');
+  });
+
+  it('does not elevate a legacy admin role when an authoritative grant set is empty', () => {
+    const subject = { role: 'super_admin', grants: new Set() } as const;
+
+    expect(getNavigationForUser(subject)).toEqual([]);
+    expect(canAccessPath(subject, '/settings')).toBe(false);
+    expect(getLandingPath(subject)).toBe('/profile');
+  });
+
   it('grants super admin all navigation and assignable permissions', () => {
     const user: AccessUser = { role: 'super_admin', permissions: [] };
 

@@ -16,6 +16,7 @@ import {
   Wallet,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
+import type { EnterprisePermissionCode } from '@/lib/enterprise/permissions';
 
 export type AccountRole = 'super_admin' | 'factory_admin' | 'supplier_admin' | 'dealer_admin' | 'employee';
 export type PermissionLevel = 1 | 2 | 3;
@@ -52,6 +53,8 @@ export type AccessUser = Partial<AuthUser & User> & {
   tenant_name?: string;
   department?: string;
   permissions?: string[];
+  grants?: ReadonlySet<EnterprisePermissionCode>;
+  enterpriseType?: string;
 };
 
 export interface AccountRoleTemplate {
@@ -304,7 +307,60 @@ const NAV_ITEMS: NavigationItem[] = [
   { title: S.sync, href: '/sync', icon: ShieldCheck, group: 'admin' },
 ];
 
+const AUTHORITATIVE_PATH_RULES: ReadonlyArray<{
+  prefix: string;
+  permissions: readonly EnterprisePermissionCode[];
+}> = [
+  { prefix: '/settings/wage-rules', permissions: ['wages.manage'] },
+  { prefix: '/settings/roles', permissions: ['roles.manage'] },
+  { prefix: '/settings/users', permissions: ['members.manage'] },
+  { prefix: '/settings/departments', permissions: ['organization.manage'] },
+  { prefix: '/settings/positions', permissions: ['organization.manage'] },
+  { prefix: '/orders/exchanges', permissions: ['partners.read'] },
+  { prefix: '/production/tasks', permissions: ['production.read'] },
+  { prefix: '/performance', permissions: ['production.read', 'wages.read.all'] },
+  { prefix: '/worker/wages', permissions: ['wages.read.self', 'wages.read.all'] },
+  { prefix: '/worker', permissions: ['production.read', 'production.report.self'] },
+  { prefix: '/employees', permissions: ['members.read'] },
+  { prefix: '/workers', permissions: ['members.read'] },
+  { prefix: '/categories', permissions: ['catalog.read'] },
+  { prefix: '/dashboard', permissions: ['dashboard.read'] },
+  { prefix: '/board', permissions: ['dashboard.read'] },
+  { prefix: '/orders', permissions: ['orders.read'] },
+  { prefix: '/progress', permissions: ['production.read'] },
+  { prefix: '/tasks', permissions: ['tasks.read'] },
+  { prefix: '/dealer', permissions: ['partners.read'] },
+  { prefix: '/supplier', permissions: ['partners.read'] },
+  { prefix: '/factory', permissions: ['organization.read'] },
+  { prefix: '/finance', permissions: ['finance.read'] },
+  { prefix: '/shipping', permissions: ['shipping.read'] },
+  { prefix: '/settings', permissions: ['settings.read'] },
+  { prefix: '/sync', permissions: ['settings.manage'] },
+];
+
+function hasAuthoritativeGrants(user: AccessUser): user is AccessUser & {
+  grants: ReadonlySet<EnterprisePermissionCode>;
+} {
+  return user.grants instanceof Set;
+}
+
+function canAccessPathFromGrants(
+  grants: ReadonlySet<EnterprisePermissionCode>,
+  pathname: string,
+): boolean {
+  const path = normalizePath(pathname);
+  if (pathStarts(path, '/profile')) return true;
+  const rule = AUTHORITATIVE_PATH_RULES.find((entry) => pathStarts(path, entry.prefix));
+  return Boolean(rule && rule.permissions.some((permission) => grants.has(permission)));
+}
+
 function enterpriseDirectoryTitleForUser(user: AccessUser): string {
+  if (hasAuthoritativeGrants(user)) {
+    const businessType = tenantTypeToBusinessType(user.enterpriseType || user.tenant_type);
+    if (businessType === 'dealer') return '工厂企业';
+    if (businessType === 'factory') return '材料供应商';
+    return '企业库';
+  }
   if (isSuperAdmin(user)) return '经销商管理';
 
   const role = normalizeAccountRole(rawRoleOf(user));
@@ -400,6 +456,19 @@ export function isFactoryUser(user: AccessUser | null | undefined): boolean {
 
 export function getLandingPath(user: AccessUser | null | undefined): string {
   if (!user) return '/login';
+  if (hasAuthoritativeGrants(user)) {
+    const priorities = [
+      '/orders',
+      '/board',
+      '/dashboard',
+      '/production/tasks',
+      '/tasks',
+      '/finance',
+      '/shipping',
+      '/settings',
+    ];
+    return priorities.find((path) => canAccessPathFromGrants(user.grants, path)) || '/profile';
+  }
   if (canAccessPath(user, '/orders')) return '/orders';
 
   const roleTemplate = getAccountRoleTemplate(rawRoleOf(user));
@@ -427,6 +496,7 @@ function allowedPrefixes(user: AccessUser): string[] {
 
 export function canAccessPath(user: AccessUser | null | undefined, pathname: string): boolean {
   if (!user) return false;
+  if (hasAuthoritativeGrants(user)) return canAccessPathFromGrants(user.grants, pathname);
   const path = normalizePath(pathname);
   const permissions = getUserPermissionKeys(user);
   const canManageOrganization = isAdminRole(user) || permissions.includes('factory_boss');

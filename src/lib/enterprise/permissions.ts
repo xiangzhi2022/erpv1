@@ -44,6 +44,12 @@ export const ENTERPRISE_PERMISSION_CODES = [
 
 export type EnterprisePermissionCode = (typeof ENTERPRISE_PERMISSION_CODES)[number];
 
+const ENTERPRISE_PERMISSION_CODE_SET = new Set<string>(ENTERPRISE_PERMISSION_CODES);
+
+export function isEnterprisePermissionCode(value: string): value is EnterprisePermissionCode {
+  return ENTERPRISE_PERMISSION_CODE_SET.has(value);
+}
+
 export const STANDARD_ROLE_PERMISSIONS = {
   enterprise_owner: [
     'organization.read',

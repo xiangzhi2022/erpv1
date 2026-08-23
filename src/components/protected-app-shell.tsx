@@ -2,8 +2,9 @@ import { redirect } from 'next/navigation';
 import { SidebarProvider, SidebarInset, SidebarTrigger } from '@/components/ui/sidebar';
 import { AppSidebar } from '@/components/sidebar';
 import { Separator } from '@/components/ui/separator';
-import { getCurrentAuthUser } from '@/lib/auth';
-import { canAccessPath, getLandingPath } from '@/lib/role-access';
+import { getEnterpriseContext } from '@/lib/enterprise/context';
+import { isEnterpriseAccessError } from '@/lib/enterprise/errors';
+import { canAccessPath } from '@/lib/role-access';
 
 interface ProtectedAppShellProps {
   children: React.ReactNode;
@@ -12,18 +13,24 @@ interface ProtectedAppShellProps {
 }
 
 export async function ProtectedAppShell({ children, title, path }: ProtectedAppShellProps) {
-  const user = await getCurrentAuthUser();
-  if (!user) {
-    redirect('/login');
+  let context;
+  try {
+    context = await getEnterpriseContext();
+  } catch (error) {
+    if (!isEnterpriseAccessError(error)) throw error;
+    if (error.code === 'IDENTITY_REQUIRED') redirect('/login');
+    if (error.code === 'ENTERPRISE_SELECTION_REQUIRED') redirect('/select-enterprise');
+    if (error.code === 'ENTERPRISE_MEMBERSHIP_REQUIRED') redirect('/onboarding');
+    if (error.code === 'ENTERPRISE_ACCESS_FORBIDDEN') redirect('/403');
+    throw error;
   }
 
-  if (!canAccessPath(user, path)) {
-    redirect(`${getLandingPath(user)}?permission=denied`);
-  }
+  const accessSubject = { grants: context.grants, enterpriseType: context.enterpriseType };
+  if (!canAccessPath(accessSubject, path)) redirect('/403');
 
   return (
     <SidebarProvider>
-      <AppSidebar user={user} />
+      <AppSidebar context={context} />
       <SidebarInset>
         <header className="flex h-12 shrink-0 items-center gap-2 border-b px-4">
           <SidebarTrigger className="-ml-1" />
