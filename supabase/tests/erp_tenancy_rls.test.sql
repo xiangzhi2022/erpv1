@@ -149,6 +149,24 @@ select matches(
   'order update policy uses orders.update'
 );
 
+select matches(
+  (select qual from pg_policies where schemaname = 'public' and tablename = 'order_exchanges' and policyname = 'order_exchanges_participant_select'),
+  'to_enterprise_id.*orders.read',
+  'order exchange select policy admits authorized receiving enterprises'
+);
+
+select matches(
+  (select with_check from pg_policies where schemaname = 'public' and tablename = 'order_exchanges' and policyname = 'order_exchanges_participant_insert'),
+  'enterprise_id.*from_enterprise_id.*orders.submit',
+  'order exchange insert policy fixes the sender enterprise'
+);
+
+select matches(
+  (select qual from pg_policies where schemaname = 'public' and tablename = 'order_exchanges' and policyname = 'order_exchanges_participant_update'),
+  'to_enterprise_id.*orders.accept',
+  'order exchange update policy admits authorized receivers'
+);
+
 insert into public.enterprises (id, code, name, enterprise_type) values
   ('10000000-0000-4000-8000-000000000001', 'rls-a', 'RLS enterprise A', 'manufacturer'),
   ('20000000-0000-4000-8000-000000000002', 'rls-b', 'RLS enterprise B', 'dealer');

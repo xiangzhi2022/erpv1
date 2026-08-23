@@ -144,4 +144,23 @@ describe('API route policy manifest', () => {
 
     expect(offenders).toEqual([]);
   });
+
+  it('uses enterprise-scoped access for migrated order reads and numbering', () => {
+    const files = [
+      resolve(API_ROOT, 'dealer/orders/route.ts'),
+      resolve(API_ROOT, 'dealer/orders/[id]/route.ts'),
+      resolve(API_ROOT, 'order-exchanges/route.ts'),
+      resolve(API_ROOT, 'order-exchanges/[id]/route.ts'),
+      resolve(API_ROOT, 'supplier/orders/route.ts'),
+      resolve(API_ROOT, 'orders/generate/route.ts'),
+      resolve(API_ROOT, 'orders/prefix/route.ts'),
+      resolve(API_ROOT, 'orders/sequence/route.ts'),
+    ];
+    const offenders = files.filter((file) => {
+      const source = readFileSync(file, 'utf8');
+      return /@\/db\/client|getSupabaseClient\s*\(|\.select\([^)]*(?:tenant_id|from_tenant_id|to_tenant_id)|\.(?:eq|is)\(['"](?:tenant_id|from_tenant_id|to_tenant_id)['"]/.test(source);
+    }).map((file) => relative(process.cwd(), file));
+
+    expect(offenders).toEqual([]);
+  });
 });

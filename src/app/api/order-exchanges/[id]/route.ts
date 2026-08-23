@@ -1,118 +1,90 @@
-import { parseJsonObject } from '@/lib/api/request';
-import { NextResponse } from 'next/server';
-import { getSupabaseClient } from '@/db/client';
-import { getUserFromRequest } from '@/lib/auth';
+import { NextResponse, type NextRequest } from 'next/server';
+import { z } from 'zod';
+import { parseJson } from '@/lib/api/request';
+import { getEnterpriseContext, requirePermission } from '@/lib/enterprise/context';
 import {
-  canActOnExchange,
-  canSeeExchange,
   isValidOrderExchangeStatus,
   nextExchangeStatus,
-  shouldSyncOrderOnExchangeAction,
   type OrderExchangeAction,
-  type OrderExchangeStatus,
 } from '@/lib/order-exchange';
+import { createClient } from '@/lib/supabase/server';
 
-interface ExchangeRow {
-  id: string;
-  order_id: string;
-  from_tenant_id: string;
-  to_tenant_id: string;
-  status: OrderExchangeStatus;
-  message: string | null;
-}
+const actionSchema = z.object({
+  action: z.enum(['send', 'accept', 'request_change', 'reject', 'withdraw']),
+  message: z.string().trim().max(2000).optional(),
+  proposed_changes: z.json().nullable().optional(),
+});
 
-function jsonError(error: string, status: number) {
-  return NextResponse.json({ success: false, error }, { status });
-}
-
-function isAction(value: unknown): value is OrderExchangeAction {
-  return value === 'send' || value === 'accept' || value === 'request_change' || value === 'reject' || value === 'withdraw';
+function permissionForAction(action: OrderExchangeAction) {
+  return action === 'withdraw' || action === 'send' ? 'orders.update' as const : 'orders.accept' as const;
 }
 
 export async function PATCH(
-  request: Request,
-  { params }: { params: Promise<{ id: string }> }
+  request: NextRequest,
+  { params }: { params: Promise<{ id: string }> },
 ) {
   try {
-    const user = await getUserFromRequest(request);
-    if (!user) return jsonError('请先登录', 401);
-
+    const context = await getEnterpriseContext();
+    const input = await parseJson(request, actionSchema);
+    requirePermission(context, permissionForAction(input.action));
     const { id } = await params;
-    const body = (await parseJsonObject(request)) as Record<string, unknown>;
-    if (!isAction(body.action)) return jsonError('动作无效', 400);
-
-    const supabase = getSupabaseClient();
+    const supabase = await createClient();
     const { data: exchange, error: fetchError } = await supabase
       .from('order_exchanges')
-      .select('id, order_id, from_tenant_id, to_tenant_id, status, message')
+      .select('id,order_id,from_enterprise_id,to_enterprise_id,status,message')
       .eq('id', id)
+      .or(
+        `from_enterprise_id.eq.${context.enterpriseId},to_enterprise_id.eq.${context.enterpriseId}`,
+      )
       .maybeSingle();
-
-    if (fetchError || !exchange) return jsonError('订单流转不存在', 404);
-    const row = exchange as ExchangeRow;
-    if (!isValidOrderExchangeStatus(row.status)) return jsonError('当前流转状态异常', 400);
-    if (!canSeeExchange(user, row)) return jsonError('无权查看该订单流转', 403);
-    if (!canActOnExchange(user, row, body.action)) return jsonError('无权处理该订单流转', 403);
-
-    const nextStatus = nextExchangeStatus(row.status, body.action);
+    if (fetchError || !exchange) {
+      return NextResponse.json({ success: false, error: '订单流转不存在' }, { status: 404 });
+    }
+    if (!isValidOrderExchangeStatus(exchange.status)) {
+      return NextResponse.json({ success: false, error: '当前流转状态异常' }, { status: 409 });
+    }
+    const isSender = exchange.from_enterprise_id === context.enterpriseId;
+    const isReceiver = exchange.to_enterprise_id === context.enterpriseId;
+    if ((input.action === 'withdraw' || input.action === 'send') ? !isSender : !isReceiver) {
+      return NextResponse.json({ success: false, error: '无权处理该订单流转' }, { status: 403 });
+    }
+    const nextStatus = nextExchangeStatus(exchange.status, input.action);
     if (!nextStatus) {
-      return jsonError(`不允许从「${row.status}」执行「${body.action}」`, 400);
+      return NextResponse.json({ success: false, error: '当前状态不允许执行该动作' }, { status: 409 });
     }
-
-    const message = typeof body.message === 'string' ? body.message.trim() : '';
-    const proposedChanges = body.proposed_changes && typeof body.proposed_changes === 'object' ? body.proposed_changes : null;
-    const updateData: Record<string, unknown> = {
-      status: nextStatus,
-      updated_at: new Date().toISOString(),
-    };
-
-    if (message) {
-      updateData.message = body.action === 'withdraw' && row.message
-        ? `${row.message}\n撤回原因：${message}`
-        : body.action === 'withdraw'
-          ? `撤回原因：${message}`
-          : message;
-    }
-    if (body.action === 'request_change' && proposedChanges) updateData.proposed_changes = proposedChanges;
-    if (body.action === 'accept' || body.action === 'request_change' || body.action === 'reject' || body.action === 'withdraw') {
-      updateData.handled_by = user.id;
-      updateData.handled_at = new Date().toISOString();
-    }
-
+    const message = input.message
+      ? input.action === 'withdraw' && exchange.message
+        ? `${exchange.message}\n撤回原因：${input.message}`
+        : input.action === 'withdraw'
+          ? `撤回原因：${input.message}`
+          : input.message
+      : exchange.message;
     const { data, error } = await supabase
       .from('order_exchanges')
-      .update(updateData)
+      .update({
+        status: nextStatus,
+        message,
+        proposed_changes: input.action === 'request_change'
+          ? input.proposed_changes ?? null
+          : undefined,
+        handled_by: context.userId,
+        handled_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      })
       .eq('id', id)
+      .eq('status', exchange.status)
       .select()
-      .single();
-
-    if (error) return jsonError(error.message, 500);
-
-    if (shouldSyncOrderOnExchangeAction(body.action)) {
-      await supabase
-        .from('orders')
-        .update({
-          status: 'confirmed',
-          target_factory_id: row.to_tenant_id,
-          to_tenant_id: row.to_tenant_id,
-          updated_at: new Date().toISOString(),
-        })
-        .eq('id', row.order_id)
-        .in('status', ['pending', 'returned']);
-
-      await supabase
-        .from('production_tasks')
-        .update({
-          tenant_id: row.to_tenant_id,
-          updated_at: new Date().toISOString(),
-        })
-        .eq('order_id', row.order_id)
-        .is('tenant_id', null);
+      .maybeSingle();
+    if (error) {
+      console.error('order_exchange.update_failed', { code: error.code });
+      return NextResponse.json({ success: false, error: '更新订单流转失败' }, { status: 500 });
     }
-
+    if (!data) {
+      return NextResponse.json({ success: false, error: '订单流转状态已变化' }, { status: 409 });
+    }
     return NextResponse.json({ success: true, exchange: data });
   } catch (error) {
-    console.error('update order exchange failed:', error);
-    return jsonError('更新订单流转失败', 500);
+    console.error('order_exchange.update_failed', { error });
+    return NextResponse.json({ success: false, error: '更新订单流转失败' }, { status: 500 });
   }
 }

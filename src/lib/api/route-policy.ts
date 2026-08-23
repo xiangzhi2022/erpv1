@@ -65,16 +65,20 @@ export const API_ROUTE_POLICY_ENTRIES: readonly PolicyEntry[] = [
     '/api/dealer',
     '/api/enterprise-directory',
     '/api/factories',
-    '/api/order-exchanges/[id]',
     '/api/order-exchanges/partners',
-    '/api/order-exchanges',
-    '/api/order-partners',
     '/api/supplier/create',
     '/api/supplier/delete',
     '/api/supplier/list',
     '/api/supplier/orders',
     '/api/supplier/update',
   ], 'partners.read', 'partners.manage'),
+  ...enterpriseRoutes([
+    '/api/order-exchanges/[id]',
+    '/api/order-exchanges',
+  ], 'orders.read', 'orders.update'),
+  ...enterpriseRoutes([
+    '/api/order-partners',
+  ], 'orders.create'),
   ...enterpriseRoutes([
     '/api/dealer/orders/[id]',
     '/api/dealer/orders/create',

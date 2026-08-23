@@ -1,68 +1,38 @@
-import { parseJsonObject } from '@/lib/api/request';
-import { getSupabaseClient } from '@/db/client';
-import { getUserFromRequest } from '@/lib/auth';
-import { isSuperAdmin } from '@/lib/role-access';
+import { NextResponse, type NextRequest } from 'next/server';
+import { z } from 'zod';
+import { parseJson } from '@/lib/api/request';
+import { getEnterpriseContext, requirePermission } from '@/lib/enterprise/context';
+import { createClient } from '@/lib/supabase/server';
 
-const getServiceClient = () => getSupabaseClient();
+const generateSchema = z.object({ prefix: z.string().trim().min(1).max(16).default('ORD') });
 
-// POST /api/orders/generate - Generate order number with atomic sequence
-export async function POST(request: Request) {
+export async function POST(request: NextRequest) {
   try {
-    const user = await getUserFromRequest(request);
-    if (!user) {
-      return Response.json({ success: false, error: '请先登录' }, { status: 401 });
-    }
-
-    const body: Record<string, unknown> = await parseJsonObject(request).catch(() => ({}));
-    const prefix = typeof body.prefix === 'string' && body.prefix.trim() ? body.prefix.trim() : 'ORD';
-
-    if (!prefix) {
-      return Response.json({ success: false, error: '前缀不能为空' }, { status: 400 });
-    }
-
-    const supabase = getServiceClient();
-    const now = new Date();
-    const dateStr = [
-      now.getFullYear(),
-      String(now.getMonth() + 1).padStart(2, '0'),
-      String(now.getDate()).padStart(2, '0'),
-    ].join('');
-
-    let query = supabase
+    const context = await getEnterpriseContext();
+    requirePermission(context, 'orders.create');
+    const { prefix } = await parseJson(request, generateSchema);
+    const date = new Date();
+    const dateStr = `${date.getFullYear()}${String(date.getMonth() + 1).padStart(2, '0')}${String(date.getDate()).padStart(2, '0')}`;
+    const supabase = await createClient();
+    const { data, error } = await supabase
       .from('orders')
       .select('order_no')
+      .eq('enterprise_id', context.enterpriseId)
       .like('order_no', `${prefix}${dateStr}%`)
       .order('order_no', { ascending: false })
       .limit(1);
-
-    if (!isSuperAdmin(user)) {
-      if (!user.tenant_id) {
-        return Response.json({ success: false, error: '当前用户未关联租户' }, { status: 403 });
-      }
-      query = query.eq('tenant_id', user.tenant_id);
-    }
-
-    const { data, error } = await query;
-
     if (error) {
-      console.error('Generate order number error:', error);
-      return Response.json({ success: false, error: '生成订单号失败' }, { status: 500 });
+      console.error('order_number.generate_failed', { code: error.code });
+      return NextResponse.json({ success: false, error: '生成订单号失败' }, { status: 500 });
     }
-
     let sequence = 1;
-    const lastNo = data?.[0]?.order_no;
-    if (lastNo) {
-      const escapedPrefix = prefix.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-      const match = lastNo.match(new RegExp(`^${escapedPrefix}${dateStr}(\\d+)$`));
-      if (match) {
-        sequence = Number.parseInt(match[1], 10) + 1;
-      }
-    }
-
+    const escapedPrefix = prefix.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const match = data?.[0]?.order_no.match(new RegExp(`^${escapedPrefix}${dateStr}(\\d+)$`));
+    if (match) sequence = Number.parseInt(match[1], 10) + 1;
     const orderNo = `${prefix}${dateStr}${String(sequence).padStart(3, '0')}`;
-    return Response.json({ success: true, data: { order_no: orderNo }, orderNo });
-  } catch (err) {
-    console.error('Generate order number error:', err);
-    return Response.json({ success: false, error: '服务器错误' }, { status: 500 });
+    return NextResponse.json({ success: true, data: { order_no: orderNo }, orderNo });
+  } catch (error) {
+    console.error('order_number.generate_failed', { error });
+    return NextResponse.json({ success: false, error: '生成订单号失败' }, { status: 500 });
   }
 }

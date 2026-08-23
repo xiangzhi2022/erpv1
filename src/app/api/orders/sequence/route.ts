@@ -1,68 +1,41 @@
-import { getSupabaseClient } from '@/db/client';
-import { getUserFromRequest } from '@/lib/auth';
-import { isSuperAdmin } from '@/lib/role-access';
+import { NextResponse, type NextRequest } from 'next/server';
+import { getEnterpriseContext, requirePermission } from '@/lib/enterprise/context';
+import { createClient } from '@/lib/supabase/server';
 
-const getServiceClient = () => getSupabaseClient();
-
-// GET /api/orders/sequence - Get next order sequence number for current tenant
-export async function GET(request: Request) {
+export async function GET(request: NextRequest) {
   try {
-    const user = await getUserFromRequest(request);
-    if (!user) {
-      return Response.json({ success: false, error: '请先登录' }, { status: 401 });
-    }
-
-    const supabase = getServiceClient();
-    const { searchParams } = new URL(request.url);
-    const prefix = searchParams.get('prefix') || 'ORD';
-    const dateStr = searchParams.get('date') || new Date().toISOString().slice(0, 10).replace(/-/g, '');
-
-    // Build query with tenant scope
-    let query = supabase
+    const context = await getEnterpriseContext();
+    requirePermission(context, 'orders.create');
+    const prefix = request.nextUrl.searchParams.get('prefix')?.trim() || 'ORD';
+    const date = request.nextUrl.searchParams.get('date')?.trim()
+      || new Date().toISOString().slice(0, 10).replace(/-/g, '');
+    const supabase = await createClient();
+    const { data, error } = await supabase
       .from('orders')
       .select('order_no')
-      .like('order_no', `${prefix}${dateStr}%`)
+      .eq('enterprise_id', context.enterpriseId)
+      .like('order_no', `${prefix}${date}%`)
       .order('order_no', { ascending: false })
       .limit(1);
-
-    // Non-platform users are scoped by tenant_id.
-    // are scoped by tenant_id instead of per-user ownership.
-    if (!isSuperAdmin(user)) {
-      if (!user.tenant_id) {
-        return Response.json({ success: false, error: '当前用户未关联租户' }, { status: 403 });
-      }
-      query = query.eq('tenant_id', user.tenant_id);
-    }
-
-    const { data, error } = await query;
-
     if (error) {
-      console.error('获取订单序号失败:', error);
-      return Response.json({ success: false, error: '获取订单序号失败' }, { status: 500 });
+      console.error('order_sequence.get_failed', { code: error.code });
+      return NextResponse.json({ success: false, error: '获取订单序号失败' }, { status: 500 });
     }
-
     let sequence = 1;
-    if (data && data.length > 0) {
-      const lastNo = data[0].order_no;
-      const escapedPrefix = prefix.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-      const match = lastNo.match(new RegExp(`^${escapedPrefix}${dateStr}(\\d+)$`));
-      if (match) {
-        sequence = parseInt(match[1], 10) + 1;
-      }
-    }
-
-    const orderNo = `${prefix}${dateStr}${String(sequence).padStart(3, '0')}`;
-
-    return Response.json({
+    const escapedPrefix = prefix.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const match = data?.[0]?.order_no.match(new RegExp(`^${escapedPrefix}${date}(\\d+)$`));
+    if (match) sequence = Number.parseInt(match[1], 10) + 1;
+    const orderNo = `${prefix}${date}${String(sequence).padStart(3, '0')}`;
+    return NextResponse.json({
       success: true,
-      data: { order_no: orderNo, prefix, date: dateStr, sequence },
+      data: { order_no: orderNo, prefix, date, sequence },
       orderNo,
       prefix,
-      date: dateStr,
+      date,
       sequence,
     });
-  } catch (err) {
-    console.error('获取订单序号失败:', err);
-    return Response.json({ success: false, error: '获取订单序号失败' }, { status: 500 });
+  } catch (error) {
+    console.error('order_sequence.get_failed', { error });
+    return NextResponse.json({ success: false, error: '获取订单序号失败' }, { status: 500 });
   }
 }
