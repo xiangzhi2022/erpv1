@@ -27,6 +27,7 @@ log_step()    { echo -e "\n${BOLD}${CYAN}━━━ $1 ━━━${NC}\n"; }
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="${PROJECT_DIR:-${SCRIPT_DIR}}"
 PORT="${DEPLOY_RUN_PORT:-5000}"
+export PORT
 LOG_DIR="/app/work/logs/bypass"
 MAX_WAIT=90  # 最大等待秒数
 NODE_ENV="${NODE_ENV:-development}"
@@ -99,11 +100,11 @@ fi
 # ── Step 3: 构建（生产环境） ─────────────────────────────────
 if [[ "${NODE_ENV}" == "production" ]]; then
   log_step "Step 3/7: 构建生产版本"
-  bash scripts/build.sh 2>&1 | tail -20
+  pnpm build 2>&1 | tail -20
   log_success "构建完成"
 else
   log_step "Step 3/7: 跳过构建（开发模式）"
-  log_info "开发模式使用 tsx watch 热更新，无需构建"
+  log_info "开发模式使用 Next.js 热更新，无需构建"
 fi
 
 # ── Step 4: 清理端口 ─────────────────────────────────────────
@@ -134,10 +135,10 @@ mkdir -p "${LOG_DIR}"
 
 if [[ "${NODE_ENV}" == "production" ]]; then
   log_info "启动生产服务器 (端口: ${PORT})..."
-  nohup bash scripts/start.sh > "${LOG_DIR}/app.log" 2>&1 &
+  nohup pnpm start > "${LOG_DIR}/app.log" 2>&1 &
 else
   log_info "启动开发服务器 (端口: ${PORT})..."
-  nohup bash scripts/dev.sh > "${LOG_DIR}/app.log" 2>&1 &
+  nohup pnpm dev > "${LOG_DIR}/app.log" 2>&1 &
 fi
 
 SERVER_PID=$!
@@ -215,7 +216,7 @@ echo -e "${BOLD}${GREEN}┠━━━━━━━━━━━━━━━━━�
 echo -e "${BOLD}${GREEN}┃                                                                  ┃${NC}"
 echo -e "${BOLD}${GREEN}┃${NC}  ${BOLD}${CYAN}外网访问地址:${NC}                                                  ${BOLD}${GREEN}┃${NC}"
 echo -e "${BOLD}${GREEN}┃${NC}                                                                  ${BOLD}${GREEN}┃${NC}"
-echo -e "${BOLD}${GREEN}┃${NC}    ${BOLD}${WHITE}${ACCESS_URL}${NC}                    ${BOLD}${GREEN}┃${NC}"
+echo -e "${BOLD}${GREEN}┃${NC}    ${BOLD}${CYAN}${ACCESS_URL}${NC}                    ${BOLD}${GREEN}┃${NC}"
 echo -e "${BOLD}${GREEN}┃${NC}                                                                  ${BOLD}${GREEN}┃${NC}"
 echo -e "${BOLD}${GREEN}┠━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┫${NC}"
 echo -e "${BOLD}${GREEN}┃${NC}                                                                  ${BOLD}${GREEN}┃${NC}"
@@ -223,12 +224,6 @@ echo -e "${BOLD}${GREEN}┃${NC}  ${DIM}本地地址:${NC}   http://localhost:${
 echo -e "${BOLD}${GREEN}┃${NC}  ${DIM}服务端口:${NC}   ${PORT}                                                ${BOLD}${GREEN}┃${NC}"
 echo -e "${BOLD}${GREEN}┃${NC}  ${DIM}运行模式:${NC}   ${NODE_ENV}                                        ${BOLD}${GREEN}┃${NC}"
 echo -e "${BOLD}${GREEN}┃${NC}  ${DIM}服务 PID:${NC}   ${SERVER_PID}                                             ${BOLD}${GREEN}┃${NC}"
-echo -e "${BOLD}${GREEN}┃${NC}                                                                  ${BOLD}${GREEN}┃${NC}"
-echo -e "${BOLD}${GREEN}┠━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┫${NC}"
-echo -e "${BOLD}${GREEN}┃${NC}                                                                  ${BOLD}${GREEN}┃${NC}"
-echo -e "${BOLD}${GREEN}┃${NC}  ${BOLD}超级管理员登录:${NC}                                               ${BOLD}${GREEN}┃${NC}"
-echo -e "${BOLD}${GREEN}┃${NC}    手机号: 13800000000                                          ${BOLD}${GREEN}┃${NC}"
-echo -e "${BOLD}${GREEN}┃${NC}    密  码: 19840214aA                                            ${BOLD}${GREEN}┃${NC}"
 echo -e "${BOLD}${GREEN}┃${NC}                                                                  ${BOLD}${GREEN}┃${NC}"
 echo -e "${BOLD}${GREEN}┠━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┫${NC}"
 echo -e "${BOLD}${GREEN}┃${NC}                                                                  ${BOLD}${GREEN}┃${NC}"

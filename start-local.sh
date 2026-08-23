@@ -190,8 +190,8 @@ if [[ "${MODE}" == "prod" ]]; then
   pnpm build
   START_CMD=(pnpm start)
 else
-  log_info "Development mode: using tsx watch on src/server.ts"
-  START_CMD=(pnpm tsx watch src/server.ts)
+  log_info "Development mode: using the Next.js development server"
+  START_CMD=(pnpm dev)
 fi
 
 export PORT

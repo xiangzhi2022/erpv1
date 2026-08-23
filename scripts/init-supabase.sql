@@ -473,13 +473,6 @@ DROP TRIGGER IF EXISTS update_tasks_updated_at ON tasks;
 CREATE TRIGGER update_tasks_updated_at BEFORE UPDATE ON tasks FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
 -- ============================================
--- 鎻掑叆瓒呯骇绠＄悊鍛樿处鍙?
--- ============================================
-INSERT INTO users (phone, password, nickname, role, is_active) 
-VALUES ('13800000000', '19840214aA', '瓒呯骇绠＄悊鍛?, 'super_admin', true)
-ON CONFLICT (phone) DO NOTHING;
-
--- ============================================
 -- 鎻掑叆娴嬭瘯绉熸埛
 -- ============================================
 INSERT INTO tenants (tenant_type, company_name, contact_phone, prefix, status)
@@ -488,48 +481,6 @@ VALUES
   ('dealer', '娴嬭瘯缁忛攢鍟?, '4001234568', 'JX', 'active'),
   ('material_supplier', '娴嬭瘯鏉愭枡鍟?, '4001234569', 'CL', 'active')
 ON CONFLICT DO NOTHING;
-
--- ============================================
--- 鎻掑叆娴嬭瘯绉熸埛璐﹀彿
--- ============================================
-DO $$
-DECLARE
-  mfr_id UUID;
- dlr_id UUID;
-  mat_id UUID;
-BEGIN
-  -- 鑾峰彇鐢熶骇鍟咺D
-  SELECT id INTO mfr_id FROM tenants WHERE company_name = '娴嬭瘯鐢熶骇鍟?;
-  -- 鑾峰彇缁忛攢鍟咺D
-  SELECT id INTO dlr_id FROM tenants WHERE company_name = '娴嬭瘯缁忛攢鍟?;
-  -- 鑾峰彇鏉愭枡鍟咺D
-  SELECT id INTO mat_id FROM tenants WHERE company_name = '娴嬭瘯鏉愭枡鍟?;
-  
-  -- 鎻掑叆鐢熶骇鍟嗘祴璇曡处鍙?
-  IF mfr_id IS NOT NULL THEN
-    INSERT INTO tenant_users (tenant_id, phone, password, name, role, status)
-    VALUES (mfr_id, '55556666', '55556666', '鍏ㄦ柊鍏徃', 'user', 'active')
-    ON CONFLICT (tenant_id, phone) DO NOTHING;
-    
-    INSERT INTO tenant_users (tenant_id, phone, password, name, role, status)
-    VALUES (mfr_id, '13912345601', 'pass123', '鏉庡洓', '璁㈠崟绠＄悊', 'active')
-    ON CONFLICT (tenant_id, phone) DO NOTHING;
-  END IF;
-  
-  -- 鎻掑叆缁忛攢鍟嗘祴璇曡处鍙?
-  IF dlr_id IS NOT NULL THEN
-    INSERT INTO tenant_users (tenant_id, phone, password, name, role, status)
-    VALUES (dlr_id, '66660000', '66660000', '缁忛攢鍟嗙鐞嗗憳', 'user', 'active')
-    ON CONFLICT (tenant_id, phone) DO NOTHING;
-  END IF;
-  
-  -- 鎻掑叆鏉愭枡鍟嗘祴璇曡处鍙?
-  IF mat_id IS NOT NULL THEN
-    INSERT INTO tenant_users (tenant_id, phone, password, name, role, status)
-    VALUES (mat_id, '77770000', '77770000', '鏉愭枡鍟嗙鐞嗗憳', 'user', 'active')
-    ON CONFLICT (tenant_id, phone) DO NOTHING;
-  END IF;
-END $$;
 
 -- ============================================
 -- 鎻掑叆璁㈠崟鍓嶇紑
@@ -554,4 +505,3 @@ SELECT
   (SELECT COUNT(*) FROM users) as users_count,
   (SELECT COUNT(*) FROM tenants) as tenants_count,
   (SELECT COUNT(*) FROM tenant_users) as tenant_users_count;
-

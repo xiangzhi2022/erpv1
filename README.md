@@ -12,7 +12,7 @@ pnpm install
 pnpm dev
 ```
 
-启动后，在浏览器中打开 [http://localhost:5000](http://localhost:5000) 查看应用。
+启动后，在浏览器中打开 [http://localhost:3000](http://localhost:3000) 查看应用。
 
 开发服务器支持热更新，修改代码后页面会自动刷新。
 
@@ -46,11 +46,30 @@ src/
 │   └── utils.ts            # cn() 等工具函数
 └── hooks/                   # 自定义 React Hooks（可选）
 
-server/
-├── index.ts                 # 自定义服务器入口
-├── tsconfig.json           # Server TypeScript 配置
-└── dist/                    # 编译输出目录（自动生成）
 ```
+
+## 部署与环境隔离
+
+生产站点为 [https://qingya-erp-163.netlify.app](https://qingya-erp-163.netlify.app)，
+生产环境的 `APP_URL` 必须设置为 `https://qingya-erp-163.netlify.app`。Netlify 使用
+Node.js 24、pnpm 9 和自动启用的 Next.js OpenNext Runtime；构建命令为 `pnpm build`，
+发布目录为 `.next`。
+
+Netlify 环境变量必须按 deploy context 分开配置：
+
+- Production 的 `NEXT_PUBLIC_SUPABASE_URL` 必须指向项目
+  `jfcsbwdawvsxnmovwlgl`。
+- Deploy Preview 和 Branch Deploy 必须使用独立的测试或 staging Supabase 项目，禁止指向生产项目；
+  `APP_URL` 应留空以使用 Netlify 提供的 `DEPLOY_PRIME_URL`，或精确设置为该次部署的 origin。
+- `SUPABASE_SECRET_KEY` 与 `RATE_LIMIT_PEPPER` 只配置在 Netlify Functions scope，
+  并为 Production、Deploy Preview、Branch Deploy 设置彼此隔离的 context value；它们不是构建环境必需变量。
+- Publishable Key 可用于浏览器，但仍必须与对应 context 的 Supabase 项目匹配。
+- 不得在 `netlify.toml`、GitHub Actions、README、`.env.example` 或构建日志中保存或输出真实密钥。
+
+仓库的部署环境 guard 会在 Netlify 构建期间验证 Supabase URL 和应用 origin。Production 未指向
+精确生产 project ref/站点 origin，或 Deploy Preview/Branch Deploy 指向生产 ref、缺少部署 origin、
+使用非 HTTPS/畸形 URL 时，构建会直接失败。普通本地命令和 CI 不设置 Netlify `CONTEXT`，因此
+不会要求生产凭据。
 
 ## 核心开发规范
 

@@ -246,5 +246,10 @@ export async function createAuthService(): Promise<AuthService> {
 }
 
 export function getApplicationUrl(): string {
-  return (process.env.APP_URL || 'http://localhost:5000').replace(/\/$/, '');
+  return (
+    process.env.APP_URL
+    || process.env.DEPLOY_PRIME_URL
+    || process.env.URL
+    || 'http://localhost:3000'
+  ).replace(/\/$/, '');
 }

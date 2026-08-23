@@ -53,9 +53,6 @@ __pycache__/
 bin/
 *.test
 
-# GitHub Actions (need workflow scope to push, use scripts/push-workflows.sh instead)
-.github/workflows/
-
 # Video files
 *.mp4
 *.avi

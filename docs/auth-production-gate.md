@@ -9,7 +9,7 @@ production Auth configuration or store provider secrets.
 - Redirect allowlist:
   - `https://qingya-erp-163.netlify.app/auth/confirm`
   - `https://**--qingya-erp-163.netlify.app/auth/confirm`
-  - `http://localhost:5000/auth/confirm`
+  - `http://localhost:3000/auth/confirm`
 - Enable only the identity channels actually operated by the business:
   email/password, phone/password or OTP, GitHub, and Google.
 - Configure GitHub/Google client secrets only in Supabase and the provider
@@ -21,19 +21,28 @@ production Auth configuration or store provider secrets.
   CAPTCHA route.
 - `SKIP_CAPTCHA` must be absent from every production and deploy-preview
   environment.
+- Production `APP_URL` must be exactly `https://qingya-erp-163.netlify.app`.
+  Deploy Preview and Branch Deploy should leave `APP_URL` unset so the
+  application uses Netlify's per-deploy `DEPLOY_PRIME_URL`, or set it to that
+  exact HTTPS origin.
 
 ## Required application secrets
 
-- Generate an independent, high-entropy `RATE_LIMIT_PEPPER` and store it as a
-  Netlify protected environment variable for production and deploy previews.
+- Generate an independent, high-entropy `RATE_LIMIT_PEPPER` for each deploy
+  context. Store it as a Netlify protected environment variable with Functions
+  scope, not in the build environment.
+- Store `SUPABASE_SECRET_KEY` in Functions scope as well. Production, Deploy
+  Preview, and Branch Deploy must use isolated context values and the key for
+  the Supabase project assigned to that context.
 - Never reuse a Supabase key as the pepper, expose it to the browser, print it in
   build/runtime logs, or commit its real value. `.env.example` contains only a
   non-secret placeholder.
 - Treat the pepper as a hard release gate: authentication, uploads, organization
   switching, and critical mutations intentionally fail closed with HTTP 503 when
   it is absent or invalid.
-- Verify only that the variable exists in each required Netlify deploy context;
-  do not retrieve or echo its value during release checks.
+- Neither `RATE_LIMIT_PEPPER` nor `SUPABASE_SECRET_KEY` is required to build the
+  application. Verify only that each variable exists in the required Functions
+  context; do not retrieve or echo its value during release checks.
 
 ## Legacy identity activation
 

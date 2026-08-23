@@ -3,26 +3,26 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "build": "bash ./scripts/build.sh",
+    "build": "next build",
     "db:history": "node scripts/verify-migration-history.mjs",
-    "db:lint": "supabase db lint --local --level warning",
+    "db:lint": "supabase db lint --local --level warning --fail-on warning",
     "db:reset": "supabase db reset --local",
     "db:start": "supabase start",
     "db:stop": "supabase stop",
-    "db:test": "supabase test db",
+    "db:test": "supabase test db --local",
     "db:types": "supabase gen types typescript --local > src/db/database.types.ts",
     "db:types:check": "node scripts/verify-generated-database-types.mjs",
-    "dev": "bash ./scripts/dev.sh",
-    "preinstall": "npx only-allow pnpm",
-    "lint": "eslint",
-    "lint:build": "eslint . --quiet",
+    "dev": "next dev",
+    "preinstall": "only-allow pnpm",
+    "prebuild": "node scripts/verify-deploy-environment.mjs",
+    "lint": "eslint . --max-warnings 0",
     "legacy-auth:report": "node scripts/report-legacy-identities.mjs",
-    "start": "bash ./scripts/start.sh",
+    "start": "next start",
     "ts-check": "tsc -p tsconfig.json",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
-    "validate": "pnpm run --parallel '/^(ts-check|lint:build)$/'"
+    "validate": "pnpm lint && pnpm ts-check && pnpm test && pnpm build"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.958.0",
@@ -89,7 +89,7 @@
     "@tailwindcss/postcss": "^4",
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/react": "^16.3.2",
-    "@types/node": "^20",
+    "@types/node": "^24.13.3",
     "@types/nodemailer": "^8.0.0",
     "@types/pg": "^8.16.0",
     "@types/react": "^19",
@@ -103,13 +103,12 @@
     "shadcn": "^2.6.3",
     "supabase": "2.115.0",
     "tailwindcss": "^4",
-    "tsup": "^8.3.5",
-    "tsx": "^4.19.2",
     "typescript": "^5",
     "vitest": "^4.1.5"
   },
   "packageManager": "pnpm@9.0.0",
   "engines": {
-    "pnpm": ">=9.0.0"
+    "node": "24.x",
+    "pnpm": "9.x"
   }
 }
