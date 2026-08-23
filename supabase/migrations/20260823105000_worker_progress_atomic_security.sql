@@ -1,4 +1,14 @@
 -- Narrow worker/progress access to the caller's enterprise and workshop scope.
+do $$
+begin
+  if exists (
+    select 1 from pg_catalog.pg_roles where rolname = 'v2_function_owner'
+  ) then
+    execute 'alter group v2_function_owner add user postgres';
+  end if;
+end;
+$$;
+
 drop policy if exists production_tasks_select on public.production_tasks;
 create policy production_tasks_select on public.production_tasks
 for select to authenticated
@@ -402,3 +412,15 @@ revoke all on function public.create_production_work_order(uuid, uuid, uuid, tex
 grant execute on function public.report_worker_task(uuid, uuid, text) to authenticated;
 grant execute on function public.report_work_order_progress(uuid, uuid, text, numeric, text) to authenticated;
 grant execute on function public.create_production_work_order(uuid, uuid, uuid, text, numeric, text, timestamptz, text) to authenticated;
+
+do $$
+begin
+  if exists (
+    select 1 from pg_catalog.pg_auth_members membership
+    where membership.roleid = 'v2_function_owner'::regrole
+      and membership.member = 'postgres'::regrole
+  ) then
+    execute 'alter group v2_function_owner drop user postgres';
+  end if;
+end;
+$$;

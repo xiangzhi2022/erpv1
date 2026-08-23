@@ -1,3 +1,13 @@
+do $$
+begin
+  if exists (
+    select 1 from pg_catalog.pg_roles where rolname = 'v2_function_owner'
+  ) then
+    execute 'alter group v2_function_owner add user postgres';
+  end if;
+end;
+$$;
+
 create table app_private.api_rate_limit_buckets (
   bucket text not null,
   identifier_hash text not null,
@@ -154,3 +164,15 @@ revoke all on function public.consume_api_rate_limit(text, text, integer, intege
 
 grant execute on function public.consume_api_rate_limit(text, text, integer, integer)
   to service_role;
+
+do $$
+begin
+  if exists (
+    select 1 from pg_catalog.pg_auth_members membership
+    where membership.roleid = 'v2_function_owner'::regrole
+      and membership.member = 'postgres'::regrole
+  ) then
+    execute 'alter group v2_function_owner drop user postgres';
+  end if;
+end;
+$$;

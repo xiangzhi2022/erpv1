@@ -116,7 +116,7 @@
         {
           "name": "Stop local Supabase",
           "if": "${{ always() }}",
-          "run": "pnpm db:stop -- --no-backup"
+          "run": "pnpm db:stop --no-backup"
         }
       ]
     }
