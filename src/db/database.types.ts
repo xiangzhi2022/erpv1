@@ -2795,6 +2795,87 @@ export type Database = {
           workshop_ids: string[]
         }[]
       }
+      finance_manage_wage_record: {
+        Args: {
+          target_enterprise_id: string
+          target_expected_status: string
+          target_quantity?: number | null
+          target_record_id: string
+          target_status: string
+          target_unit_price?: number | null
+          target_wage_amount?: number | null
+        }
+        Returns: Database["public"]["Tables"]["worker_wage_records"]["Row"][]
+      }
+      finance_list_order_summaries: {
+        Args: { target_enterprise_id: string; target_status?: string | null }
+        Returns: {
+          cost_amount: number
+          created_at: string
+          customer_name: string
+          deposit_amount: number
+          id: string
+          labor_cost: number
+          order_no: string
+          payable_amount: number
+          profit: number
+          profit_amount: number
+          receivable_amount: number
+          status: string
+          total_amount: number
+          total_cost: number
+          updated_at: string
+        }[]
+      }
+      finance_list_settlements: {
+        Args: { target_enterprise_id: string }
+        Returns: {
+          approved_at: string | null
+          created_at: string
+          id: string
+          paid_at: string | null
+          status: string
+          wage_amount: number
+          worker: Json
+          worker_id: string
+        }[]
+      }
+      finance_list_wages: {
+        Args: {
+          target_enterprise_id: string
+          target_status?: string | null
+          target_worker_id?: string | null
+        }
+        Returns: {
+          created_at: string
+          id: string
+          status: string
+          task: Json
+          task_id: string
+          wage_amount: number
+          worker: Json
+          worker_id: string
+        }[]
+      }
+      finance_pay_wage_record: {
+        Args: { target_enterprise_id: string; target_record_id: string }
+        Returns: Database["public"]["Tables"]["worker_wage_records"]["Row"][]
+      }
+      finance_settle_wage_records: {
+        Args: { target_enterprise_id: string; target_record_ids: string[] }
+        Returns: Database["public"]["Tables"]["worker_wage_records"]["Row"][]
+      }
+      finance_update_order_pricing: {
+        Args: {
+          target_cost_amount?: number | null
+          target_deposit_amount?: number | null
+          target_enterprise_id: string
+          target_order_id: string
+          target_profit_amount?: number | null
+          target_total_amount?: number | null
+        }
+        Returns: Database["public"]["Tables"]["orders"]["Row"][]
+      }
       onboard_enterprise: {
         Args: {
           display_name: string
@@ -2942,4 +3023,3 @@ export const Constants = {
     },
   },
 } as const
-

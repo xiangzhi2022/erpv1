@@ -1,43 +1,52 @@
-import { parseJsonObject } from '@/lib/api/request';
-import { getSupabaseClient } from '@/db/client';
-import { getUserFromRequest } from '@/lib/auth';
-import { canEditFinancialFields } from '@/lib/four-level-order';
+import { NextResponse } from 'next/server';
+import { z } from 'zod';
+import { isApiError } from '@/lib/api/errors';
+import { parseJson, parseParams } from '@/lib/api/request';
+import { getEnterpriseContext, requirePermission } from '@/lib/enterprise/context';
+import { isEnterpriseAccessError } from '@/lib/enterprise/errors';
+import { createClient } from '@/lib/supabase/server';
 
-function jsonError(error: string, status: number) {
-  return Response.json({ success: false, error }, { status });
+const paramsSchema = z.object({ id: z.string().uuid() });
+// Order monetary values are persisted as integer cents. Keeping this boundary
+// integer-only prevents a finance client from silently mixing yuan and cents.
+const centsSchema = z.number().int().nonnegative();
+const updatePricingSchema = z.object({
+  total_amount: centsSchema.optional(),
+  cost_amount: centsSchema.optional(),
+  profit_amount: z.number().int().optional(),
+  deposit_amount: centsSchema.optional(),
+}).refine((input) => Object.keys(input).length > 0, '没有需要更新的字段');
+
+interface RouteContext { params: Promise<{ id: string }>; }
+
+function errorResponse(error: unknown, message: string) {
+  if (isEnterpriseAccessError(error) || isApiError(error)) {
+    return NextResponse.json({ success: false, error: error.message }, { status: error.status });
+  }
+  console.error('finance_order_pricing.request_failed', { error });
+  return NextResponse.json({ success: false, error: message }, { status: 500 });
 }
 
-const PATCH_FIELDS = [
-  'total_amount',
-  'cost_amount',
-  'profit_amount',
-  'deposit_amount',
-  'material_cost',
-  'hardware_cost',
-  'quote_status',
-  'settlement_status',
-  'finance_remark',
-];
-
-export async function PATCH(request: Request, { params }: { params: Promise<{ id: string }> }) {
+export async function PATCH(request: Request, { params }: RouteContext) {
   try {
-    const user = await getUserFromRequest(request);
-    if (!user) return jsonError('请先登录', 401);
-    if (!canEditFinancialFields(user)) return jsonError('无权编辑财务字段', 403);
-    const { id } = await params;
-    const body = (await parseJsonObject(request)) as Record<string, unknown>;
-    const updateData: Record<string, unknown> = { updated_at: new Date().toISOString() };
-    for (const key of PATCH_FIELDS) {
-      if (body[key] !== undefined) updateData[key] = body[key];
-    }
-    const supabase = getSupabaseClient();
-    let query = supabase.from('orders').update(updateData).eq('id', id);
-    if (user.tenant_id) query = query.eq('tenant_id', user.tenant_id);
-    const { data, error } = await query.select().single();
-    if (error) return jsonError(error.message, 500);
-    return Response.json({ success: true, data });
+    const context = await getEnterpriseContext();
+    requirePermission(context, 'finance.manage');
+    const { id } = await parseParams(params, paramsSchema);
+    const input = await parseJson(request, updatePricingSchema);
+    const supabase = await createClient();
+    const { data, error } = await supabase.rpc('finance_update_order_pricing', {
+      target_enterprise_id: context.enterpriseId,
+      target_order_id: id,
+      target_total_amount: input.total_amount ?? null,
+      target_cost_amount: input.cost_amount ?? null,
+      target_profit_amount: input.profit_amount ?? null,
+      target_deposit_amount: input.deposit_amount ?? null,
+    });
+    if (error) throw error;
+    const order = data?.[0];
+    if (!order) return NextResponse.json({ success: false, error: '订单不存在' }, { status: 404 });
+    return NextResponse.json({ success: true, data: order });
   } catch (error) {
-    console.error('update finance pricing failed:', error);
-    return jsonError('更新财务价格失败', 500);
+    return errorResponse(error, '更新财务价格失败');
   }
 }

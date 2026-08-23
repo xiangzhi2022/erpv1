@@ -1,126 +1,83 @@
-import { parseJsonObject } from '@/lib/api/request';
-import { getSupabaseClient } from '@/db/client';
-import { getUserFromRequest } from '@/lib/auth';
-import {
-  canManageWageRules,
-  defaultWageCalculationMethod,
-  isProductionTaskType,
-  isWageCalculationMethod,
-  isWageRuleScopeType,
-} from '@/lib/four-level-order';
+import { NextResponse } from 'next/server';
+import { z } from 'zod';
+import { isApiError } from '@/lib/api/errors';
+import { parseJson, parseQuery } from '@/lib/api/request';
+import { getEnterpriseContext, requirePermission } from '@/lib/enterprise/context';
+import { isEnterpriseAccessError } from '@/lib/enterprise/errors';
+import { createClient } from '@/lib/supabase/server';
 
-function jsonError(error: string, status: number) {
-  return Response.json({ success: false, error }, { status });
+const taskTypeSchema = z.enum(['board', 'door', 'special', 'hardware', 'process', 'install', 'package', 'delivery']);
+const calculationSchema = z.enum(['by_piece', 'by_area', 'by_meter', 'by_set', 'fixed']);
+const scopeSchema = z.enum(['company', 'position', 'worker']);
+const moneySchema = z.number().finite().nonnegative();
+const querySchema = z.object({ task_type: taskTypeSchema.optional(), scope_type: scopeSchema.optional(), include_options: z.enum(['0', '1']).optional() });
+const createSchema = z.object({
+  rule_name: z.string().trim().min(1).max(200), task_type: taskTypeSchema,
+  process_name: z.string().trim().max(200).nullable().optional(), unit: z.string().trim().min(1).max(32).default('件'),
+  unit_price: moneySchema.default(0), calculation_method: calculationSchema.optional(), role_scope: z.string().trim().max(200).nullable().optional(),
+  scope_type: scopeSchema.default('company'), worker_id: z.string().uuid().nullable().optional(), position_id: z.string().uuid().nullable().optional(),
+  product_type: z.string().trim().max(100).nullable().optional(), extra_amount: moneySchema.default(0), enabled: z.boolean().default(true),
+}).superRefine((input, ctx) => {
+  if (input.scope_type === 'worker' && !input.worker_id) ctx.addIssue({ code: 'custom', path: ['worker_id'], message: '个人规则必须选择工人' });
+  if (input.scope_type === 'position' && !input.position_id) ctx.addIssue({ code: 'custom', path: ['position_id'], message: '岗位规则必须选择岗位' });
+});
+
+async function scopeReferencesExist(supabase: Awaited<ReturnType<typeof createClient>>, enterpriseId: string, scopeType: z.infer<typeof scopeSchema>, workerId: string | null | undefined, positionId: string | null | undefined) {
+  if (scopeType === 'worker' && workerId) {
+    const { data, error } = await supabase.from('workers').select('id').eq('enterprise_id', enterpriseId).eq('id', workerId).maybeSingle();
+    if (error) throw error;
+    return Boolean(data);
+  }
+  if (scopeType === 'position' && positionId) {
+    const { data, error } = await supabase.from('positions').select('id').eq('enterprise_id', enterpriseId).eq('id', positionId).maybeSingle();
+    if (error) throw error;
+    return Boolean(data);
+  }
+  return true;
 }
 
-function text(value: unknown): string | null {
-  return typeof value === 'string' && value.trim() ? value.trim() : null;
-}
-
-function numberValue(value: unknown): number {
-  if (value === null || value === undefined || value === '') return 0;
-  const parsed = typeof value === 'number' ? value : Number(value);
-  return Number.isFinite(parsed) ? parsed : 0;
-}
-
-function scopedTenantId(userTenantId: string | undefined, requestedTenantId: string | null): string | null {
-  return userTenantId || requestedTenantId || null;
-}
-
-async function loadWageRuleOptions(supabase: ReturnType<typeof getSupabaseClient>, tenantId: string | null) {
-  const [workersRes, positionsRes] = await Promise.all([
-    tenantId
-      ? supabase.from('workers').select('id,name,worker_no,craft_type,tenant_id').eq('tenant_id', tenantId).order('name', { ascending: true })
-      : supabase.from('workers').select('id,name,worker_no,craft_type,tenant_id').order('name', { ascending: true }),
-    tenantId
-      ? supabase.from('positions').select('id,name,code,position_type,tenant_id').or(`tenant_id.is.null,tenant_id.eq.${tenantId}`).order('name', { ascending: true })
-      : supabase.from('positions').select('id,name,code,position_type,tenant_id').order('name', { ascending: true }),
-  ]);
-
-  return {
-    workers: workersRes.data || [],
-    positions: positionsRes.data || [],
-  };
+function errorResponse(error: unknown, message: string) {
+  if (isEnterpriseAccessError(error) || isApiError(error)) return NextResponse.json({ success: false, error: error.message }, { status: error.status });
+  console.error('wage_rules.request_failed', { error });
+  return NextResponse.json({ success: false, error: message }, { status: 500 });
 }
 
 export async function GET(request: Request) {
   try {
-    const user = await getUserFromRequest(request);
-    if (!user) return jsonError('请先登录', 401);
-    if (!canManageWageRules(user)) return jsonError('无权查看工资管理规则', 403);
-
-    const supabase = getSupabaseClient();
-    const { searchParams } = new URL(request.url);
-    const tenantId = scopedTenantId(user.tenant_id, text(searchParams.get('tenant_id')));
-    let query = supabase.from('wage_rules').select('*').order('created_at', { ascending: false });
-    if (tenantId) query = query.eq('tenant_id', tenantId);
-
-    const taskType = searchParams.get('task_type');
-    if (taskType) query = query.eq('task_type', taskType);
-    const scopeType = searchParams.get('scope_type');
-    if (scopeType) query = query.eq('scope_type', scopeType);
-
+    const context = await getEnterpriseContext();
+    requirePermission(context, 'wages.manage');
+    const filters = parseQuery(request, querySchema);
+    const supabase = await createClient();
+    let query = supabase.from('wage_rules').select('*').eq('enterprise_id', context.enterpriseId).order('created_at', { ascending: false });
+    if (filters.task_type) query = query.eq('task_type', filters.task_type);
+    if (filters.scope_type) query = query.eq('scope_type', filters.scope_type);
     const { data, error } = await query;
-    if (error) return jsonError(error.message, 500);
-
-    const includeOptions = searchParams.get('include_options') === '1';
-    const options = includeOptions ? await loadWageRuleOptions(supabase, tenantId) : undefined;
-    return Response.json({ success: true, data: data || [], options });
-  } catch (error) {
-    console.error('get wage rules failed:', error);
-    return jsonError('获取工资管理规则失败', 500);
-  }
+    if (error) throw error;
+    const options = filters.include_options === '1' ? await Promise.all([
+      supabase.from('workers').select('id,name,worker_no,craft_type').eq('enterprise_id', context.enterpriseId).order('name', { ascending: true }),
+      supabase.from('positions').select('id,name,code,position_type').eq('enterprise_id', context.enterpriseId).order('name', { ascending: true }),
+    ]) : null;
+    if (options?.some((result) => result.error)) throw options.find((result) => result.error)?.error;
+    return NextResponse.json({ success: true, data: data ?? [], options: options ? { workers: options[0].data ?? [], positions: options[1].data ?? [] } : undefined });
+  } catch (error) { return errorResponse(error, '获取工资管理规则失败'); }
 }
 
 export async function POST(request: Request) {
   try {
-    const user = await getUserFromRequest(request);
-    if (!user) return jsonError('请先登录', 401);
-    if (!canManageWageRules(user)) return jsonError('无权创建工资管理规则', 403);
-
-    const body = (await parseJsonObject(request)) as Record<string, unknown>;
-    const ruleName = text(body.rule_name);
-    const taskType = text(body.task_type);
-    const productType = text(body.product_type);
-    const scopeType = text(body.scope_type) || 'company';
-    const method = text(body.calculation_method) || defaultWageCalculationMethod(taskType || productType);
-    const tenantId = scopedTenantId(user.tenant_id, text(body.tenant_id));
-
-    if (!tenantId) return jsonError('工资规则必须归属到工厂企业', 400);
-    if (!ruleName) return jsonError('规则名称不能为空', 400);
-    if (!taskType || !isProductionTaskType(taskType)) return jsonError('拆单任务类型无效', 400);
-    if (!isWageCalculationMethod(method)) return jsonError('计算方式无效', 400);
-    if (!isWageRuleScopeType(scopeType)) return jsonError('适用范围无效', 400);
-    if (scopeType === 'worker' && !text(body.worker_id)) return jsonError('个人规则必须选择工人', 400);
-    if (scopeType === 'position' && !text(body.position_id)) return jsonError('岗位规则必须选择岗位', 400);
-
-    const supabase = getSupabaseClient();
-    const { data, error } = await supabase
-      .from('wage_rules')
-      .insert({
-        tenant_id: tenantId,
-        rule_name: ruleName,
-        task_type: taskType,
-        process_name: text(body.process_name),
-        unit: text(body.unit) || '件',
-        unit_price: numberValue(body.unit_price),
-        calculation_method: method,
-        role_scope: text(body.role_scope),
-        scope_type: scopeType,
-        worker_id: scopeType === 'worker' ? text(body.worker_id) : null,
-        position_id: scopeType === 'position' ? text(body.position_id) : null,
-        product_type: productType,
-        extra_amount: numberValue(body.extra_amount),
-        enabled: body.enabled !== false,
-        created_by: user.id,
-        updated_at: new Date().toISOString(),
-      })
-      .select()
-      .single();
-    if (error) return jsonError(error.message, 500);
-    return Response.json({ success: true, data });
-  } catch (error) {
-    console.error('create wage rule failed:', error);
-    return jsonError('创建工资管理规则失败', 500);
-  }
+    const context = await getEnterpriseContext();
+    requirePermission(context, 'wages.manage');
+    const input = await parseJson(request, createSchema);
+    const supabase = await createClient();
+    if (!await scopeReferencesExist(supabase, context.enterpriseId, input.scope_type, input.worker_id, input.position_id)) {
+      return NextResponse.json({ success: false, error: '适用的工人或岗位不属于当前企业' }, { status: 422 });
+    }
+    const { data, error } = await supabase.from('wage_rules').insert({
+      enterprise_id: context.enterpriseId, rule_name: input.rule_name, task_type: input.task_type, process_name: input.process_name ?? null,
+      unit: input.unit, unit_price: input.unit_price, calculation_method: input.calculation_method ?? 'by_piece', role_scope: input.role_scope ?? null,
+      scope_type: input.scope_type, worker_id: input.scope_type === 'worker' ? input.worker_id : null, position_id: input.scope_type === 'position' ? input.position_id : null,
+      product_type: input.product_type ?? null, extra_amount: input.extra_amount, enabled: input.enabled, created_by: context.userId, updated_at: new Date().toISOString(),
+    }).select().single();
+    if (error) throw error;
+    return NextResponse.json({ success: true, data }, { status: 201 });
+  } catch (error) { return errorResponse(error, '创建工资管理规则失败'); }
 }

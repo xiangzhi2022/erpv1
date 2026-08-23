@@ -1,33 +1,37 @@
-import { getSupabaseClient } from '@/db/client';
-import { getUserFromRequest } from '@/lib/auth';
-import { canEditFinancialFields } from '@/lib/four-level-order';
-import { writeStatusLog } from '@/lib/four-level-order-server';
+import { NextResponse } from 'next/server';
+import { z } from 'zod';
+import { isApiError } from '@/lib/api/errors';
+import { parseParams } from '@/lib/api/request';
+import { getEnterpriseContext, requirePermission } from '@/lib/enterprise/context';
+import { isEnterpriseAccessError } from '@/lib/enterprise/errors';
+import { createClient } from '@/lib/supabase/server';
 
-function jsonError(error: string, status: number) {
-  return Response.json({ success: false, error }, { status });
+const paramsSchema = z.object({ id: z.string().uuid() });
+interface RouteContext { params: Promise<{ id: string }>; }
+function isStatusConflict(error: unknown): boolean {
+  return Boolean(error && typeof error === 'object' && 'code' in error && error.code === 'P0001');
 }
-
-export async function PATCH(request: Request, { params }: { params: Promise<{ id: string }> }) {
+function errorResponse(error: unknown, message: string) {
+  if (isEnterpriseAccessError(error) || isApiError(error)) return NextResponse.json({ success: false, error: error.message }, { status: error.status });
+  console.error('finance_wage_settlement.request_failed', { error });
+  return NextResponse.json({ success: false, error: message }, { status: 500 });
+}
+export async function PATCH(_request: Request, { params }: RouteContext) {
   try {
-    const user = await getUserFromRequest(request);
-    if (!user) return jsonError('请先登录', 401);
-    if (!canEditFinancialFields(user)) return jsonError('无权结算工资', 403);
-    const { id } = await params;
-    const supabase = getSupabaseClient();
-    const existing = await supabase.from('worker_wage_records').select('id,status').eq('id', id).maybeSingle();
-    if (!existing.data) return jsonError('工资记录不存在', 404);
-    if (existing.data.status !== 'approved') return jsonError('只有已确认工资可以结算', 409);
-    const { data, error } = await supabase
-      .from('worker_wage_records')
-      .update({ status: 'settled', updated_at: new Date().toISOString() })
-      .eq('id', id)
-      .select()
-      .single();
-    if (error) return jsonError(error.message, 500);
-    await writeStatusLog(supabase, 'wage_record', id, 'approved', 'settled', user.id, '财务结算工资');
-    return Response.json({ success: true, data });
-  } catch (error) {
-    console.error('settle wage failed:', error);
-    return jsonError('工资结算失败', 500);
-  }
+    const context = await getEnterpriseContext();
+    requirePermission(context, 'wages.settle');
+    const { id } = await parseParams(params, paramsSchema);
+    const supabase = await createClient();
+    const { data, error } = await supabase.rpc('finance_settle_wage_records', {
+      target_enterprise_id: context.enterpriseId,
+      target_record_ids: [id],
+    });
+    if (error) {
+      if (isStatusConflict(error)) return NextResponse.json({ success: false, error: '工资记录不存在或状态已变化' }, { status: 409 });
+      throw error;
+    }
+    const record = data?.[0];
+    if (!record) return NextResponse.json({ success: false, error: '工资记录不存在或状态已变化' }, { status: 409 });
+    return NextResponse.json({ success: true, data: record });
+  } catch (error) { return errorResponse(error, '工资结算失败'); }
 }

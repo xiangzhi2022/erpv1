@@ -1,44 +1,39 @@
-import { getSupabaseClient } from '@/db/client';
-import { getUserFromRequest } from '@/lib/auth';
-import { canViewWageSummary } from '@/lib/four-level-order';
+import { NextResponse } from 'next/server';
+import { z } from 'zod';
+import { isApiError } from '@/lib/api/errors';
+import { parseQuery } from '@/lib/api/request';
+import { getEnterpriseContext, requirePermission } from '@/lib/enterprise/context';
+import { isEnterpriseAccessError } from '@/lib/enterprise/errors';
+import { createClient } from '@/lib/supabase/server';
 
-function jsonError(error: string, status: number) {
-  return Response.json({ success: false, error }, { status });
+const wageStatusSchema = z.enum(['pending', 'approved', 'rejected', 'settled', 'paid']);
+const querySchema = z.object({ worker_id: z.string().uuid().optional(), status: z.union([wageStatusSchema, z.literal('all')]).optional() });
+function numberValue(value: unknown): number { return typeof value === 'number' && Number.isFinite(value) ? value : 0; }
+function errorResponse(error: unknown, message: string) {
+  if (isEnterpriseAccessError(error) || isApiError(error)) return NextResponse.json({ success: false, error: error.message }, { status: error.status });
+  console.error('finance_wages.request_failed', { error });
+  return NextResponse.json({ success: false, error: message }, { status: 500 });
 }
-
-function num(value: unknown): number {
-  const parsed = typeof value === 'number' ? value : Number(value || 0);
-  return Number.isFinite(parsed) ? parsed : 0;
-}
-
 export async function GET(request: Request) {
   try {
-    const user = await getUserFromRequest(request);
-    if (!user) return jsonError('请先登录', 401);
-    if (!canViewWageSummary(user)) return jsonError('无权查看工资汇总', 403);
-    const supabase = getSupabaseClient();
-    const { searchParams } = new URL(request.url);
-    const workerId = searchParams.get('worker_id');
-    const status = searchParams.get('status');
-    let query = supabase
-      .from('worker_wage_records')
-      .select('*, worker:workers(id,name,worker_no,craft_type,workshop_id), task:production_tasks(id,task_no,task_name,process_name)')
-      .order('created_at', { ascending: false });
-    if (workerId) query = query.eq('worker_id', workerId);
-    if (status && status !== 'all') query = query.eq('status', status);
-    const { data, error } = await query;
-    if (error) return jsonError(error.message, 500);
-    const rows = (data || []) as Record<string, unknown>[];
+    const context = await getEnterpriseContext();
+    requirePermission(context, 'finance.read');
+    const filters = parseQuery(request, querySchema);
+    const supabase = await createClient();
+    const { data, error } = await supabase.rpc('finance_list_wages', {
+      target_enterprise_id: context.enterpriseId,
+      target_status: filters.status && filters.status !== 'all' ? filters.status : null,
+      target_worker_id: filters.worker_id ?? null,
+    });
+    if (error) throw error;
+    const rows = data ?? [];
     const summary = rows.reduce<Record<string, number>>((acc, row) => {
-      const rowStatus = String(row.status || 'pending');
-      acc[rowStatus] = (acc[rowStatus] || 0) + num(row.wage_amount);
-      acc.total = (acc.total || 0) + num(row.wage_amount);
+      const status = row.status || 'pending';
+      acc[status] = (acc[status] || 0) + numberValue(row.wage_amount);
+      acc.total = (acc.total || 0) + numberValue(row.wage_amount);
       acc.count = (acc.count || 0) + 1;
       return acc;
     }, { pending: 0, approved: 0, rejected: 0, settled: 0, paid: 0, total: 0, count: 0 });
-    return Response.json({ success: true, data: rows, summary });
-  } catch (error) {
-    console.error('get finance wages failed:', error);
-    return jsonError('获取工资汇总失败', 500);
-  }
+    return NextResponse.json({ success: true, data: rows, summary });
+  } catch (error) { return errorResponse(error, '获取工资汇总失败'); }
 }

@@ -1,50 +1,54 @@
-import { parseJsonObject } from '@/lib/api/request';
-import { getSupabaseClient } from '@/db/client';
-import { getUserFromRequest } from '@/lib/auth';
-import { canEditFinancialFields, canViewFinancialFields } from '@/lib/four-level-order';
+import { NextResponse } from 'next/server';
+import { z } from 'zod';
+import { isApiError } from '@/lib/api/errors';
+import { parseJson } from '@/lib/api/request';
+import { getEnterpriseContext, requirePermission } from '@/lib/enterprise/context';
+import { isEnterpriseAccessError } from '@/lib/enterprise/errors';
+import { createClient } from '@/lib/supabase/server';
 
-function jsonError(error: string, status: number) {
-  return Response.json({ success: false, error }, { status });
+const createSettlementSchema = z.object({ record_ids: z.array(z.string().uuid()).min(1).max(100) })
+  .refine((input) => new Set(input.record_ids).size === input.record_ids.length, {
+    path: ['record_ids'], message: '工资记录不能重复',
+  });
+
+function isStatusConflict(error: unknown): boolean {
+  return Boolean(error && typeof error === 'object' && 'code' in error && error.code === 'P0001');
 }
 
-export async function GET(request: Request) {
+function errorResponse(error: unknown, message: string) {
+  if (isEnterpriseAccessError(error) || isApiError(error)) return NextResponse.json({ success: false, error: error.message }, { status: error.status });
+  console.error('finance_settlements.request_failed', { error });
+  return NextResponse.json({ success: false, error: message }, { status: 500 });
+}
+
+export async function GET() {
   try {
-    const user = await getUserFromRequest(request);
-    if (!user) return jsonError('请先登录', 401);
-    if (!canViewFinancialFields(user)) return jsonError('无权查看结算', 403);
-    const supabase = getSupabaseClient();
-    const { data, error } = await supabase
-      .from('worker_wage_records')
-      .select('id, worker_id, wage_amount, status, approved_at, paid_at, created_at, worker:workers(id,name,worker_no)')
-      .in('status', ['settled', 'paid'])
-      .order('updated_at', { ascending: false });
-    if (error) return jsonError(error.message, 500);
-    return Response.json({ success: true, data: data || [] });
-  } catch (error) {
-    console.error('get settlements failed:', error);
-    return jsonError('获取结算记录失败', 500);
-  }
+    const context = await getEnterpriseContext();
+    requirePermission(context, 'finance.read');
+    const supabase = await createClient();
+    const { data, error } = await supabase.rpc('finance_list_settlements', {
+      target_enterprise_id: context.enterpriseId,
+    });
+    if (error) throw error;
+    return NextResponse.json({ success: true, data: data ?? [] });
+  } catch (error) { return errorResponse(error, '获取结算记录失败'); }
 }
 
 export async function POST(request: Request) {
   try {
-    const user = await getUserFromRequest(request);
-    if (!user) return jsonError('请先登录', 401);
-    if (!canEditFinancialFields(user)) return jsonError('无权创建结算', 403);
-    const body = (await parseJsonObject(request)) as { record_ids?: string[] };
-    const recordIds = Array.isArray(body.record_ids) ? body.record_ids.filter((id): id is string => typeof id === 'string') : [];
-    if (recordIds.length === 0) return jsonError('请选择工资记录', 400);
-    const supabase = getSupabaseClient();
-    const { data, error } = await supabase
-      .from('worker_wage_records')
-      .update({ status: 'settled', updated_at: new Date().toISOString() })
-      .in('id', recordIds)
-      .eq('status', 'approved')
-      .select();
-    if (error) return jsonError(error.message, 500);
-    return Response.json({ success: true, data: data || [] });
-  } catch (error) {
-    console.error('create settlement failed:', error);
-    return jsonError('创建结算失败', 500);
-  }
+    const context = await getEnterpriseContext();
+    requirePermission(context, 'wages.settle');
+    const { record_ids: recordIds } = await parseJson(request, createSettlementSchema);
+    const supabase = await createClient();
+    const { data, error } = await supabase.rpc('finance_settle_wage_records', {
+      target_enterprise_id: context.enterpriseId,
+      target_record_ids: recordIds,
+    });
+    if (error) {
+      if (isStatusConflict(error)) return NextResponse.json({ success: false, error: '部分工资记录状态已变化' }, { status: 409 });
+      throw error;
+    }
+    if (!data || data.length !== recordIds.length) return NextResponse.json({ success: false, error: '部分工资记录状态已变化' }, { status: 409 });
+    return NextResponse.json({ success: true, data });
+  } catch (error) { return errorResponse(error, '创建结算失败'); }
 }
