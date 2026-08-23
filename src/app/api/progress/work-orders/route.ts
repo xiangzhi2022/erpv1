@@ -1,211 +1,76 @@
-import { parseJsonObject } from '@/lib/api/request';
+import { z } from 'zod';
 import { NextResponse } from 'next/server';
-import { getSupabaseClient } from '@/db/client';
-import { getUserFromRequest } from '@/lib/auth';
-import { workOrderQuerySchema, WorkOrderStatus, type ProgressStats, type WorkOrder } from '@/app/progress/schemas';
+import { isApiError } from '@/lib/api/errors';
+import { parseJson, parseQuery } from '@/lib/api/request';
+import { canAccessEnterpriseWorkshop, getEnterpriseContext, requirePermission } from '@/lib/enterprise/context';
+import { isEnterpriseAccessError } from '@/lib/enterprise/errors';
+import { createClient } from '@/lib/supabase/server';
 
-/** Check if a string is a valid UUID v4 format */
-function isValidUUID(value: string): boolean {
-  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value);
-}
-
-/** Safely resolve operator name from user, with fallback chain */
-function resolveOperatorName(user: { nickname?: string; phone?: string; email?: string; name?: string }): string {
-  return user.nickname || user.phone || user.email || user.name || '未知操作人';
+const statusSchema = z.enum(['pending', 'scheduling', 'producing', 'inspecting', 'stored', 'aborted']);
+const prioritySchema = z.enum(['low', 'normal', 'high', 'urgent']);
+const querySchema = z.object({
+  status: statusSchema.optional(), workshop_id: z.string().uuid().optional(), priority: prioritySchema.optional(),
+  keyword: z.string().trim().max(64).regex(/^[\p{L}\p{N} -]+$/u, '关键词包含不支持的字符').optional(),
+  page: z.coerce.number().int().min(1).default(1), page_size: z.coerce.number().int().min(1).max(100).default(20),
+});
+const createSchema = z.object({
+  order_id: z.string().uuid().nullable().optional(), workshop_id: z.string().uuid().nullable().optional(),
+  product_name: z.string().trim().min(1).max(200), target_quantity: z.coerce.number().int().positive(),
+  priority: prioritySchema.default('normal'), expected_end_date: z.string().datetime().nullable().optional(), remark: z.string().trim().max(500).nullable().optional(),
+});
+function errorResponse(error: unknown, message: string) {
+  if (isEnterpriseAccessError(error) || isApiError(error)) return NextResponse.json({ success: false, error: error.message }, { status: error.status });
+  console.error('progress_work_orders.request_failed', { error });
+  return NextResponse.json({ success: false, error: message }, { status: 500 });
 }
 
 export async function GET(request: Request) {
   try {
-    const user = await getUserFromRequest(request);
-    if (!user) {
-      return NextResponse.json({ success: false, error: '请先登录' }, { status: 401 });
-    }
-
-    const { searchParams } = new URL(request.url);
-    const parsed = workOrderQuerySchema.safeParse(
-      Object.fromEntries(searchParams.entries())
-    );
-
-    if (!parsed.success) {
-      return NextResponse.json(
-        { success: false, error: '参数错误', details: parsed.error.flatten() },
-        { status: 400 }
-      );
-    }
-
-    const { status, workshop_id, keyword, priority, page, page_size } = parsed.data;
-    const supabase = getSupabaseClient();
-
-    // Build query - fetch work orders with optional related data
-    let query = supabase
-      .from('work_orders')
-      .select('*')
-      .order('created_at', { ascending: false })
-      .range((page - 1) * page_size, page * page_size - 1);
-
-    if (status) {
-      query = query.eq('status', status);
-    }
-    if (workshop_id) {
-      query = query.eq('workshop_id', workshop_id);
-    }
-    if (priority) {
-      query = query.eq('priority', priority);
-    }
-
-    const { data, error } = await query;
-
-    if (error) {
-      throw new Error(`查询工单失败: ${error.message}`);
-    }
-
-    // Keyword filter (client-side since we can't do full-text search easily)
-    let workOrders = (data || []) as WorkOrder[];
-    if (keyword?.trim()) {
-      const kw = keyword.trim().toLowerCase();
-      workOrders = workOrders.filter(
-        (wo) =>
-          wo.product_name?.toLowerCase().includes(kw) ||
-          wo.order?.order_no?.toLowerCase().includes(kw) ||
-          wo.order?.customer_name?.toLowerCase().includes(kw)
-      );
-    }
-
-    // Get total count for stats
-    const { count: totalCount, error: countError } = await supabase
-      .from('work_orders')
-      .select('*', { count: 'exact', head: true });
-
-    if (countError) {
-      throw new Error(`统计失败: ${countError.message}`);
-    }
-
-    // Get status distribution for stats - aligned with canonical status names
-    const { data: allOrders, error: statsError } = await supabase
-      .from('work_orders')
-      .select('status, expected_end_date, completed_quantity, target_quantity');
-
-    if (statsError) {
-      throw new Error(`统计查询失败: ${statsError.message}`);
-    }
-
-    const now = new Date();
-    const stats: ProgressStats = {
-      total: allOrders?.length || 0,
-      pending: allOrders?.filter((o: Record<string, unknown>) => o.status === WorkOrderStatus.PENDING).length || 0,
-      producing: allOrders?.filter((o: Record<string, unknown>) => o.status === WorkOrderStatus.PRODUCING).length || 0,
-      inspecting: allOrders?.filter((o: Record<string, unknown>) => o.status === WorkOrderStatus.INSPECTING).length || 0,
-      stored: allOrders?.filter((o: Record<string, unknown>) => o.status === WorkOrderStatus.STORED).length || 0,
-      aborted: allOrders?.filter((o: Record<string, unknown>) => o.status === WorkOrderStatus.ABORTED).length || 0,
-      overdue:
-        allOrders?.filter((o: Record<string, unknown>) => {
-          if (!o.expected_end_date || o.status === WorkOrderStatus.STORED || o.status === WorkOrderStatus.ABORTED)
-            return false;
-          return new Date(String(o.expected_end_date)) < now;
-        }).length || 0,
-    };
-
-    return NextResponse.json({
-      success: true,
-      data: workOrders,
-      stats,
-      pagination: {
-        page,
-        page_size,
-        total: totalCount || 0,
-      },
-    });
-  } catch (err) {
-    const message = err instanceof Error ? err.message : '服务器错误';
-    console.error('获取工单失败:', message);
-    return NextResponse.json({ success: false, error: message }, { status: 500 });
-  }
+    const context = await getEnterpriseContext();
+    requirePermission(context, 'production.read');
+    const filters = parseQuery(request, querySchema);
+    const supabase = await createClient();
+    let query = supabase.from('work_orders').select('id,order_id,workshop_id,product_name,target_quantity,completed_quantity,status,priority,start_date,expected_end_date,actual_end_date,remark,created_at,updated_at', { count: 'exact' })
+      .eq('enterprise_id', context.enterpriseId).order('created_at', { ascending: false }).range((filters.page - 1) * filters.page_size, filters.page * filters.page_size - 1);
+    if (filters.status) query = query.eq('status', filters.status);
+    if (filters.workshop_id) query = query.eq('workshop_id', filters.workshop_id);
+    if (filters.priority) query = query.eq('priority', filters.priority);
+    const { data, error, count } = await query;
+    if (error) throw error;
+    const workOrders = (data ?? []).filter((workOrder) => !filters.keyword || workOrder.product_name.toLowerCase().includes(filters.keyword.toLowerCase()));
+    const { data: statRows, error: statError } = await supabase.from('work_orders').select('status,expected_end_date')
+      .eq('enterprise_id', context.enterpriseId);
+    if (statError) throw statError;
+    const now = Date.now(); const all = statRows ?? [];
+    return NextResponse.json({ success: true, data: workOrders, stats: {
+      total: all.length, pending: all.filter((row) => row.status === 'pending').length, producing: all.filter((row) => row.status === 'producing').length,
+      inspecting: all.filter((row) => row.status === 'inspecting').length, stored: all.filter((row) => row.status === 'stored').length,
+      aborted: all.filter((row) => row.status === 'aborted').length,
+      overdue: all.filter((row) => Boolean(row.expected_end_date) && !['stored', 'aborted'].includes(row.status) && new Date(row.expected_end_date!).getTime() < now).length,
+    }, pagination: { page: filters.page, page_size: filters.page_size, total: count ?? 0 } });
+  } catch (error) { return errorResponse(error, '获取工单失败'); }
 }
 
-// Create a new work order
 export async function POST(request: Request) {
   try {
-    const user = await getUserFromRequest(request);
-    if (!user) {
-      return NextResponse.json({ success: false, error: '请先登录' }, { status: 401 });
+    const context = await getEnterpriseContext();
+    requirePermission(context, 'production.plan');
+    const input = await parseJson(request, createSchema);
+    if (input.workshop_id && !canAccessEnterpriseWorkshop(context, 'production.plan', input.workshop_id)) {
+      return NextResponse.json({ success: false, error: '无权在该车间创建工单' }, { status: 403 });
     }
-
-    const body = await parseJsonObject(request);
-    const { order_id, workshop_id, product_name, target_quantity, priority, expected_end_date, remark } = body;
-
-    if (!product_name || target_quantity === undefined) {
-      return NextResponse.json(
-        { success: false, error: '缺少必填字段: product_name, target_quantity' },
-        { status: 400 }
-      );
+    const supabase = await createClient();
+    if (input.order_id) {
+      const { data: order, error: orderError } = await supabase.from('orders').select('id').eq('enterprise_id', context.enterpriseId).eq('id', input.order_id).maybeSingle();
+      if (orderError) throw orderError;
+      if (!order) return NextResponse.json({ success: false, error: '订单不存在' }, { status: 404 });
     }
-
-    const targetQuantity = Number(target_quantity);
-    if (!Number.isFinite(targetQuantity) || targetQuantity <= 0) {
-      return NextResponse.json(
-        { success: false, error: '目标数量必须大于0' },
-        { status: 400 }
-      );
-    }
-
-    const supabase = getSupabaseClient();
-
-    // Build insert data — only include columns that exist in the DB schema
-    const insertData: Record<string, unknown> = {
-      workshop_id: workshop_id || null,
-      product_name,
-      target_quantity: targetQuantity,
-      completed_quantity: 0,
-      status: WorkOrderStatus.PENDING,
-      priority: priority || 'normal',
-      expected_end_date: expected_end_date || null,
-      remark: remark || null,
-    };
-
-    // Only set order_id if it is a valid UUID (the column is UUID type and nullable)
-    if (order_id && isValidUUID(String(order_id))) {
-      insertData.order_id = order_id;
-    }
-
-    // Create work order with initial status 'pending'
-    const { data, error } = await supabase
-      .from('work_orders')
-      .insert(insertData)
-      .select()
-      .maybeSingle();
-
-    if (error) {
-      throw new Error(`创建工单失败: ${error.message}`);
-    }
-
-    if (!data) {
-      throw new Error('创建工单失败: 未返回数据');
-    }
-
-    // Write initial progress log on work order creation
-    // operator_id is UUID type — only set if user.id is a valid UUID
-    const logInsertData: Record<string, unknown> = {
-      work_order_id: data.id,
-      operator_name: resolveOperatorName(user),
-      action: 'start',
-      completed_delta: 0,
-      remark: '工单创建',
-    };
-    if (isValidUUID(user.id)) {
-      logInsertData.operator_id = user.id;
-    }
-
-    const { error: logError } = await supabase.from('progress_logs').insert(logInsertData);
-
-    if (logError) {
-      console.error('创建进度日志失败:', logError.message);
-      // Non-fatal: work order is created, log failure should not block
-    }
-
-    return NextResponse.json({ success: true, data });
-  } catch (err) {
-    const message = err instanceof Error ? err.message : '服务器错误';
-    console.error('创建工单失败:', message);
-    return NextResponse.json({ success: false, error: message }, { status: 500 });
-  }
+    const { data, error } = await supabase.from('work_orders').insert({ enterprise_id: context.enterpriseId, order_id: input.order_id ?? null, workshop_id: input.workshop_id ?? null, product_name: input.product_name, target_quantity: input.target_quantity, completed_quantity: 0, status: 'pending', priority: input.priority, expected_end_date: input.expected_end_date ?? null, remark: input.remark ?? null })
+      .select('id,order_id,workshop_id,product_name,target_quantity,completed_quantity,status,priority,start_date,expected_end_date,actual_end_date,remark,created_at,updated_at').maybeSingle();
+    if (error) throw error;
+    if (!data) throw new Error('missing_work_order');
+    const { error: logError } = await supabase.from('progress_logs').insert({ enterprise_id: context.enterpriseId, work_order_id: data.id, operator_id: context.userId, operator_name: context.displayName, action: 'start', completed_delta: 0, remark: '工单创建' });
+    if (logError) throw logError;
+    return NextResponse.json({ success: true, data }, { status: 201 });
+  } catch (error) { return errorResponse(error, '创建工单失败'); }
 }

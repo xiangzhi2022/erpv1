@@ -1,160 +1,44 @@
-import { parseJsonObject } from '@/lib/api/request';
+import { z } from 'zod';
 import { NextResponse } from 'next/server';
-import { getSupabaseClient } from '@/db/client';
-import { getUserFromRequest } from '@/lib/auth';
-import { progressReportSchema, WorkOrderStatus } from '@/app/progress/schemas';
+import { isApiError } from '@/lib/api/errors';
+import { parseJson } from '@/lib/api/request';
+import { getEnterpriseContext, requirePermission } from '@/lib/enterprise/context';
+import { isEnterpriseAccessError } from '@/lib/enterprise/errors';
+import { createClient } from '@/lib/supabase/server';
 
-/** Check if a string is a valid UUID v4 format */
-function isValidUUID(value: string): boolean {
-  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value);
+const actions = ['start', 'complete_cutting', 'complete_assembly', 'complete_painting', 'quality_check', 'warehouse_in', 'report_progress', 'report_defect', 'pause', 'resume', 'abort'] as const;
+const reportSchema = z.object({ work_order_id: z.string().uuid(), action: z.enum(actions), completed_delta: z.coerce.number().int().min(0).default(0), remark: z.string().trim().max(500).nullable().optional() });
+const reportResultSchema = z.object({ work_order: z.object({ id: z.string().uuid(), status: z.string(), completed_quantity: z.number() }), log: z.object({ id: z.string().uuid() }).passthrough().nullable() });
+interface RpcError { code?: string; message: string; }
+interface AtomicRpcClient { rpc(functionName: string, args: Record<string, unknown>): Promise<{ data: unknown; error: RpcError | null }>; }
+function errorResponse(error: unknown) {
+  if (isEnterpriseAccessError(error) || isApiError(error)) return NextResponse.json({ success: false, error: error.message }, { status: error.status });
+  console.error('progress_report.request_failed', { error });
+  return NextResponse.json({ success: false, error: '进度上报失败' }, { status: 500 });
 }
 
-/** Safely resolve operator name from user, with fallback chain */
-function resolveOperatorName(user: { nickname?: string; phone?: string; email?: string; name?: string }): string {
-  return user.nickname || user.phone || user.email || user.name || '未知操作人';
+function rpcErrorResponse(error: RpcError) {
+  const status = error.code === 'P0001' ? 409 : error.code === 'P0002' ? 404 : error.code === '22023' ? 422 : error.code === '28000' ? 401 : 403;
+  const message = status === 409 ? '当前工单状态不允许进度上报' : status === 404 ? '工单不存在' : status === 422 ? '请求参数无法处理' : status === 401 ? '请先登录' : '无权操作该工单';
+  return NextResponse.json({ success: false, error: message }, { status });
 }
 
-// Status transition map: action -> new status
-// Aligned with WorkOrderStatus enum: pending, scheduling, producing, inspecting, stored, aborted
-const ACTION_STATUS_MAP: Record<string, string> = {
-  start: WorkOrderStatus.PRODUCING,
-  complete_cutting: WorkOrderStatus.PRODUCING,
-  complete_assembly: WorkOrderStatus.PRODUCING,
-  complete_painting: WorkOrderStatus.PRODUCING,
-  quality_check: WorkOrderStatus.INSPECTING,
-  warehouse_in: WorkOrderStatus.STORED,
-  report_progress: '', // keep current status
-  report_defect: '',   // keep current status
-  pause: WorkOrderStatus.PENDING,
-  resume: WorkOrderStatus.PRODUCING,
-  abort: WorkOrderStatus.ABORTED,
-};
-
-// Submit progress report
 export async function POST(request: Request) {
   try {
-    const user = await getUserFromRequest(request);
-    if (!user) {
-      return NextResponse.json({ success: false, error: '请先登录' }, { status: 401 });
-    }
-
-    const body = await parseJsonObject(request);
-    const parsed = progressReportSchema.safeParse(body);
-
-    if (!parsed.success) {
-      return NextResponse.json(
-        { success: false, error: '参数校验失败', details: parsed.error.flatten() },
-        { status: 400 }
-      );
-    }
-
-    const { work_order_id, action, completed_delta, remark } = parsed.data;
-    const supabase = getSupabaseClient();
-
-    // Get current work order
-    const { data: workOrder, error: woError } = await supabase
-      .from('work_orders')
-      .select('id, status, completed_quantity, target_quantity')
-      .eq('id', work_order_id)
-      .maybeSingle();
-
-    if (woError) {
-      throw new Error(`查询工单失败: ${woError.message}`);
-    }
-
-    if (!workOrder) {
-      return NextResponse.json({ success: false, error: '工单不存在' }, { status: 404 });
-    }
-
-    // Validate completed quantity won't exceed target
-    const newCompletedQuantity = workOrder.completed_quantity + (completed_delta || 0);
-    if (newCompletedQuantity > workOrder.target_quantity) {
-      return NextResponse.json(
-        { success: false, error: `完成数量(${newCompletedQuantity})不能超过目标数量(${workOrder.target_quantity})` },
-        { status: 400 }
-      );
-    }
-
-    // Determine new status based on action
-    let newStatus: string;
-    const mappedStatus = ACTION_STATUS_MAP[action];
-
-    if (mappedStatus === '') {
-      // Actions that keep current status (report_progress, report_defect)
-      newStatus = workOrder.status;
-    } else {
-      newStatus = mappedStatus;
-    }
-
-    // Auto-transition: if target reached and not abort/warehouse_in, go to inspecting
-    // warehouse_in should always go to stored regardless of target
-    if (newCompletedQuantity >= workOrder.target_quantity && action !== 'abort' && action !== 'warehouse_in') {
-      // If the mapped status is not a terminal state, auto-advance to inspecting
-      if (newStatus !== WorkOrderStatus.STORED && newStatus !== WorkOrderStatus.ABORTED) {
-        newStatus = WorkOrderStatus.INSPECTING;
-      }
-    }
-
-    // Build update data
-    const updateData: Record<string, unknown> = {
-      status: newStatus,
-      completed_quantity: newCompletedQuantity,
-      updated_at: new Date().toISOString(),
-    };
-
-    // Set start_date when first entering producing
-    if (newStatus === WorkOrderStatus.PRODUCING && workOrder.status !== WorkOrderStatus.PRODUCING) {
-      updateData.start_date = new Date().toISOString();
-    }
-
-    // Set actual_end_date when entering stored
-    if (newStatus === WorkOrderStatus.STORED) {
-      updateData.actual_end_date = new Date().toISOString();
-    }
-
-    // Update work order
-    const { error: updateError } = await supabase
-      .from('work_orders')
-      .update(updateData)
-      .eq('id', work_order_id);
-
-    if (updateError) {
-      throw new Error(`更新工单失败: ${updateError.message}`);
-    }
-
-    // Create progress log
-    // operator_id is UUID type — only set if user.id is a valid UUID
-    const logInsertData: Record<string, unknown> = {
-      work_order_id,
-      operator_name: resolveOperatorName(user),
-      action,
-      completed_delta: completed_delta || 0,
-      remark: remark || null,
-    };
-    if (isValidUUID(user.id)) {
-      logInsertData.operator_id = user.id;
-    }
-
-    const { data: logData, error: logError } = await supabase
-      .from('progress_logs')
-      .insert(logInsertData)
-      .select()
-      .maybeSingle();
-
-    if (logError) {
-      throw new Error(`记录进度日志失败: ${logError.message}`);
-    }
-
-    return NextResponse.json({
-      success: true,
-      data: {
-        work_order: { ...workOrder, status: newStatus, completed_quantity: newCompletedQuantity },
-        log: logData,
-      },
+    const context = await getEnterpriseContext();
+    requirePermission(context, 'production.report.self');
+    const input = await parseJson(request, reportSchema);
+    const supabase = await createClient();
+    const { data, error } = await (supabase as unknown as AtomicRpcClient).rpc('report_work_order_progress', {
+      target_enterprise_id: context.enterpriseId,
+      target_work_order_id: input.work_order_id,
+      target_action: input.action,
+      target_completed_delta: input.completed_delta,
+      target_remark: input.remark ?? null,
     });
-  } catch (err) {
-    const message = err instanceof Error ? err.message : '服务器错误';
-    console.error('进度上报失败:', message);
-    return NextResponse.json({ success: false, error: message }, { status: 500 });
-  }
+    if (error) return rpcErrorResponse(error);
+    const result = reportResultSchema.safeParse(data);
+    if (!result.success) throw new Error('invalid_work_order_report_result');
+    return NextResponse.json({ success: true, data: result.data });
+  } catch (error) { return errorResponse(error); }
 }
