@@ -9,14 +9,14 @@ export function isDevEnv(): boolean {
 }
 
 /**
- * Guard that rejects requests in production with a 403 response.
+ * Guard that makes diagnostic routes indistinguishable from missing routes in production.
  * Returns `undefined` when the request is allowed (dev mode).
  */
 export function requireDevEnv(): NextResponse | undefined {
   if (!isDevEnv()) {
     return NextResponse.json(
-      { error: 'This endpoint is only available in development' },
-      { status: 403 },
+      { error: 'Not found' },
+      { status: 404 },
     );
   }
   return undefined;
