@@ -24,7 +24,6 @@ export async function GET(request: Request) {
     const financeRes = hasEnterprisePermission(context, 'finance.read')
       ? await supabase.rpc('finance_list_order_summaries', {
           target_enterprise_id: context.enterpriseId,
-          target_status: null,
         })
       : { data: [], error: null };
     const wagesRes = hasEnterprisePermission(context, 'wages.read.all')

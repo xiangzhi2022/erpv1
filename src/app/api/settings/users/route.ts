@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
+import { allowNullableRpcArgs } from '@/db/rpc-args';
 import { isApiError } from '@/lib/api/errors';
 import { parseJson } from '@/lib/api/request';
 import { errorResponse } from '@/lib/api/response';
@@ -147,13 +148,16 @@ export async function PUT(request: NextRequest) {
       if (!role) return NextResponse.json({ success: false, error: '角色不存在' }, { status: 400 });
       roleId = role.id;
     }
-    const { error } = await client.rpc('update_enterprise_member', {
+    const { error } = await client.rpc('update_enterprise_member', allowNullableRpcArgs<
+      'update_enterprise_member',
+      'target_display_name' | 'target_role_id' | 'target_status'
+    >({
       target_display_name: displayName ?? null,
       target_enterprise_id: auth.context.enterpriseId,
       target_role_id: roleId,
       target_status: membershipStatus ?? null,
       target_user_id: userId,
-    });
+    }));
     if (error?.message === 'member_not_found') return NextResponse.json({ success: false, error: '用户不存在' }, { status: 404 });
     if (error?.message === 'permission_denied') return NextResponse.json({ success: false, error: '没有更新成员或角色的权限' }, { status: 403 });
     if (error?.message === 'owner_protected') return NextResponse.json({ success: false, error: '只有企业所有者可以修改所有者账号' }, { status: 403 });

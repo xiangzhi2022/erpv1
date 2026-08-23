@@ -52,9 +52,9 @@ export async function PATCH(request: Request, { params }: RouteContext) {
           target_record_id: id,
           target_expected_status: input.expected_status,
           target_status: input.status ?? input.expected_status,
-          target_wage_amount: input.wage_amount ?? null,
-          target_quantity: input.quantity ?? null,
-          target_unit_price: input.unit_price ?? null,
+          ...(input.wage_amount === undefined ? {} : { target_wage_amount: input.wage_amount }),
+          ...(input.quantity === undefined ? {} : { target_quantity: input.quantity }),
+          ...(input.unit_price === undefined ? {} : { target_unit_price: input.unit_price }),
         });
         if (error) {
           if (isStatusConflict(error)) return NextResponse.json({ success: false, error: '工资记录不存在或状态已变化' }, { status: 409 });

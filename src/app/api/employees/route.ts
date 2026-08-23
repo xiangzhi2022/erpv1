@@ -1,4 +1,5 @@
 import { parseJsonObject } from '@/lib/api/request';
+import { allowNullableRpcArgs } from '@/db/rpc-args';
 import { getEnterpriseContext, hasEnterprisePermission, requirePermission } from '@/lib/enterprise/context';
 import { createClient } from '@/lib/supabase/server';
 import {
@@ -98,7 +99,10 @@ export async function POST(request: Request) {
 
     const supabase = await createClient();
     const roles = await ensureEmployeeRoleRows(roleIds, context);
-    const { data, error } = await supabase.rpc('save_employee_with_relations', {
+    const { data, error } = await supabase.rpc('save_employee_with_relations', allowNullableRpcArgs<
+      'save_employee_with_relations',
+      'target_employee_id' | 'target_primary_position_id' | 'target_user_id'
+    >({
       target_employee_id: null,
       target_enterprise_id: context.enterpriseId,
       target_fields: {
@@ -121,7 +125,7 @@ export async function POST(request: Request) {
       target_primary_position_id: primaryPositionId,
       target_role_ids: roles.map((role) => role.id),
       target_user_id: userId,
-    });
+    }));
     if (error?.message === 'permission_denied') return jsonError('没有创建员工或分配角色的权限', 403);
     if (error?.message === 'wage_permission_denied') return jsonError('没有设置员工底薪的权限', 403);
     if (error?.message === 'role_not_assignable' || error?.message === 'owner_protected') return jsonError('不能分配超出当前账号权限范围的角色', 403);

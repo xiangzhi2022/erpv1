@@ -1,4 +1,5 @@
 import { parseJsonObject } from '@/lib/api/request';
+import { allowNullableRpcArgs } from '@/db/rpc-args';
 import { getEnterpriseContext, hasEnterprisePermission, requirePermission } from '@/lib/enterprise/context';
 import { createClient } from '@/lib/supabase/server';
 import {
@@ -100,7 +101,10 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
     const primaryPositionId = body.primary_position_id !== undefined
       ? text(body.primary_position_id)
       : existing.primary_position_id;
-    const { data, error } = await supabase.rpc('save_employee_with_relations', {
+    const { data, error } = await supabase.rpc('save_employee_with_relations', allowNullableRpcArgs<
+      'save_employee_with_relations',
+      'target_primary_position_id' | 'target_user_id'
+    >({
       target_employee_id: id,
       target_enterprise_id: context.enterpriseId,
       target_fields: updateData,
@@ -108,7 +112,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
       target_primary_position_id: primaryPositionId,
       target_role_ids: roles.map((role) => role.id),
       target_user_id: userId,
-    });
+    }));
     if (error?.message === 'permission_denied') return jsonError('没有修改员工或分配角色的权限', 403);
     if (error?.message === 'wage_permission_denied') return jsonError('没有修改员工底薪的权限', 403);
     if (error?.message === 'active_member_not_found') return jsonError('登录账号尚未通过当前企业加入审批', 409);

@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import type { Database } from '@/db/database.types';
+import { allowNullableRpcArgs } from '@/db/rpc-args';
 import { parseJson } from '@/lib/api/request';
 import { getEnterpriseContext, requirePermission } from '@/lib/enterprise/context';
 import { createClient } from '@/lib/supabase/server';
@@ -65,12 +66,15 @@ export async function POST(request: Request) {
     requirePermission(context, 'roles.manage');
     const body = await parseJson(request, createRoleSchema);
     const client = await createClient();
-    const { data, error } = await client.rpc('create_enterprise_role', {
+    const { data, error } = await client.rpc('create_enterprise_role', allowNullableRpcArgs<
+      'create_enterprise_role',
+      'target_description'
+    >({
       target_enterprise_id: context.enterpriseId,
       target_code: body.code,
       target_name: body.name,
       target_description: body.description ?? null,
-    });
+    }));
     if (error?.message === 'permission_denied') return jsonError('没有创建角色的权限', 403);
     if (error?.message === 'system_role_code_reserved') return jsonError('该编码保留给系统角色', 409);
     if (error?.code === '23505') return jsonError('创建角色失败，角色编码可能已存在', 409);

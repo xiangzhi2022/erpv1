@@ -35,7 +35,9 @@ describe('order exchange mutation return boundary', () => {
       'utf8',
     );
 
-    expect(transitionType).toContain('Returns: { id: string; status: string; updated_at: string }[]');
+    expect(transitionType).toMatch(
+      /Returns:\s*\{\s*id:\s*string\s*status:\s*string\s*updated_at:\s*string\s*\}\[\]/,
+    );
     expect(transitionType).not.toContain('Tables"]["order_exchanges"]["Row"]');
     expect(route).toContain('return NextResponse.json({ success: true, exchange });');
   });

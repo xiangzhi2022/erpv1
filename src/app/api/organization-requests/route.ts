@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { allowNullableRpcArgs } from '@/db/rpc-args';
 import { parseJson } from '@/lib/api/request';
 import { createClient } from '@/lib/supabase/server';
 import { getEnterpriseContext, requirePermission } from '@/lib/enterprise/context';
@@ -37,10 +38,13 @@ export async function GET(request: Request) {
       enterpriseId = context.enterpriseId;
     }
     const client = await createClient();
-    const { data, error } = await client.rpc('list_enterprise_join_requests', {
+    const { data, error } = await client.rpc('list_enterprise_join_requests', allowNullableRpcArgs<
+      'list_enterprise_join_requests',
+      'target_enterprise_id'
+    >({
       target_enterprise_id: enterpriseId,
       target_status: status,
-    });
+    }));
     if (error) return jsonError('获取组织申请失败', 500);
     return Response.json({ success: true, data: data ?? [] });
   } catch (error) {
@@ -61,10 +65,13 @@ export async function POST(request: Request) {
       return jsonError('自助加入申请仅支持员工角色', 422);
     }
     const client = await createClient();
-    const { data, error } = await client.rpc('create_enterprise_join_request', {
+    const { data, error } = await client.rpc('create_enterprise_join_request', allowNullableRpcArgs<
+      'create_enterprise_join_request',
+      'target_message'
+    >({
       target_enterprise_id: enterpriseId,
       target_message: body.message ?? null,
-    });
+    }));
     if (error?.message === 'already_active_member') return jsonError('你已经是该企业成员', 409);
     if (error?.message === 'join_request_pending') return jsonError('已有待处理申请，请勿重复提交', 409);
     if (error?.message === 'enterprise_not_found') return jsonError('企业不存在或不可加入', 404);

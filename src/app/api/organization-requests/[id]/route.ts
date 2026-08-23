@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { allowNullableRpcArgs } from '@/db/rpc-args';
 import { parseJson } from '@/lib/api/request';
 import { createClient } from '@/lib/supabase/server';
 
@@ -20,11 +21,14 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
     const parsedId = requestIdSchema.safeParse((await params).id);
     if (!parsedId.success) return jsonError('申请 ID 不正确', 400);
     const body = await parseJson(request, actionSchema);
-    const { data, error } = await client.rpc('handle_enterprise_join_request', {
+    const { data, error } = await client.rpc('handle_enterprise_join_request', allowNullableRpcArgs<
+      'handle_enterprise_join_request',
+      'target_reason'
+    >({
       target_action: body.action,
       target_reason: body.reason ?? null,
       target_request_id: parsedId.data,
-    });
+    }));
     if (error?.message === 'join_request_not_found') return jsonError('申请不存在', 404);
     if (error?.message === 'join_request_already_handled') return jsonError('该申请已经处理', 409);
     if (error?.message === 'already_active_member') return jsonError('该用户已经是启用的企业成员', 409);

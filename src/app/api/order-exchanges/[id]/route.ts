@@ -30,7 +30,7 @@ export async function PATCH(
     const { data, error } = await supabase.rpc('transition_order_exchange', {
       target_exchange_id: id,
       target_action: input.action,
-      target_message: input.message ?? null,
+      target_message: input.message,
       target_proposed_changes: input.proposed_changes ?? null,
     });
     if (error) {

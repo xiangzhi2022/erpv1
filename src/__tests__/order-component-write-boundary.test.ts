@@ -58,8 +58,8 @@ describe('order component write boundary', () => {
     expect(migration).toMatch(/target_product\s+\?\|\s+array\['quoted_amount',\s*'cost_amount',\s*'profit_amount',\s*'internal_remark'\][\s\S]+?finance\.manage/i);
     expect(migration).toMatch(/revoke\s+all\s+on\s+function\s+app_private\.create_order_product_with_pricing_internal\(uuid,\s*uuid,\s*jsonb\)\s+from\s+public,\s*anon,\s*authenticated,\s*service_role/i);
     const databaseTypes = source('src/db/database.types.ts');
-    expect(databaseTypes).toMatch(/create_order_product_with_pricing:[\s\S]+?Returns:\s+Database\["public"\]\["Tables"\]\["order_products"\]\["Row"\]\[\]/);
-    expect(databaseTypes).toMatch(/create_order_item_with_pricing:[\s\S]+?Returns:\s+Database\["public"\]\["Tables"\]\["order_items"\]\["Row"\]\[\]/);
+    expect(databaseTypes).toMatch(/create_order_product_with_pricing:[\s\S]+?Returns:\s*\{[\s\S]+?\}\[\][\s\S]+?SetofOptions:\s*\{[\s\S]+?to:\s*"order_products"[\s\S]+?isSetofReturn:\s*true/);
+    expect(databaseTypes).toMatch(/create_order_item_with_pricing:[\s\S]+?Returns:\s*\{[\s\S]+?\}\[\][\s\S]+?SetofOptions:\s*\{[\s\S]+?to:\s*"order_items"[\s\S]+?isSetofReturn:\s*true/);
   });
 
   it('routes component creation and base updates only through guarded RPCs', () => {
