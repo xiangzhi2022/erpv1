@@ -24,7 +24,8 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
     if (!user) return NextResponse.json({ success: false, error: '请先登录' }, { status: 401 });
     const { id } = await params;
     const supabase = await createClient();
-    const { data, error } = await supabase.from('workers').select('*, workshops(name)').eq('id', id).single();
+    const { data, error } = await supabase.from('workers').select('*, workshops(name)')
+      .eq('enterprise_id', user.enterpriseId).eq('id', id).single();
     if (error || !data) return NextResponse.json({ success: false, error: '工人不存在' }, { status: 404 });
     const worker = { ...data, workshop_name: (data.workshops as Record<string, unknown>)?.name || null };
     return NextResponse.json({ success: true, worker });
@@ -44,7 +45,8 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
     const supabase = await createClient();
 
     // 先校验工人是否存在
-    const { data: existing, error: findError } = await supabase.from('workers').select('id').eq('id', id).maybeSingle();
+    const { data: existing, error: findError } = await supabase.from('workers').select('id')
+      .eq('enterprise_id', user.enterpriseId).eq('id', id).maybeSingle();
     if (findError || !existing) {
       return NextResponse.json({ success: false, error: '工人不存在' }, { status: 404 });
     }
@@ -79,7 +81,8 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
 
     updateData.updated_at = new Date().toISOString();
 
-    const { data, error } = await supabase.from('workers').update(updateData).eq('id', id).select('*, workshops(name)').single();
+    const { data, error } = await supabase.from('workers').update(updateData)
+      .eq('enterprise_id', user.enterpriseId).eq('id', id).select('*, workshops(name)').single();
     if (error) {
       console.error('更新工人失败:', error);
       return NextResponse.json({ success: false, error: '更新失败' }, { status: 500 });
@@ -101,12 +104,14 @@ export async function DELETE(_request: Request, { params }: { params: Promise<{ 
     const supabase = await createClient();
 
     // 先校验工人是否存在
-    const { data: existing, error: findError } = await supabase.from('workers').select('id, name').eq('id', id).maybeSingle();
+    const { data: existing, error: findError } = await supabase.from('workers').select('id, name')
+      .eq('enterprise_id', user.enterpriseId).eq('id', id).maybeSingle();
     if (findError || !existing) {
       return NextResponse.json({ success: false, error: '工人不存在' }, { status: 404 });
     }
 
-    const { error } = await supabase.from('workers').delete().eq('id', id);
+    const { error } = await supabase.from('workers').delete()
+      .eq('enterprise_id', user.enterpriseId).eq('id', id);
     if (error) {
       console.error('删除工人失败:', error);
       return NextResponse.json({ success: false, error: '删除失败' }, { status: 500 });

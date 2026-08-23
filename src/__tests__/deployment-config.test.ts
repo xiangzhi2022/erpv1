@@ -72,6 +72,7 @@ describe("deployment entrypoints", () => {
     expect(startAll).toMatch(/nohup pnpm dev/);
     expect(startAll).toMatch(/export PORT/);
     expect(startAll).not.toMatch(/\$\{WHITE\}|超级管理员登录|手机号:|密\s*码:/);
+    expect(startAll).not.toMatch(/kill\s+-9|xargs[^\n]*\bkill\b/);
   });
 
 });

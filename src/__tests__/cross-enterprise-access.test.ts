@@ -86,7 +86,6 @@ describe('cross-enterprise access boundary', () => {
       'src/app/api/orders/[id]/route.ts',
       'src/app/api/products/[id]/route.ts',
       'src/app/api/spaces/[id]/route.ts',
-      'src/app/api/workers/[id]/route.ts',
       'src/app/api/orders/route.ts',
       'src/app/actions/tasks.ts',
     ]) {
@@ -94,6 +93,12 @@ describe('cross-enterprise access boundary', () => {
       expect(route, path).toContain('getEnterpriseContext');
       expect(route, path).toContain('context.enterpriseId');
     }
+
+    const workerRoute = source('src/app/api/workers/[id]/route.ts');
+    const scopedWorkerQueries = workerRoute.match(
+      /\.eq\('enterprise_id',\s*user\.enterpriseId\)\.eq\('id',\s*id\)/g,
+    ) ?? [];
+    expect(scopedWorkerQueries).toHaveLength(5);
 
     const rlsTest = source('supabase/tests/erp_tenancy_rls.test.sql');
     expect(rlsTest).toContain('enterprise A cannot select enterprise B customers');

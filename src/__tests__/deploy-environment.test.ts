@@ -93,9 +93,10 @@ describe('Netlify deploy environment guard', () => {
           DEPLOY_PRIME_URL: 'https://deploy-preview-42--qingya-erp-163.netlify.app',
           NEXT_PUBLIC_SUPABASE_URL: `https://${stagingRef}.supabase.co`,
         };
-      const jwt = (role: string) => [
+      const expectedRef = context === 'production' ? productionRef : stagingRef;
+      const jwt = (role: string, ref?: string) => [
         Buffer.from(JSON.stringify({ alg: 'HS256', typ: 'JWT' })).toString('base64url'),
-        Buffer.from(JSON.stringify({ role })).toString('base64url'),
+        Buffer.from(JSON.stringify({ role, ...(ref ? { ref } : {}) })).toString('base64url'),
         'signature',
       ].join('.');
 
@@ -103,7 +104,9 @@ describe('Netlify deploy environment guard', () => {
         '',
         'not-a-key',
         `sb_secret_${'b'.repeat(24)}`,
-        jwt('service_role'),
+        jwt('service_role', expectedRef),
+        jwt('anon'),
+        jwt('anon', 'wrongprojectref00000'),
       ]) {
         expect(runGuard({
           CONTEXT: context,
@@ -114,7 +117,7 @@ describe('Netlify deploy environment guard', () => {
 
       expect(runGuard({
         CONTEXT: context,
-        NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: jwt('anon'),
+        NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: jwt('anon', expectedRef),
         ...deployEnvironment,
       }).status).toBe(0);
     },

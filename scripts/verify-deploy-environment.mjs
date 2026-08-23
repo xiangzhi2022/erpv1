@@ -58,8 +58,7 @@ function isPublishableKey(value, projectRef) {
   if (parts.length !== 3 || parts.some((part) => !part)) return false;
   try {
     const payload = JSON.parse(Buffer.from(parts[1], 'base64url').toString('utf8'));
-    return payload?.role === 'anon'
-      && (typeof payload.ref !== 'string' || payload.ref === projectRef);
+    return payload?.role === 'anon' && payload.ref === projectRef;
   } catch {
     return false;
   }

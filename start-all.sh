@@ -114,16 +114,8 @@ log_step "Step 4/7: 清理端口"
 pids=$(ss -H -lntp 2>/dev/null | awk -v port="${PORT}" '$4 ~ ":"port"$"' | grep -o 'pid=[0-9]*' | cut -d= -f2 | paste -sd' ' - || true)
 
 if [[ -n "${pids}" ]]; then
-  log_warn "端口 ${PORT} 被进程 ${pids} 占用，正在清理..."
-  echo "${pids}" | xargs -I {} kill -9 {} 2>/dev/null || true
-  sleep 1
-  # 再次检查
-  pids2=$(ss -H -lntp 2>/dev/null | awk -v port="${PORT}" '$4 ~ ":"port"$"' | grep -o 'pid=[0-9]*' | cut -d= -f2 | paste -sd' ' - || true)
-  if [[ -n "${pids2}" ]]; then
-    log_error "端口 ${PORT} 仍被占用，请手动处理 (PIDs: ${pids2})"
-    exit 1
-  fi
-  log_success "端口 ${PORT} 已清理"
+  log_error "端口 ${PORT} 已被进程 ${pids} 占用；请确认进程归属并手动处理，脚本不会自动终止进程。"
+  exit 1
 else
   log_success "端口 ${PORT} 空闲"
 fi
