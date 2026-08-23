@@ -1,198 +1,238 @@
-import { parseJsonObject } from '@/lib/api/request';
-import { NextResponse } from "next/server";
-import { getSupabaseClient } from "@/db/client";
-import { getUserFromRequest } from "@/lib/auth";
-import { canAccessPath, getUserPermissionKeys, isSuperAdmin } from "@/lib/role-access";
+import { z } from 'zod';
+import { ORDER_STATUSES } from '@/app/orders/schemas';
+import { isApiError } from '@/lib/api/errors';
+import { parseJson, parseQuery } from '@/lib/api/request';
+import { NextResponse, type NextRequest } from 'next/server';
+import { getEnterpriseContext, requirePermission } from '@/lib/enterprise/context';
+import { isEnterpriseAccessError } from '@/lib/enterprise/errors';
+import { createClient } from '@/lib/supabase/server';
 
-function canManageFactoryOrders(user: NonNullable<Awaited<ReturnType<typeof getUserFromRequest>>>): boolean {
-  return (
-    isSuperAdmin(user) ||
-    user.role === "factory_admin" ||
-    getUserPermissionKeys(user).some((key) => key === "factory_order_manager" || key === "factory_sales")
-  );
+const factoryOrderQuerySchema = z.object({
+  status: z.union([z.enum(ORDER_STATUSES), z.literal('all')]).optional(),
+  keyword: z.string().trim().min(1).max(64)
+    .regex(/^[\p{L}\p{N} -]+$/u, '关键词包含不支持的字符')
+    .optional(),
+});
+
+const acceptOrderSchema = z.object({
+  order_id: z.string().uuid(),
+});
+
+const ACCEPTABLE_FACTORY_ORDER_STATUSES = new Set(['pending']);
+
+interface FactoryOrderItem {
+  id: string;
+  product_name: string;
+  quantity: number;
+  unit_price: number;
+  subtotal: number;
 }
 
-export async function GET(request: Request) {
+interface FactoryOrderRow {
+  id: string;
+  order_no: string;
+  customer_name: string;
+  customer_phone: string | null;
+  status: string;
+  total_amount: number;
+  delivery_date: string | null;
+  remark: string | null;
+  dealer_id: string | null;
+  from_enterprise_id: string | null;
+  target_factory_id: string | null;
+  created_at: string;
+  updated_at: string;
+  items: FactoryOrderItem[] | null;
+}
+
+interface EnterpriseSummary {
+  id: string;
+  name: string;
+}
+
+interface ProductionTaskRow {
+  order_id: string | null;
+  status: string;
+}
+
+function buildTaskStats(tasks: readonly ProductionTaskRow[]) {
+  const statsByOrderId = new Map<string, { total: number; completed: number }>();
+  for (const task of tasks) {
+    if (!task.order_id) continue;
+    const stats = statsByOrderId.get(task.order_id) ?? { total: 0, completed: 0 };
+    stats.total += 1;
+    if (task.status === 'completed') stats.completed += 1;
+    statsByOrderId.set(task.order_id, stats);
+  }
+  return statsByOrderId;
+}
+
+function errorResponse(error: unknown, message: string) {
+  if (isEnterpriseAccessError(error) || isApiError(error)) {
+    return NextResponse.json({ success: false, error: error.message }, { status: error.status });
+  }
+  console.error('factory_orders.request_failed', { error });
+  return NextResponse.json({ success: false, error: message }, { status: 500 });
+}
+
+export async function GET(request: NextRequest) {
   try {
-    const user = await getUserFromRequest(request);
+    const context = await getEnterpriseContext();
+    requirePermission(context, 'orders.read');
+    const filters = parseQuery(request, factoryOrderQuerySchema);
+    const supabase = await createClient();
 
-    if (!user) {
-      return NextResponse.json({ success: false, error: "请先登录" }, { status: 401 });
-    }
-
-    if (!canAccessPath(user, "/orders") || !canManageFactoryOrders(user)) {
-      return NextResponse.json({ success: false, error: "无权限访问" }, { status: 403 });
-    }
-
-    const supabase = getSupabaseClient();
-
-    // 解析筛选参数
-    const { searchParams } = new URL(request.url);
-    const statusFilter = searchParams.get("status");
-    const keyword = searchParams.get("keyword");
-
-    // 构建查询 - 获取本工厂的订单
     let query = supabase
-      .from("orders")
+      .from('orders')
       .select(`
         id, order_no, customer_name, customer_phone, status, total_amount,
-        delivery_date, remark, tenant_id, dealer_id, from_tenant_id, target_factory_id, created_at, updated_at,
+        delivery_date, remark, dealer_id, from_enterprise_id, target_factory_id, created_at, updated_at,
         items:order_items(id, product_name, quantity, unit_price, subtotal)
       `)
-      .eq("target_factory_id", user.tenant_id || "")
-      .order("created_at", { ascending: false });
-
-    if (statusFilter) {
-      query = query.eq("status", statusFilter);
-    }
-
-    if (keyword) {
-      query = query.or(`order_no.ilike.%${keyword}%,customer_name.ilike.%${keyword}%`);
-    }
+      .eq('enterprise_id', context.enterpriseId)
+      .eq('target_factory_id', context.enterpriseId)
+      .order('created_at', { ascending: false });
+    if (filters.status && filters.status !== 'all') query = query.eq('status', filters.status);
+    if (filters.keyword) query = query.or(`order_no.ilike.%${filters.keyword}%,customer_name.ilike.%${filters.keyword}%`);
 
     const { data: orders, error } = await query;
-
     if (error) {
-      console.error("获取订单失败:", error);
-      return NextResponse.json({ success: false, error: "获取失败" }, { status: 500 });
+      console.error('factory_orders.list_failed', { code: error.code });
+      return NextResponse.json({ success: false, error: '获取失败' }, { status: 500 });
     }
 
-    const orderList = orders || [];
-    const tenantIds = Array.from(new Set(
+    const orderList = (orders ?? []) as FactoryOrderRow[];
+    const enterpriseIds = Array.from(new Set(
       orderList
-        .flatMap((order: Record<string, unknown>) => [order.dealer_id, order.from_tenant_id, order.tenant_id])
-        .filter((value): value is string => typeof value === "string" && value.length > 0)
+        .flatMap((order) => [order.dealer_id, order.from_enterprise_id])
+        .filter((value): value is string => Boolean(value)),
     ));
-    const { data: tenantRows } = tenantIds.length > 0
-      ? await supabase.from("tenants").select("id, name, company_name").in("id", tenantIds)
+    const { data: enterpriseRows } = enterpriseIds.length > 0
+      ? await supabase.from('enterprises').select('id,name').in('id', enterpriseIds)
       : { data: [] };
-    const tenantMap = new Map((tenantRows || []).map((tenant: Record<string, unknown>) => [tenant.id as string, tenant]));
+    const enterprisesById = new Map<string, EnterpriseSummary>(
+      ((enterpriseRows ?? []) as EnterpriseSummary[]).map((enterprise) => [enterprise.id, {
+        id: enterprise.id,
+        name: enterprise.name,
+      }]),
+    );
 
-    // 获取订单对应的生产任务 - 使用 status 字段（与 production_tasks 表一致）
-    const orderIds = orderList.map((o: Record<string, unknown>) => o.id as string);
-    let taskStats: { order_id: string; total: number; completed: number }[] = [];
+    const orderIds = orderList.map((order) => order.id);
+    const { data: taskRows } = orderIds.length > 0
+      ? await supabase
+          .from('production_tasks')
+          .select('order_id,status')
+          .eq('enterprise_id', context.enterpriseId)
+          .in('order_id', orderIds)
+      : { data: [] };
+    const taskStatsByOrderId = buildTaskStats((taskRows ?? []) as ProductionTaskRow[]);
 
-    if (orderIds.length > 0) {
-      const { data: tasks } = await supabase
-        .from("production_tasks")
-        .select("order_id, status")
-        .in("order_id", orderIds);
-
-      const taskMap = new Map<string, { total: number; completed: number }>();
-      (tasks || []).forEach((t: Record<string, unknown>) => {
-        const stats = taskMap.get(t.order_id as string) || { total: 0, completed: 0 };
-        stats.total++;
-        // production_tasks 表使用 status 字段，不是 progress
-        if (t.status === "completed") stats.completed++;
-        taskMap.set(t.order_id as string, stats);
-      });
-
-      taskStats = Array.from(taskMap.entries()).map(([order_id, stats]) => ({
-        order_id,
-        ...stats,
-      }));
-    }
-
-    // 合并数据
-    const ordersWithProgress = orderList.map((o: Record<string, unknown>) => {
-      const stats = taskStats.find(s => s.order_id === o.id) || { total: 0, completed: 0 };
-      const dealerId = (o.dealer_id || o.from_tenant_id || o.tenant_id) as string | undefined;
+    const ordersWithProgress = orderList.map((order) => {
+      const stats = taskStatsByOrderId.get(order.id) ?? { total: 0, completed: 0 };
+      const dealerId = order.dealer_id ?? order.from_enterprise_id;
       return {
-        ...o,
-        dealer: dealerId ? tenantMap.get(dealerId) || null : null,
+        id: order.id,
+        order_no: order.order_no,
+        customer_name: order.customer_name,
+        customer_phone: order.customer_phone,
+        status: order.status,
+        total_amount: order.total_amount,
+        delivery_date: order.delivery_date,
+        remark: order.remark,
+        target_factory_id: order.target_factory_id,
+        created_at: order.created_at,
+        updated_at: order.updated_at,
+        items: (order.items ?? []).map((item) => ({
+          id: item.id,
+          product_name: item.product_name,
+          quantity: item.quantity,
+          unit_price: item.unit_price,
+          subtotal: item.subtotal,
+        })),
+        dealer: dealerId ? enterprisesById.get(dealerId) ?? null : null,
         total_tasks: stats.total,
         completed_tasks: stats.completed,
         progress: stats.total > 0 ? Math.round((stats.completed / stats.total) * 100) : 0,
       };
     });
 
-    // 统计（基于全量订单，不受筛选参数影响）
     const { data: allOrders, error: statsError } = await supabase
-      .from("orders")
-      .select("id, status")
-      .eq("target_factory_id", user.tenant_id || "");
-
-    if (statsError) {
-      console.error("获取订单统计失败:", statsError);
-    }
+      .from('orders')
+      .select('id,status')
+      .eq('enterprise_id', context.enterpriseId)
+      .eq('target_factory_id', context.enterpriseId);
+    if (statsError) console.error('factory_orders.stats_failed', { code: statsError.code });
 
     const statusStats = {
-      pending: (allOrders || []).filter((o: Record<string, unknown>) => o.status === "pending").length,
-      confirmed: (allOrders || []).filter((o: Record<string, unknown>) => o.status === "confirmed").length,
-      producing: (allOrders || []).filter((o: Record<string, unknown>) => o.status === "producing").length,
-      shipped: (allOrders || []).filter((o: Record<string, unknown>) => o.status === "shipped").length,
-      completed: (allOrders || []).filter((o: Record<string, unknown>) => o.status === "completed").length,
+      pending: (allOrders ?? []).filter((order) => order.status === 'pending').length,
+      confirmed: (allOrders ?? []).filter((order) => order.status === 'confirmed').length,
+      producing: (allOrders ?? []).filter((order) => order.status === 'producing').length,
+      shipped: (allOrders ?? []).filter((order) => order.status === 'shipped').length,
+      completed: (allOrders ?? []).filter((order) => order.status === 'completed').length,
     };
-
-    // 获取关联的生产任务总数和完成数
-    const allOrderIds = (allOrders || []).map((o: Record<string, unknown>) => o.id as string);
-    let totalTasks = 0;
-    let completedTasks = 0;
-
-    if (allOrderIds.length > 0) {
-      const { data: allTasks } = await supabase
-        .from("production_tasks")
-        .select("status")
-        .in("order_id", allOrderIds);
-
-      totalTasks = (allTasks || []).length;
-      completedTasks = (allTasks || []).filter((t: Record<string, unknown>) => t.status === "completed").length;
-    }
+    const allOrderIds = (allOrders ?? []).map((order) => order.id);
+    const { data: allTaskRows } = allOrderIds.length > 0
+      ? await supabase
+          .from('production_tasks')
+          .select('status')
+          .eq('enterprise_id', context.enterpriseId)
+          .in('order_id', allOrderIds)
+      : { data: [] };
+    const allTasks = allTaskRows ?? [];
 
     return NextResponse.json({
       success: true,
       orders: ordersWithProgress,
       stats: statusStats,
       taskStats: {
-        total: totalTasks,
-        completed: completedTasks,
+        total: allTasks.length,
+        completed: allTasks.filter((task) => task.status === 'completed').length,
       },
     });
   } catch (error) {
-    console.error("获取订单失败:", error);
-    return NextResponse.json({ success: false, error: "服务器错误" }, { status: 500 });
+    return errorResponse(error, '服务器错误');
   }
 }
 
-// 接收订单
-export async function POST(request: Request) {
+export async function POST(request: NextRequest) {
   try {
-    const user = await getUserFromRequest(request);
+    const context = await getEnterpriseContext();
+    requirePermission(context, 'orders.accept');
+    const { order_id: orderId } = await parseJson(request, acceptOrderSchema);
 
-    if (!user) {
-      return NextResponse.json({ success: false, error: "请先登录" }, { status: 401 });
+    const supabase = await createClient();
+    const { data: existingOrder, error: existingOrderError } = await supabase
+      .from('orders')
+      .select('id,status')
+      .eq('enterprise_id', context.enterpriseId)
+      .eq('target_factory_id', context.enterpriseId)
+      .eq('id', orderId)
+      .maybeSingle();
+    if (existingOrderError) {
+      console.error('factory_orders.accept_lookup_failed', { code: existingOrderError.code });
+      return NextResponse.json({ success: false, error: '接收失败' }, { status: 500 });
+    }
+    if (!existingOrder) return NextResponse.json({ success: false, error: '订单不存在' }, { status: 404 });
+    if (!ACCEPTABLE_FACTORY_ORDER_STATUSES.has(existingOrder.status)) {
+      return NextResponse.json({ success: false, error: '当前订单状态无法接收' }, { status: 409 });
     }
 
-    if (!canManageFactoryOrders(user)) {
-      return NextResponse.json({ success: false, error: "无权限访问" }, { status: 403 });
-    }
-
-    const supabase = getSupabaseClient();
-    const body = await parseJsonObject(request);
-    const { order_id } = body;
-
-    if (!order_id) {
-      return NextResponse.json({ success: false, error: "缺少 order_id" }, { status: 400 });
-    }
-
-    // 更新订单状态 - 仅更新 orders 表中存在的列
-    const { error } = await supabase
-      .from("orders")
-      .update({
-        status: "confirmed",
-        updated_at: new Date().toISOString(),
-      })
-      .eq("id", order_id)
-      .eq("target_factory_id", user.tenant_id || "");
-
+    const { data: updatedOrder, error } = await supabase
+      .from('orders')
+      .update({ status: 'confirmed', updated_at: new Date().toISOString() })
+      .eq('enterprise_id', context.enterpriseId)
+      .eq('target_factory_id', context.enterpriseId)
+      .eq('id', orderId)
+      .eq('status', existingOrder.status)
+      .select('id')
+      .maybeSingle();
     if (error) {
-      console.error("接收订单失败:", error);
-      return NextResponse.json({ success: false, error: "接收失败" }, { status: 500 });
+      console.error('factory_orders.accept_failed', { code: error.code });
+      return NextResponse.json({ success: false, error: '接收失败' }, { status: 500 });
     }
-
-    return NextResponse.json({ success: true, message: "订单已接收" });
+    if (!updatedOrder) return NextResponse.json({ success: false, error: '订单状态已变更，请刷新后重试' }, { status: 409 });
+    return NextResponse.json({ success: true, message: '订单已接收' });
   } catch (error) {
-    console.error("接收订单失败:", error);
-    return NextResponse.json({ success: false, error: "服务器错误" }, { status: 500 });
+    return errorResponse(error, '服务器错误');
   }
 }
