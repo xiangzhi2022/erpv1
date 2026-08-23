@@ -3,6 +3,11 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
 const ENTERPRISE_ID = '11111111-1111-4111-8111-111111111111';
+const IDEMPOTENCY_KEY = 'finance-wage-test-key';
+
+function mutationHeaders(key = IDEMPOTENCY_KEY) {
+  return { 'Idempotency-Key': key };
+}
 
 const mocks = vi.hoisted(() => ({
   getEnterpriseContext: vi.fn(),
@@ -59,7 +64,13 @@ beforeEach(() => {
   mocks.rpc.mockReset();
   mocks.calls.length = 0;
   mocks.maybeSingleData = null;
-  mocks.rpc.mockResolvedValue({ data: [{ id: 'record-1' }], error: null });
+  mocks.rpc.mockImplementation((functionName) => {
+    if (functionName === 'claim_api_idempotency') {
+      return Promise.resolve({ data: [{ outcome: 'claimed', response_status: null, response_body: null, claim_token: 'claim-1' }], error: null });
+    }
+    if (functionName === 'complete_api_idempotency') return Promise.resolve({ data: [], error: null });
+    return Promise.resolve({ data: [{ id: 'record-1' }], error: null });
+  });
   mocks.getEnterpriseContext.mockResolvedValue({
     enterpriseId: ENTERPRISE_ID,
     userId: 'user-1',
@@ -95,7 +106,7 @@ describe('finance and wage API enterprise boundary', () => {
     expect(mocks.createClient).not.toHaveBeenCalled();
 
     const valid = await PATCH(new Request('https://erp.example.com/api/finance/orders/order-1/pricing', {
-      method: 'PATCH', body: JSON.stringify({ total_amount: 1250, cost_amount: 500 }),
+      method: 'PATCH', headers: mutationHeaders(), body: JSON.stringify({ total_amount: 1250, cost_amount: 500 }),
     }), { params: Promise.resolve({ id: '11111111-1111-4111-8111-111111111112' }) });
 
     expect(valid.status).toBe(200);
@@ -107,6 +118,32 @@ describe('finance and wage API enterprise boundary', () => {
       target_profit_amount: null,
       target_deposit_amount: null,
     });
+  });
+
+  it('requires an Idempotency-Key before pricing can invoke its business RPC', async () => {
+    const { PATCH } = await import('@/app/api/finance/orders/[id]/pricing/route');
+    const response = await PATCH(new Request('https://erp.example.com/api/finance/orders/order-1/pricing', {
+      method: 'PATCH', body: JSON.stringify({ total_amount: 1250 }),
+    }), { params: Promise.resolve({ id: '11111111-1111-4111-8111-111111111112' }) });
+
+    expect(response.status).toBe(400);
+    expect(mocks.rpc).not.toHaveBeenCalled();
+  });
+
+  it('replays pricing without invoking its business RPC', async () => {
+    mocks.rpc.mockImplementation((functionName) => {
+      if (functionName === 'claim_api_idempotency') {
+        return Promise.resolve({ data: [{ outcome: 'replay', response_status: 200, response_body: { success: true, data: { id: 'saved' } }, claim_token: null }], error: null });
+      }
+      return Promise.resolve({ data: [{ id: 'record-1' }], error: null });
+    });
+    const { PATCH } = await import('@/app/api/finance/orders/[id]/pricing/route');
+    const response = await PATCH(new Request('https://erp.example.com/api/finance/orders/order-1/pricing', {
+      method: 'PATCH', headers: mutationHeaders('replay-pricing'), body: JSON.stringify({ total_amount: 1250 }),
+    }), { params: Promise.resolve({ id: '11111111-1111-4111-8111-111111111112' }) });
+
+    expect(response.status).toBe(200);
+    expect(mocks.rpc).not.toHaveBeenCalledWith('finance_update_order_pricing', expect.anything());
   });
 
   it('uses finance-scoped read RPCs instead of relying on table RLS grants', async () => {
@@ -133,10 +170,16 @@ describe('finance and wage API enterprise boundary', () => {
   });
 
   it('reports a conflict when a settlement record is no longer approved', async () => {
-    mocks.rpc.mockResolvedValueOnce({ data: null, error: { code: 'P0001' } });
+    mocks.rpc.mockImplementation((functionName) => {
+      if (functionName === 'claim_api_idempotency') {
+        return Promise.resolve({ data: [{ outcome: 'claimed', response_status: null, response_body: null, claim_token: 'claim-1' }], error: null });
+      }
+      if (functionName === 'finance_settle_wage_records') return Promise.resolve({ data: null, error: { code: 'P0001' } });
+      return Promise.resolve({ data: [], error: null });
+    });
     const { POST } = await import('@/app/api/finance/settlements/route');
     const response = await POST(new Request('https://erp.example.com/api/finance/settlements', {
-      method: 'POST',
+      method: 'POST', headers: mutationHeaders(),
       body: JSON.stringify({ record_ids: ['11111111-1111-4111-8111-111111111113'] }),
     }));
 
@@ -151,7 +194,7 @@ describe('finance and wage API enterprise boundary', () => {
     const { POST } = await import('@/app/api/finance/settlements/route');
     const recordId = '11111111-1111-4111-8111-111111111113';
     const response = await POST(new Request('https://erp.example.com/api/finance/settlements', {
-      method: 'POST', body: JSON.stringify({ record_ids: [recordId, recordId] }),
+      method: 'POST', headers: mutationHeaders(), body: JSON.stringify({ record_ids: [recordId, recordId] }),
     }));
 
     expect(response.status).toBe(422);
@@ -161,7 +204,7 @@ describe('finance and wage API enterprise boundary', () => {
   it('uses the atomic payment RPC instead of a direct wage-record update', async () => {
     const { PATCH } = await import('@/app/api/finance/wage-records/[id]/pay/route');
     const response = await PATCH(new Request('https://erp.example.com/api/finance/wage-records/record-1/pay', {
-      method: 'PATCH',
+      method: 'PATCH', headers: mutationHeaders(),
     }), { params: Promise.resolve({ id: '11111111-1111-4111-8111-111111111115' }) });
 
     expect(response.status).toBe(200);
@@ -175,7 +218,7 @@ describe('finance and wage API enterprise boundary', () => {
   it('does not create a wage rule for a worker outside the active enterprise', async () => {
     const { POST } = await import('@/app/api/wage-rules/route');
     const response = await POST(new Request('https://erp.example.com/api/wage-rules', {
-      method: 'POST',
+      method: 'POST', headers: mutationHeaders(),
       body: JSON.stringify({
         rule_name: '封边计件',
         task_type: 'board',
@@ -190,11 +233,37 @@ describe('finance and wage API enterprise boundary', () => {
     expect(mocks.calls.filter((call) => call.table === 'wage_rules' && call.method === 'insert')).toEqual([]);
   });
 
+  it('replays wage-rule creation without revalidating or writing business rows', async () => {
+    mocks.rpc.mockImplementation((functionName) => {
+      if (functionName === 'claim_api_idempotency') {
+        return Promise.resolve({ data: [{ outcome: 'replay', response_status: 201, response_body: { success: true, data: { id: 'saved-rule' } }, claim_token: null }], error: null });
+      }
+      return Promise.resolve({ data: [], error: null });
+    });
+    const { POST } = await import('@/app/api/wage-rules/route');
+    const response = await POST(new Request('https://erp.example.com/api/wage-rules', {
+      method: 'POST', headers: mutationHeaders('replay-wage-rule'),
+      body: JSON.stringify({
+        rule_name: '封边计件', task_type: 'board', scope_type: 'worker',
+        worker_id: '11111111-1111-4111-8111-111111111114', unit_price: 10,
+      }),
+    }));
+
+    expect(response.status).toBe(201);
+    expect(mocks.calls).toEqual([]);
+  });
+
   it('refuses to modify a paid wage record through the generic PATCH endpoint', async () => {
-    mocks.rpc.mockResolvedValueOnce({ data: [], error: null });
+    mocks.rpc.mockImplementation((functionName) => {
+      if (functionName === 'claim_api_idempotency') {
+        return Promise.resolve({ data: [{ outcome: 'claimed', response_status: null, response_body: null, claim_token: 'claim-1' }], error: null });
+      }
+      if (functionName === 'finance_manage_wage_record') return Promise.resolve({ data: [], error: null });
+      return Promise.resolve({ data: [], error: null });
+    });
     const { PATCH } = await import('@/app/api/wage-records/[id]/route');
     const response = await PATCH(new Request('https://erp.example.com/api/wage-records/record-1', {
-      method: 'PATCH', body: JSON.stringify({ expected_status: 'paid', wage_amount: 999 }),
+      method: 'PATCH', headers: mutationHeaders(), body: JSON.stringify({ expected_status: 'paid', wage_amount: 999 }),
     }), { params: Promise.resolve({ id: '11111111-1111-4111-8111-111111111116' }) });
 
     expect(response.status).toBe(409);
@@ -213,7 +282,7 @@ describe('finance and wage API enterprise boundary', () => {
   it('rejects a monetary edit when an approved wage is being transitioned', async () => {
     const { PATCH } = await import('@/app/api/wage-records/[id]/route');
     const response = await PATCH(new Request('https://erp.example.com/api/wage-records/record-1', {
-      method: 'PATCH', body: JSON.stringify({ expected_status: 'approved', status: 'rejected', wage_amount: 999 }),
+      method: 'PATCH', headers: mutationHeaders(), body: JSON.stringify({ expected_status: 'approved', status: 'rejected', wage_amount: 999 }),
     }), { params: Promise.resolve({ id: '11111111-1111-4111-8111-111111111117' }) });
 
     expect(response.status).toBe(422);

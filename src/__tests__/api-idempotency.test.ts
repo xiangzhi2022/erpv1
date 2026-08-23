@@ -16,6 +16,30 @@ function request(key?: string) {
 }
 
 describe('API mutation idempotency', () => {
+  it('wraps every state-changing production and money handler', () => {
+    const routeFiles = [
+      'src/app/api/finance/orders/[id]/pricing/route.ts',
+      'src/app/api/finance/settlements/route.ts',
+      'src/app/api/finance/wage-records/[id]/pay/route.ts',
+      'src/app/api/finance/wage-records/[id]/settle/route.ts',
+      'src/app/api/production/tasks/[id]/approve/route.ts',
+      'src/app/api/production/tasks/[id]/assign/route.ts',
+      'src/app/api/production/tasks/[id]/route.ts',
+      'src/app/api/production/tasks/[id]/start/route.ts',
+      'src/app/api/production/tasks/[id]/submit/route.ts',
+      'src/app/api/progress/report/route.ts',
+      'src/app/api/progress/work-orders/route.ts',
+      'src/app/api/wage-records/[id]/route.ts',
+      'src/app/api/wage-rules/[id]/route.ts',
+      'src/app/api/wage-rules/route.ts',
+      'src/app/api/worker/report/route.ts',
+    ];
+    const offenders = routeFiles.filter((file) => !readFileSync(resolve(process.cwd(), file), 'utf8')
+      .includes('executeIdempotentMutation'));
+
+    expect(offenders).toEqual([]);
+  });
+
   it('exposes authenticated wrappers without exposing private idempotency functions', () => {
     const migration = readFileSync(resolve(
       process.cwd(),

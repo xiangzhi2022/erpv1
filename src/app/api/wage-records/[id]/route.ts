@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
 import { isApiError } from '@/lib/api/errors';
+import { executeIdempotentMutation } from '@/lib/api/idempotency';
 import { parseJson, parseParams } from '@/lib/api/request';
 import { getEnterpriseContext, requirePermission } from '@/lib/enterprise/context';
 import { isEnterpriseAccessError } from '@/lib/enterprise/errors';
@@ -25,6 +26,7 @@ const updateSchema = z.object({
   }
 });
 interface RouteContext { params: Promise<{ id: string }>; }
+interface RpcClient { rpc(functionName: string, args: Record<string, unknown>): PromiseLike<{ data: unknown; error: unknown }>; }
 function isStatusConflict(error: unknown): boolean {
   return Boolean(error && typeof error === 'object' && 'code' in error && error.code === 'P0001');
 }
@@ -40,21 +42,28 @@ export async function PATCH(request: Request, { params }: RouteContext) {
     const { id } = await parseParams(params, paramsSchema);
     const input = await parseJson(request, updateSchema);
     const supabase = await createClient();
-    const { data, error } = await supabase.rpc('finance_manage_wage_record', {
-      target_enterprise_id: context.enterpriseId,
-      target_record_id: id,
-      target_expected_status: input.expected_status,
-      target_status: input.status ?? input.expected_status,
-      target_wage_amount: input.wage_amount ?? null,
-      target_quantity: input.quantity ?? null,
-      target_unit_price: input.unit_price ?? null,
+    const rpc = (functionName: string, args: Record<string, unknown>) => (supabase as unknown as RpcClient).rpc(functionName, args);
+    return await executeIdempotentMutation({
+      request, context, rpc,
+      input: { resource_id: id, action: 'manage_wage_record', body: input },
+      execute: async () => {
+        const { data, error } = await supabase.rpc('finance_manage_wage_record', {
+          target_enterprise_id: context.enterpriseId,
+          target_record_id: id,
+          target_expected_status: input.expected_status,
+          target_status: input.status ?? input.expected_status,
+          target_wage_amount: input.wage_amount ?? null,
+          target_quantity: input.quantity ?? null,
+          target_unit_price: input.unit_price ?? null,
+        });
+        if (error) {
+          if (isStatusConflict(error)) return NextResponse.json({ success: false, error: '工资记录不存在或状态已变化' }, { status: 409 });
+          throw error;
+        }
+        const record = data?.[0];
+        if (!record) return NextResponse.json({ success: false, error: '工资记录不存在或状态已变化' }, { status: 409 });
+        return NextResponse.json({ success: true, data: record });
+      },
     });
-    if (error) {
-      if (isStatusConflict(error)) return NextResponse.json({ success: false, error: '工资记录不存在或状态已变化' }, { status: 409 });
-      throw error;
-    }
-    const record = data?.[0];
-    if (!record) return NextResponse.json({ success: false, error: '工资记录不存在或状态已变化' }, { status: 409 });
-    return NextResponse.json({ success: true, data: record });
   } catch (error) { return errorResponse(error, '修改工资记录失败'); }
 }

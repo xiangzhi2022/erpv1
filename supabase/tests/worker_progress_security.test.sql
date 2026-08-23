@@ -1,6 +1,6 @@
 begin;
 
-select plan(12);
+select plan(20);
 
 select ok(
   (select qual from pg_policies where schemaname = 'public' and tablename = 'production_tasks' and policyname = 'production_tasks_select') ~ 'can_access_workshop',
@@ -33,6 +33,21 @@ select ok(
 );
 
 select ok(
+  (select qual from pg_policies where schemaname = 'public' and tablename = 'workers' and policyname = 'workers_select') ~ 'members.read.*production.read',
+  'worker list reads admit both member and production permissions under their own scopes'
+);
+
+select ok(
+  (select qual from pg_policies where schemaname = 'public' and tablename = 'workers' and policyname = 'workers_select') ~ 'wages.manage',
+  'wage managers can validate worker-scoped wage rules'
+);
+
+select ok(
+  (select qual from pg_policies where schemaname = 'public' and tablename = 'positions' and policyname = 'positions_wages_manage_select') ~ 'wages.manage',
+  'enterprise wage managers can validate position-scoped wage rules'
+);
+
+select ok(
   (select qual from pg_policies where schemaname = 'public' and tablename = 'worker_wage_records' and policyname = 'worker_wage_records_select') ~ 'wages.read.self.*auth.uid',
   'self wage reads are tied to auth.uid through a worker binding'
 );
@@ -47,6 +62,16 @@ select ok(
   'atomic work order progress RPC exists'
 );
 
+select ok(
+  to_regprocedure('public.create_production_work_order(uuid,uuid,uuid,text,numeric,text,timestamptz,text)') is not null,
+  'atomic work order creation RPC exists'
+);
+
+select ok(
+  (select prosrc from pg_proc where oid = 'public.create_production_work_order(uuid,uuid,uuid,text,numeric,text,timestamptz,text)'::regprocedure) ~ 'target_quantity <> trunc\(target_quantity\)',
+  'work order creation RPC enforces the integer quantity contract'
+);
+
 select is(
   (select pg_get_userbyid(proowner) from pg_proc where oid = 'public.report_worker_task(uuid,uuid,text)'::regprocedure),
   'v2_function_owner',
@@ -58,11 +83,29 @@ select ok(
   'authenticated callers can execute worker report RPC'
 );
 
+select is(
+  (select pg_get_userbyid(proowner) from pg_proc where oid = 'public.create_production_work_order(uuid,uuid,uuid,text,numeric,text,timestamptz,text)'::regprocedure),
+  'v2_function_owner',
+  'work order creation RPC has the dedicated function owner'
+);
+
+select ok(
+  has_function_privilege('authenticated', 'public.create_production_work_order(uuid,uuid,uuid,text,numeric,text,timestamptz,text)', 'EXECUTE'),
+  'authenticated callers can execute work order creation RPC'
+);
+
 select ok(
   has_table_privilege('v2_function_owner', 'public.progress_logs', 'INSERT')
   and has_table_privilege('v2_function_owner', 'public.production_tasks', 'UPDATE')
   and has_table_privilege('v2_function_owner', 'public.work_orders', 'UPDATE'),
   'RPC owner has only the write privileges required for atomic reporting'
+);
+
+select ok(
+  has_table_privilege('v2_function_owner', 'public.work_orders', 'INSERT')
+  and has_table_privilege('v2_function_owner', 'public.progress_logs', 'INSERT')
+  and has_table_privilege('v2_function_owner', 'public.orders', 'SELECT'),
+  'work order creation RPC owner has its precise table privileges'
 );
 
 select * from finish();

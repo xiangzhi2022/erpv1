@@ -52,6 +52,23 @@ function emptyClient() {
   };
 }
 
+function idempotencyHeaders(key = 'production-mutation-key') {
+  return { 'Idempotency-Key': key };
+}
+
+function claimedRpc(data: unknown) {
+  return vi.fn()
+    .mockResolvedValueOnce({
+      data: [{ outcome: 'claimed', response_status: null, response_body: null, claim_token: 'claim-1' }],
+      error: null,
+    })
+    .mockResolvedValueOnce({ data, error: null })
+    .mockResolvedValueOnce({
+      data: [{ outcome: 'completed', response_status: 200, response_body: { success: true } }],
+      error: null,
+    });
+}
+
 beforeEach(() => {
   vi.resetModules();
   vi.clearAllMocks();
@@ -82,12 +99,12 @@ describe('production API migration', () => {
   });
 
   it('assigns through the enterprise-scoped atomic RPC', async () => {
-    const rpc = vi.fn().mockResolvedValue({ data: { id: TASK_ID, status: 'assigned' }, error: null });
+    const rpc = claimedRpc({ id: TASK_ID, status: 'assigned' });
     mocks.createClient.mockResolvedValue({ rpc });
     const { PATCH } = await import('@/app/api/production/tasks/[id]/assign/route');
 
     const response = await PATCH(new Request(`https://erp.example.com/api/production/tasks/${TASK_ID}/assign`, {
-      method: 'PATCH', body: JSON.stringify({ assigned_worker_id: WORKER_ID }),
+      method: 'PATCH', headers: idempotencyHeaders(), body: JSON.stringify({ assigned_worker_id: WORKER_ID }),
     }), { params: Promise.resolve({ id: TASK_ID }) });
 
     expect(response.status).toBe(200);
@@ -97,18 +114,32 @@ describe('production API migration', () => {
     }));
   });
 
+  it('rejects an assign request without an idempotency key before invoking its RPC', async () => {
+    const rpc = vi.fn();
+    mocks.createClient.mockResolvedValue({ rpc });
+    const { PATCH } = await import('@/app/api/production/tasks/[id]/assign/route');
+
+    const response = await PATCH(new Request(`https://erp.example.com/api/production/tasks/${TASK_ID}/assign`, {
+      method: 'PATCH', body: JSON.stringify({ assigned_worker_id: WORKER_ID }),
+    }), { params: Promise.resolve({ id: TASK_ID }) });
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({ success: false, error: '缺少或无效的 Idempotency-Key' });
+    expect(rpc).not.toHaveBeenCalled();
+  });
+
   it.each([
     ['approve', '/approve', { action: 'approve' }, 'approve'],
     ['review', '/review', { action: 'approve' }, 'approve'],
     ['rework', '/rework', { action: 'rework' }, 'rework'],
     ['abnormal', '/abnormal', { action: 'abnormal' }, 'abnormal'],
   ])('handles %s through the atomic review RPC', async (name, suffix, body, action) => {
-    const rpc = vi.fn().mockResolvedValue({ data: { id: TASK_ID, status: 'completed' }, error: null });
+    const rpc = claimedRpc({ id: TASK_ID, status: 'completed' });
     mocks.createClient.mockResolvedValue({ rpc });
     const routeHandler = await reviewRouteLoaders[name as keyof typeof reviewRouteLoaders]();
 
     const response = await routeHandler.PATCH(new Request(`https://erp.example.com/api/production/tasks/${TASK_ID}${suffix}`, {
-      method: 'PATCH', body: JSON.stringify(body),
+      method: 'PATCH', headers: idempotencyHeaders(`${name}-key`), body: JSON.stringify(body),
     }), { params: Promise.resolve({ id: TASK_ID }) });
 
     expect(response.status).toBe(200);
@@ -118,12 +149,12 @@ describe('production API migration', () => {
   });
 
   it('edits a task through the whitelist RPC', async () => {
-    const rpc = vi.fn().mockResolvedValue({ data: { id: TASK_ID, task_name: '切割' }, error: null });
+    const rpc = claimedRpc({ id: TASK_ID, task_name: '切割' });
     mocks.createClient.mockResolvedValue({ rpc });
     const { PATCH } = await import('@/app/api/production/tasks/[id]/route');
 
     const response = await PATCH(new Request(`https://erp.example.com/api/production/tasks/${TASK_ID}`, {
-      method: 'PATCH', body: JSON.stringify({ task_name: '切割' }),
+      method: 'PATCH', headers: idempotencyHeaders(), body: JSON.stringify({ task_name: '切割' }),
     }), { params: Promise.resolve({ id: TASK_ID }) });
 
     expect(response.status).toBe(200);
@@ -136,11 +167,13 @@ describe('production API migration', () => {
     ['start', 'producing'],
     ['submit', 'submitted'],
   ])('lets a worker %s only through the self-transition RPC', async (action, nextStatus) => {
-    const rpc = vi.fn().mockResolvedValue({ data: { id: TASK_ID, status: nextStatus }, error: null });
+    const rpc = claimedRpc({ id: TASK_ID, status: nextStatus });
     mocks.createClient.mockResolvedValue({ rpc });
     const routeHandler = await workerTransitionRouteLoaders[action as keyof typeof workerTransitionRouteLoaders]();
 
-    const response = await routeHandler.PATCH(new Request(`https://erp.example.com/api/production/tasks/${TASK_ID}/${action}`, { method: 'PATCH' }), {
+    const response = await routeHandler.PATCH(new Request(`https://erp.example.com/api/production/tasks/${TASK_ID}/${action}`, {
+      method: 'PATCH', headers: idempotencyHeaders(`${action}-key`),
+    }), {
       params: Promise.resolve({ id: TASK_ID }),
     });
 
@@ -148,5 +181,24 @@ describe('production API migration', () => {
     expect(rpc).toHaveBeenCalledWith('transition_own_production_task', expect.objectContaining({
       p_enterprise_id: ENTERPRISE_ID, p_task_id: TASK_ID, p_action: action,
     }));
+  });
+
+  it('replays a worker start response without calling the business RPC', async () => {
+    const replay = { success: true, data: { id: TASK_ID, status: 'producing' } };
+    const rpc = vi.fn().mockResolvedValue({
+      data: [{ outcome: 'replay', response_status: 200, response_body: replay, claim_token: null }],
+      error: null,
+    });
+    mocks.createClient.mockResolvedValue({ rpc });
+    const { PATCH } = await import('@/app/api/production/tasks/[id]/start/route');
+
+    const response = await PATCH(new Request(`https://erp.example.com/api/production/tasks/${TASK_ID}/start`, {
+      method: 'PATCH', headers: idempotencyHeaders('start-replay-key'),
+    }), { params: Promise.resolve({ id: TASK_ID }) });
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual(replay);
+    expect(rpc).toHaveBeenCalledTimes(1);
+    expect(rpc).toHaveBeenCalledWith('claim_api_idempotency', expect.any(Object));
   });
 });

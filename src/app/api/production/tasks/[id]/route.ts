@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { isApiError } from '@/lib/api/errors';
+import { executeIdempotentMutation } from '@/lib/api/idempotency';
 import { parseJson, parseParams } from '@/lib/api/request';
 import { getEnterpriseContext, requirePermission } from '@/lib/enterprise/context';
 import { isEnterpriseAccessError } from '@/lib/enterprise/errors';
@@ -25,6 +26,7 @@ const patchSchema = z.object({
   remark: z.string().trim().max(2000).nullable().optional(),
   status: statusSchema.optional(),
 }).strict().refine((value) => Object.keys(value).length > 0, '没有可更新的任务字段');
+interface IdempotencyRpcClient { rpc(functionName: string, args: Record<string, unknown>): PromiseLike<{ data: unknown; error: unknown }>; }
 
 function jsonError(error: string, status: number) { return Response.json({ success: false, error }, { status }); }
 function errorResponse(error: unknown) {
@@ -41,15 +43,24 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
     const input = await parseJson(request, patchSchema);
     if (input.status) requirePermission(context, 'production.manage');
     const supabase = await createClient();
-    const { data, error } = await callProductionTaskRpc(supabase, 'edit_production_task', {
-      p_enterprise_id: context.enterpriseId,
-      p_task_id: id,
-      p_fields: input,
+    const rpc = (functionName: string, args: Record<string, unknown>) => (supabase as unknown as IdempotencyRpcClient).rpc(functionName, args);
+    return await executeIdempotentMutation({
+      request,
+      context,
+      input: { task_id: id, action: 'edit', body: input },
+      rpc,
+      execute: async () => {
+        const { data, error } = await callProductionTaskRpc(supabase, 'edit_production_task', {
+          p_enterprise_id: context.enterpriseId,
+          p_task_id: id,
+          p_fields: input,
+        });
+        if (error) {
+          const failure = productionRpcError(error, '更新生产任务失败');
+          return jsonError(failure.error, failure.status);
+        }
+        return Response.json({ success: true, data });
+      },
     });
-    if (error) {
-      const failure = productionRpcError(error, '更新生产任务失败');
-      return jsonError(failure.error, failure.status);
-    }
-    return Response.json({ success: true, data });
   } catch (error) { return errorResponse(error); }
 }

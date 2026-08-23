@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { NextResponse } from 'next/server';
 import { isApiError } from '@/lib/api/errors';
+import { executeIdempotentMutation } from '@/lib/api/idempotency';
 import { parseJson } from '@/lib/api/request';
 import { getEnterpriseContext, requirePermission } from '@/lib/enterprise/context';
 import { isEnterpriseAccessError } from '@/lib/enterprise/errors';
@@ -29,16 +30,25 @@ export async function POST(request: Request) {
     requirePermission(context, 'production.report.self');
     const input = await parseJson(request, reportSchema);
     const supabase = await createClient();
-    const { data, error } = await (supabase as unknown as AtomicRpcClient).rpc('report_work_order_progress', {
-      target_enterprise_id: context.enterpriseId,
-      target_work_order_id: input.work_order_id,
-      target_action: input.action,
-      target_completed_delta: input.completed_delta,
-      target_remark: input.remark ?? null,
+    const rpc = (functionName: string, args: Record<string, unknown>) => (supabase as unknown as AtomicRpcClient).rpc(functionName, args);
+    return await executeIdempotentMutation({
+      request,
+      context,
+      input,
+      rpc,
+      execute: async () => {
+        const { data, error } = await rpc('report_work_order_progress', {
+          target_enterprise_id: context.enterpriseId,
+          target_work_order_id: input.work_order_id,
+          target_action: input.action,
+          target_completed_delta: input.completed_delta,
+          target_remark: input.remark ?? null,
+        });
+        if (error) return rpcErrorResponse(error);
+        const result = reportResultSchema.safeParse(data);
+        if (!result.success) throw new Error('invalid_work_order_report_result');
+        return NextResponse.json({ success: true, data: result.data });
+      },
     });
-    if (error) return rpcErrorResponse(error);
-    const result = reportResultSchema.safeParse(data);
-    if (!result.success) throw new Error('invalid_work_order_report_result');
-    return NextResponse.json({ success: true, data: result.data });
   } catch (error) { return errorResponse(error); }
 }

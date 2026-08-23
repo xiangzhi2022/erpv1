@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
 import { isApiError } from '@/lib/api/errors';
+import { executeIdempotentMutation } from '@/lib/api/idempotency';
 import { parseJson, parseQuery } from '@/lib/api/request';
 import { getEnterpriseContext, requirePermission } from '@/lib/enterprise/context';
 import { isEnterpriseAccessError } from '@/lib/enterprise/errors';
@@ -21,6 +22,7 @@ const createSchema = z.object({
   if (input.scope_type === 'worker' && !input.worker_id) ctx.addIssue({ code: 'custom', path: ['worker_id'], message: '个人规则必须选择工人' });
   if (input.scope_type === 'position' && !input.position_id) ctx.addIssue({ code: 'custom', path: ['position_id'], message: '岗位规则必须选择岗位' });
 });
+interface RpcClient { rpc(functionName: string, args: Record<string, unknown>): PromiseLike<{ data: unknown; error: unknown }>; }
 
 async function scopeReferencesExist(supabase: Awaited<ReturnType<typeof createClient>>, enterpriseId: string, scopeType: z.infer<typeof scopeSchema>, workerId: string | null | undefined, positionId: string | null | undefined) {
   if (scopeType === 'worker' && workerId) {
@@ -68,16 +70,23 @@ export async function POST(request: Request) {
     requirePermission(context, 'wages.manage');
     const input = await parseJson(request, createSchema);
     const supabase = await createClient();
-    if (!await scopeReferencesExist(supabase, context.enterpriseId, input.scope_type, input.worker_id, input.position_id)) {
-      return NextResponse.json({ success: false, error: '适用的工人或岗位不属于当前企业' }, { status: 422 });
-    }
-    const { data, error } = await supabase.from('wage_rules').insert({
-      enterprise_id: context.enterpriseId, rule_name: input.rule_name, task_type: input.task_type, process_name: input.process_name ?? null,
-      unit: input.unit, unit_price: input.unit_price, calculation_method: input.calculation_method ?? 'by_piece', role_scope: input.role_scope ?? null,
-      scope_type: input.scope_type, worker_id: input.scope_type === 'worker' ? input.worker_id : null, position_id: input.scope_type === 'position' ? input.position_id : null,
-      product_type: input.product_type ?? null, extra_amount: input.extra_amount, enabled: input.enabled, created_by: context.userId, updated_at: new Date().toISOString(),
-    }).select().single();
-    if (error) throw error;
-    return NextResponse.json({ success: true, data }, { status: 201 });
+    const rpc = (functionName: string, args: Record<string, unknown>) => (supabase as unknown as RpcClient).rpc(functionName, args);
+    return await executeIdempotentMutation({
+      request, context, rpc,
+      input: { action: 'create_wage_rule', body: input },
+      execute: async () => {
+        if (!await scopeReferencesExist(supabase, context.enterpriseId, input.scope_type, input.worker_id, input.position_id)) {
+          return NextResponse.json({ success: false, error: '适用的工人或岗位不属于当前企业' }, { status: 422 });
+        }
+        const { data, error } = await supabase.from('wage_rules').insert({
+          enterprise_id: context.enterpriseId, rule_name: input.rule_name, task_type: input.task_type, process_name: input.process_name ?? null,
+          unit: input.unit, unit_price: input.unit_price, calculation_method: input.calculation_method ?? 'by_piece', role_scope: input.role_scope ?? null,
+          scope_type: input.scope_type, worker_id: input.scope_type === 'worker' ? input.worker_id : null, position_id: input.scope_type === 'position' ? input.position_id : null,
+          product_type: input.product_type ?? null, extra_amount: input.extra_amount, enabled: input.enabled, created_by: context.userId, updated_at: new Date().toISOString(),
+        }).select().single();
+        if (error) throw error;
+        return NextResponse.json({ success: true, data }, { status: 201 });
+      },
+    });
   } catch (error) { return errorResponse(error, '创建工资管理规则失败'); }
 }

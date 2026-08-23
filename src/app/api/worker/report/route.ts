@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { NextResponse } from 'next/server';
 import { isApiError } from '@/lib/api/errors';
+import { executeIdempotentMutation } from '@/lib/api/idempotency';
 import { parseJson } from '@/lib/api/request';
 import { getEnterpriseContext, requirePermission } from '@/lib/enterprise/context';
 import { isEnterpriseAccessError } from '@/lib/enterprise/errors';
@@ -29,15 +30,24 @@ export async function POST(request: Request) {
     requirePermission(context, 'production.report.self');
     const input = await parseJson(request, reportSchema);
     const supabase = await createClient();
-    const { data, error } = await (supabase as unknown as AtomicRpcClient).rpc('report_worker_task', {
-      target_enterprise_id: context.enterpriseId,
-      target_task_id: input.task_id,
-      target_action: input.action,
+    const rpc = (functionName: string, args: Record<string, unknown>) => (supabase as unknown as AtomicRpcClient).rpc(functionName, args);
+    return await executeIdempotentMutation({
+      request,
+      context,
+      input,
+      rpc,
+      execute: async () => {
+        const { data, error } = await rpc('report_worker_task', {
+          target_enterprise_id: context.enterpriseId,
+          target_task_id: input.task_id,
+          target_action: input.action,
+        });
+        if (error) return rpcErrorResponse(error);
+        const result = reportResultSchema.safeParse(data);
+        if (!result.success) throw new Error('invalid_worker_report_result');
+        return NextResponse.json({ success: true, message: result.data.message, status: result.data.status });
+      },
     });
-    if (error) return rpcErrorResponse(error);
-    const result = reportResultSchema.safeParse(data);
-    if (!result.success) throw new Error('invalid_worker_report_result');
-    return NextResponse.json({ success: true, message: result.data.message, status: result.data.status });
   } catch (error) {
     return errorResponse(error);
   }

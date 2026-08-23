@@ -42,10 +42,26 @@ drop policy if exists workers_select on public.workers;
 create policy workers_select on public.workers
 for select to authenticated
 using (
-  app_private.has_permission(enterprise_id, 'production.read')
-  and (
-    (workshop_id is null and app_private.has_enterprise_permission(enterprise_id, 'production.read'))
-    or app_private.can_access_workshop(enterprise_id, 'production.read', workshop_id)
+  (
+    app_private.has_permission(enterprise_id, 'members.read')
+    and (
+      (workshop_id is null and app_private.has_enterprise_permission(enterprise_id, 'members.read'))
+      or app_private.can_access_workshop(enterprise_id, 'members.read', workshop_id)
+    )
+  )
+  or (
+    app_private.has_permission(enterprise_id, 'production.read')
+    and (
+      (workshop_id is null and app_private.has_enterprise_permission(enterprise_id, 'production.read'))
+      or app_private.can_access_workshop(enterprise_id, 'production.read', workshop_id)
+    )
+  )
+  or (
+    app_private.has_permission(enterprise_id, 'wages.manage')
+    and (
+      (workshop_id is null and app_private.has_enterprise_permission(enterprise_id, 'wages.manage'))
+      or app_private.can_access_workshop(enterprise_id, 'wages.manage', workshop_id)
+    )
   )
 );
 
@@ -56,6 +72,11 @@ using (
   user_id = (select auth.uid())
   and app_private.is_active_member(enterprise_id)
 );
+
+drop policy if exists positions_wages_manage_select on public.positions;
+create policy positions_wages_manage_select on public.positions
+for select to authenticated
+using (app_private.has_enterprise_permission(enterprise_id, 'wages.manage'));
 
 drop policy if exists worker_wage_records_select on public.worker_wage_records;
 create policy worker_wage_records_select on public.worker_wage_records
@@ -74,9 +95,9 @@ using (
   )
 );
 
-grant select on table public.enterprise_memberships, public.workers, public.production_tasks, public.work_orders to v2_function_owner;
+grant select on table public.enterprise_memberships, public.orders, public.workers, public.production_tasks, public.work_orders to v2_function_owner;
 grant update on table public.production_tasks, public.work_orders to v2_function_owner;
-grant insert on table public.progress_logs to v2_function_owner;
+grant insert on table public.work_orders, public.progress_logs to v2_function_owner;
 
 create or replace function public.report_worker_task(
   target_enterprise_id uuid,
@@ -282,9 +303,102 @@ begin
 end;
 $$;
 
+create or replace function public.create_production_work_order(
+  target_enterprise_id uuid,
+  target_order_id uuid,
+  target_workshop_id uuid,
+  target_product_name text,
+  target_quantity numeric,
+  target_priority text,
+  target_expected_end_date timestamptz,
+  target_remark text default null
+)
+returns jsonb
+language plpgsql
+security definer
+set search_path = pg_catalog
+as $$
+declare
+  created_work_order public.work_orders%rowtype;
+  operator_display_name text;
+begin
+  if (select auth.uid()) is null then
+    raise exception using errcode = '28000', message = 'IDENTITY_REQUIRED';
+  end if;
+  if target_product_name is null or char_length(btrim(target_product_name)) not between 1 and 200 then
+    raise exception using errcode = '22023', message = 'INVALID_PRODUCT_NAME';
+  end if;
+  if target_quantity is null or target_quantity <= 0 or target_quantity <> trunc(target_quantity) then
+    raise exception using errcode = '22023', message = 'INVALID_TARGET_QUANTITY';
+  end if;
+  if target_priority is null or target_priority not in ('low', 'normal', 'high', 'urgent') then
+    raise exception using errcode = '22023', message = 'INVALID_PRIORITY';
+  end if;
+  if target_expected_end_date is not null and target_expected_end_date < date_trunc('day', now()) then
+    raise exception using errcode = '22023', message = 'INVALID_EXPECTED_END_DATE';
+  end if;
+  if target_remark is not null and char_length(btrim(target_remark)) > 500 then
+    raise exception using errcode = '22023', message = 'INVALID_REMARK';
+  end if;
+  if not app_private.has_permission(target_enterprise_id, 'production.plan') then
+    raise exception using errcode = '42501', message = 'PRODUCTION_PLAN_FORBIDDEN';
+  end if;
+  select membership.display_name into operator_display_name
+  from public.enterprise_memberships membership
+  where membership.tenant_id = target_enterprise_id
+    and membership.user_id = (select auth.uid())
+    and membership.status = 'active';
+  if operator_display_name is null then
+    raise exception using errcode = '42501', message = 'ACTIVE_MEMBERSHIP_REQUIRED';
+  end if;
+  if target_workshop_id is null then
+    if not app_private.has_enterprise_permission(target_enterprise_id, 'production.plan') then
+      raise exception using errcode = '42501', message = 'WORKSHOP_ACCESS_FORBIDDEN';
+    end if;
+  elsif not app_private.can_access_workshop(target_enterprise_id, 'production.plan', target_workshop_id) then
+    raise exception using errcode = '42501', message = 'WORKSHOP_ACCESS_FORBIDDEN';
+  end if;
+  if target_order_id is not null and not exists (
+    select 1
+    from public.orders order_row
+    where order_row.enterprise_id = target_enterprise_id
+      and order_row.id = target_order_id
+  ) then
+    raise exception using errcode = 'P0002', message = 'ORDER_NOT_FOUND';
+  end if;
+  insert into public.work_orders (
+    enterprise_id, order_id, workshop_id, product_name, target_quantity,
+    completed_quantity, status, priority, expected_end_date, remark
+  ) values (
+    target_enterprise_id, target_order_id, target_workshop_id, btrim(target_product_name), target_quantity,
+    0, 'pending', target_priority, target_expected_end_date, nullif(btrim(target_remark), '')
+  ) returning * into created_work_order;
+  insert into public.progress_logs (
+    enterprise_id, work_order_id, operator_id, operator_name, action, completed_delta, remark
+  ) values (
+    target_enterprise_id, created_work_order.id, (select auth.uid()), operator_display_name, 'start', 0, '工单创建'
+  );
+  return jsonb_build_object(
+    'id', created_work_order.id,
+    'order_id', created_work_order.order_id,
+    'workshop_id', created_work_order.workshop_id,
+    'product_name', created_work_order.product_name,
+    'target_quantity', created_work_order.target_quantity,
+    'completed_quantity', created_work_order.completed_quantity,
+    'status', created_work_order.status,
+    'priority', created_work_order.priority,
+    'expected_end_date', created_work_order.expected_end_date,
+    'remark', created_work_order.remark
+  );
+end;
+$$;
+
 alter function public.report_worker_task(uuid, uuid, text) owner to v2_function_owner;
 alter function public.report_work_order_progress(uuid, uuid, text, numeric, text) owner to v2_function_owner;
+alter function public.create_production_work_order(uuid, uuid, uuid, text, numeric, text, timestamptz, text) owner to v2_function_owner;
 revoke all on function public.report_worker_task(uuid, uuid, text) from public, anon, authenticated, service_role;
 revoke all on function public.report_work_order_progress(uuid, uuid, text, numeric, text) from public, anon, authenticated, service_role;
+revoke all on function public.create_production_work_order(uuid, uuid, uuid, text, numeric, text, timestamptz, text) from public, anon, authenticated, service_role;
 grant execute on function public.report_worker_task(uuid, uuid, text) to authenticated;
 grant execute on function public.report_work_order_progress(uuid, uuid, text, numeric, text) to authenticated;
+grant execute on function public.create_production_work_order(uuid, uuid, uuid, text, numeric, text, timestamptz, text) to authenticated;

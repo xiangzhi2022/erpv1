@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
 import { isApiError } from '@/lib/api/errors';
+import { executeIdempotentMutation } from '@/lib/api/idempotency';
 import { parseJson, parseParams } from '@/lib/api/request';
 import { getEnterpriseContext, requirePermission } from '@/lib/enterprise/context';
 import { isEnterpriseAccessError } from '@/lib/enterprise/errors';
@@ -18,6 +19,7 @@ const updatePricingSchema = z.object({
 }).refine((input) => Object.keys(input).length > 0, '没有需要更新的字段');
 
 interface RouteContext { params: Promise<{ id: string }>; }
+interface RpcClient { rpc(functionName: string, args: Record<string, unknown>): PromiseLike<{ data: unknown; error: unknown }>; }
 
 function errorResponse(error: unknown, message: string) {
   if (isEnterpriseAccessError(error) || isApiError(error)) {
@@ -34,18 +36,25 @@ export async function PATCH(request: Request, { params }: RouteContext) {
     const { id } = await parseParams(params, paramsSchema);
     const input = await parseJson(request, updatePricingSchema);
     const supabase = await createClient();
-    const { data, error } = await supabase.rpc('finance_update_order_pricing', {
-      target_enterprise_id: context.enterpriseId,
-      target_order_id: id,
-      target_total_amount: input.total_amount ?? null,
-      target_cost_amount: input.cost_amount ?? null,
-      target_profit_amount: input.profit_amount ?? null,
-      target_deposit_amount: input.deposit_amount ?? null,
+    const rpc = (functionName: string, args: Record<string, unknown>) => (supabase as unknown as RpcClient).rpc(functionName, args);
+    return await executeIdempotentMutation({
+      request, context, rpc,
+      input: { resource_id: id, action: 'update_finance_order_pricing', body: input },
+      execute: async () => {
+        const { data, error } = await supabase.rpc('finance_update_order_pricing', {
+          target_enterprise_id: context.enterpriseId,
+          target_order_id: id,
+          target_total_amount: input.total_amount ?? null,
+          target_cost_amount: input.cost_amount ?? null,
+          target_profit_amount: input.profit_amount ?? null,
+          target_deposit_amount: input.deposit_amount ?? null,
+        });
+        if (error) throw error;
+        const order = data?.[0];
+        if (!order) return NextResponse.json({ success: false, error: '订单不存在' }, { status: 404 });
+        return NextResponse.json({ success: true, data: order });
+      },
     });
-    if (error) throw error;
-    const order = data?.[0];
-    if (!order) return NextResponse.json({ success: false, error: '订单不存在' }, { status: 404 });
-    return NextResponse.json({ success: true, data: order });
   } catch (error) {
     return errorResponse(error, '更新财务价格失败');
   }

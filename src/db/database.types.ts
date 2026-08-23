@@ -2773,6 +2773,17 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      assign_production_task: {
+        Args: {
+          p_assigned_worker_id: string
+          p_enterprise_id: string
+          p_expected_status?: string | null
+          p_task_id: string
+          p_workshop_id?: string | null
+          p_workstation_id?: string | null
+        }
+        Returns: Json
+      }
       authorize_enterprise_selection: {
         Args: {
           caller_user_agent?: string
@@ -2786,6 +2797,47 @@ export type Database = {
           tenant_id: string
         }[]
       }
+      claim_api_idempotency: {
+        Args: {
+          target_enterprise_id: string
+          target_idempotency_key: string
+          target_request_hash: string
+        }
+        Returns: {
+          claim_token: string | null
+          outcome: string
+          response_body: Json | null
+          response_status: number | null
+        }[]
+      }
+      complete_api_idempotency: {
+        Args: {
+          completed_body: Json
+          completed_status: number
+          target_claim_token: string
+          target_enterprise_id: string
+          target_idempotency_key: string
+          target_request_hash: string
+        }
+        Returns: {
+          outcome: string
+          response_body: Json | null
+          response_status: number | null
+        }[]
+      }
+      create_production_work_order: {
+        Args: {
+          target_enterprise_id: string
+          target_expected_end_date: string | null
+          target_order_id: string | null
+          target_priority: string
+          target_product_name: string
+          target_quantity: number
+          target_remark?: string | null
+          target_workshop_id: string | null
+        }
+        Returns: Json
+      }
       current_enterprise_grants: {
         Args: { target_tenant_id: string }
         Returns: {
@@ -2794,6 +2846,15 @@ export type Database = {
           site_ids: string[]
           workshop_ids: string[]
         }[]
+      }
+      edit_production_task: {
+        Args: {
+          p_enterprise_id: string
+          p_expected_status?: string | null
+          p_fields: Json
+          p_task_id: string
+        }
+        Returns: Json
       }
       finance_manage_wage_record: {
         Args: {
@@ -2883,6 +2944,43 @@ export type Database = {
           enterprise_type: string
         }
         Returns: string
+      }
+      report_work_order_progress: {
+        Args: {
+          target_action: string
+          target_completed_delta: number
+          target_enterprise_id: string
+          target_remark?: string | null
+          target_work_order_id: string
+        }
+        Returns: Json
+      }
+      report_worker_task: {
+        Args: {
+          target_action: string
+          target_enterprise_id: string
+          target_task_id: string
+        }
+        Returns: Json
+      }
+      review_production_task: {
+        Args: {
+          p_action: string
+          p_enterprise_id: string
+          p_expected_status?: string | null
+          p_remark?: string | null
+          p_task_id: string
+        }
+        Returns: Json
+      }
+      transition_own_production_task: {
+        Args: {
+          p_action: string
+          p_enterprise_id: string
+          p_expected_status?: string | null
+          p_task_id: string
+        }
+        Returns: Json
       }
     }
     Enums: {
