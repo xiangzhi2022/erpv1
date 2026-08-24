@@ -301,7 +301,7 @@ begin
    where tenant_id = target_enterprise_id and user_id = target_user_id and status = 'active' for update;
   if member_id is null then raise exception 'active_member_not_found'; end if;
   if (select count(*) from public.roles where tenant_id = target_enterprise_id and id = any(coalesce(target_role_ids, array[]::uuid[])))
-     <> pg_catalog.coalesce(pg_catalog.array_length(target_role_ids, 1), 0) then
+     <> coalesce(pg_catalog.array_length(target_role_ids, 1), 0) then
     raise exception 'role_not_found';
   end if;
   target_is_owner := app_private.membership_is_enterprise_owner(target_enterprise_id, member_id);

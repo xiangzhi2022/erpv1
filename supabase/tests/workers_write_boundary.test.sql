@@ -129,24 +129,35 @@ select lives_ok(
   'enterprise manager can manage unassigned and workshop workers'
 );
 
-select set_eq(
+select lives_ok(
   $$update public.workers
     set workshop_id = '84000000-0000-4000-8000-000000000401'
-    where worker_no = 'ENTERPRISE-INSERT-B'
-    returning workshop_id$$,
-  $$values ('84000000-0000-4000-8000-000000000401'::uuid)$$,
+    where worker_no = 'ENTERPRISE-INSERT-B'$$,
   'enterprise manager can move workers between workshops'
 );
 
-select set_eq(
+reset role;
+select results_eq(
+  $$select workshop_id from public.workers
+    where worker_no = 'ENTERPRISE-INSERT-B'$$,
+  $$values ('84000000-0000-4000-8000-000000000401'::uuid)$$,
+  'the enterprise-level worker move persists'
+);
+set local role authenticated;
+
+select lives_ok(
   $$delete from public.workers
-    where worker_no in ('ENTERPRISE-INSERT-NULL', 'ENTERPRISE-INSERT-B')
-    returning worker_no$$,
-  $$values ('ENTERPRISE-INSERT-NULL'::text), ('ENTERPRISE-INSERT-B'::text)$$,
+    where worker_no in ('ENTERPRISE-INSERT-NULL', 'ENTERPRISE-INSERT-B')$$,
   'enterprise manager can delete unassigned and workshop workers'
 );
 
 reset role;
+
+select is_empty(
+  $$select worker_no from public.workers
+    where worker_no in ('ENTERPRISE-INSERT-NULL', 'ENTERPRISE-INSERT-B')$$,
+  'the enterprise-level worker deletions persist'
+);
 
 select * from finish();
 rollback;

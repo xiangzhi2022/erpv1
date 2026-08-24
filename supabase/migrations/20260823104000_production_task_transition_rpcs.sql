@@ -2,6 +2,18 @@
 -- status change and its audit entry so authenticated callers never need broad
 -- table UPDATE or orders.update grants for routine production work.
 
+do $$
+begin
+  if exists (
+    select 1 from pg_catalog.pg_roles where rolname = 'v2_function_owner'
+  ) then
+    execute 'alter group v2_function_owner add user postgres';
+  end if;
+end;
+$$;
+
+grant create on schema public to v2_function_owner;
+
 grant select, update on public.production_tasks to v2_function_owner;
 grant select on public.workers to v2_function_owner;
 grant select on public.workstations to v2_function_owner;
@@ -340,6 +352,8 @@ grant execute on function public.assign_production_task(uuid, uuid, uuid, uuid, 
 grant execute on function public.transition_own_production_task(uuid, uuid, text, text) to authenticated;
 grant execute on function public.review_production_task(uuid, uuid, text, text, text) to authenticated;
 grant execute on function public.edit_production_task(uuid, uuid, jsonb, text) to authenticated;
+
+revoke create on schema public from v2_function_owner;
 
 do $$
 begin

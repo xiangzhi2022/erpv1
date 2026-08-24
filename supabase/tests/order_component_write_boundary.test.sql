@@ -10,6 +10,12 @@ select ok(
   'authenticated callers cannot execute the order-tree-only product helper'
 );
 
+select ok(
+  has_table_privilege('v2_function_owner', 'public.order_modules', 'SELECT')
+  and has_table_privilege('v2_function_owner', 'public.order_modules', 'UPDATE'),
+  'component RPC owner can lock modules while authenticated callers cannot update them directly'
+);
+
 insert into public.enterprises (id, code, name, enterprise_type) values
   ('79000000-0000-4000-8000-000000000001', 'component-write', 'Component Write', 'manufacturer');
 insert into auth.users (id, email, created_at, updated_at) values

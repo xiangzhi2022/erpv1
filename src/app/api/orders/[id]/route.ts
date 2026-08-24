@@ -318,7 +318,7 @@ export async function PATCH(
         target_enterprise_id: context.enterpriseId,
         target_order_id: id,
         target_action: 'withdraw',
-        target_message: typeof body.notes === 'string' ? body.notes : null,
+        target_message: body.notes,
       });
       if (transitionError) {
         console.error('order_detail.withdraw_exchange_failed', { code: transitionError.code });
@@ -383,10 +383,10 @@ export async function PATCH(
       const { data: pricingRows, error: pricingError } = await supabase.rpc('finance_update_order_pricing', {
         target_enterprise_id: context.enterpriseId,
         target_order_id: id,
-        target_total_amount: body.total_amount ?? null,
-        target_cost_amount: body.cost_amount ?? null,
-        target_profit_amount: body.profit_amount ?? null,
-        target_deposit_amount: body.deposit_amount ?? null,
+        target_total_amount: body.total_amount,
+        target_cost_amount: body.cost_amount,
+        target_profit_amount: body.profit_amount,
+        target_deposit_amount: body.deposit_amount,
       });
       if (pricingError || !pricingRows?.[0]) {
         console.error('order_detail.pricing_update_failed', { code: pricingError?.code });

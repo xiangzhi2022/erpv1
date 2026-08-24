@@ -236,7 +236,7 @@ select throws_ok(
 
 select results_eq(
   $$
-    select value ->> 'order_flow' || ':' || value ->> 'from_enterprise_id'
+    select (value ->> 'order_flow') || ':' || (value ->> 'from_enterprise_id')
     from public.create_basic_order(
       '71000000-0000-4000-8000-000000000001',
       '{

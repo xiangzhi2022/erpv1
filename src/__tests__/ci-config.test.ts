@@ -95,7 +95,7 @@ describe('GitHub Actions production-safety gates', () => {
     const { database } = loadWorkflow().jobs;
     const databaseCommands = commands(database);
     const cleanup = database.steps.find(
-      (step) => step.run === 'pnpm db:stop -- --no-backup',
+      (step) => step.run === 'pnpm db:stop --no-backup',
     );
 
     expect(databaseCommands).toEqual(expect.arrayContaining([
@@ -106,6 +106,7 @@ describe('GitHub Actions production-safety gates', () => {
       'pnpm db:types:check',
     ]));
     expect(cleanup?.if).toBe('${{ always() }}');
+    expect(databaseCommands).not.toContain('pnpm db:stop -- --no-backup');
   });
 
   it('contains no production project reference, secret context, or remote database command', () => {

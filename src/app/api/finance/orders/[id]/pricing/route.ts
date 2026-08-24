@@ -44,10 +44,10 @@ export async function PATCH(request: Request, { params }: RouteContext) {
         const { data, error } = await supabase.rpc('finance_update_order_pricing', {
           target_enterprise_id: context.enterpriseId,
           target_order_id: id,
-          target_total_amount: input.total_amount ?? null,
-          target_cost_amount: input.cost_amount ?? null,
-          target_profit_amount: input.profit_amount ?? null,
-          target_deposit_amount: input.deposit_amount ?? null,
+          ...(input.total_amount === undefined ? {} : { target_total_amount: input.total_amount }),
+          ...(input.cost_amount === undefined ? {} : { target_cost_amount: input.cost_amount }),
+          ...(input.profit_amount === undefined ? {} : { target_profit_amount: input.profit_amount }),
+          ...(input.deposit_amount === undefined ? {} : { target_deposit_amount: input.deposit_amount }),
         });
         if (error) throw error;
         const order = data?.[0];

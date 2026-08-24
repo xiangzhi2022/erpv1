@@ -178,6 +178,8 @@ select throws_ok(
   'invalid status reset rejects the complete basic-order update'
 );
 
+reset role;
+
 select results_eq(
   $$
     select order_no || ':' || customer_name

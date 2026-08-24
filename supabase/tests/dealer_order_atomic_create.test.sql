@@ -61,6 +61,8 @@ select lives_ok(
   'orders.create alone can atomically create a dealer order and its items'
 );
 
+reset role;
+
 select results_eq(
   $$
     select order_row.total_amount, count(item_row.id), sum(item_row.subtotal)
@@ -90,6 +92,8 @@ select results_eq(
   'each item stores an integer-cent unit price and subtotal'
 );
 
+set local role authenticated;
+
 select throws_ok(
   $$
     select public.create_dealer_order_with_items(
@@ -116,6 +120,8 @@ select throws_ok(
   'a child insert failure aborts the complete dealer order transaction'
 );
 
+reset role;
+
 select is(
   (
     select count(*)
@@ -126,8 +132,6 @@ select is(
   0::bigint,
   'a failed item insert leaves no parent order behind'
 );
-
-reset role;
 
 select * from finish();
 rollback;

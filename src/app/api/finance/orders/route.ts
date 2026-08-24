@@ -24,7 +24,7 @@ export async function GET(request: Request) {
     const supabase = await createClient();
     const { data, error } = await supabase.rpc('finance_list_order_summaries', {
       target_enterprise_id: context.enterpriseId,
-      target_status: filters.status && filters.status !== 'all' ? filters.status : null,
+      ...(filters.status && filters.status !== 'all' ? { target_status: filters.status } : {}),
     });
     if (error) throw error;
     return NextResponse.json({ success: true, data });

@@ -108,8 +108,8 @@ select results_eq(
 );
 
 insert into public.enterprises (id, code, name, enterprise_type) values
-  ('41000000-0000-4000-8000-000000000001', 'write-boundary-a', 'Write boundary A', 'manufacturer'),
-  ('42000000-0000-4000-8000-000000000002', 'write-boundary-b', 'Write boundary B', 'dealer');
+  ('41000000-0000-4000-8000-000000000001', 'write-boundary-a', 'Write boundary A', 'dealer'),
+  ('42000000-0000-4000-8000-000000000002', 'write-boundary-b', 'Write boundary B', 'manufacturer');
 
 insert into auth.users (id, email, created_at, updated_at) values
   ('41000000-0000-4000-8000-000000000011', 'write-a@example.invalid', now(), now()),
@@ -135,13 +135,18 @@ insert into public.role_bindings (tenant_id, role_id, membership_id, scope_kind)
   ('42000000-0000-4000-8000-000000000002', '42000000-0000-4000-8000-000000000202', '42000000-0000-4000-8000-000000000102', 'enterprise');
 
 insert into public.orders (
-  id, enterprise_id, order_no, customer_name, total_amount
+  id, enterprise_id, order_no, customer_name, total_amount, order_flow,
+  from_enterprise_id, to_enterprise_id, target_factory_id
 ) values (
   '41000000-0000-4000-8000-000000000301',
   '41000000-0000-4000-8000-000000000001',
   'WRITE-BOUNDARY-1',
   'Original customer',
-  100
+  100,
+  'dealer_to_factory',
+  '41000000-0000-4000-8000-000000000001',
+  '42000000-0000-4000-8000-000000000002',
+  '42000000-0000-4000-8000-000000000002'
 );
 
 select set_config('request.jwt.claim.sub', '41000000-0000-4000-8000-000000000011', true);

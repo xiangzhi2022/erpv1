@@ -793,6 +793,13 @@ export type Database = {
             referencedRelation: "tasks"
             referencedColumns: ["enterprise_id", "id"]
           },
+          {
+            foreignKeyName: "notifications_recipient_membership_fk"
+            columns: ["enterprise_id", "recipient_id"]
+            isOneToOne: false
+            referencedRelation: "enterprise_memberships"
+            referencedColumns: ["tenant_id", "user_id"]
+          },
         ]
       }
       order_exchanges: {
@@ -2287,7 +2294,14 @@ export type Database = {
         }
         Relationships: [
           {
-            foreignKeyName: "tasks_enterprise_id_category_id_fkey"
+            foreignKeyName: "tasks_assignee_membership_fk"
+            columns: ["enterprise_id", "assignee_id"]
+            isOneToOne: false
+            referencedRelation: "enterprise_memberships"
+            referencedColumns: ["tenant_id", "user_id"]
+          },
+          {
+            foreignKeyName: "tasks_category_enterprise_fk"
             columns: ["enterprise_id", "category_id"]
             isOneToOne: false
             referencedRelation: "categories"
@@ -2777,10 +2791,10 @@ export type Database = {
         Args: {
           p_assigned_worker_id: string
           p_enterprise_id: string
-          p_expected_status?: string | null
+          p_expected_status?: string
           p_task_id: string
-          p_workshop_id?: string | null
-          p_workstation_id?: string | null
+          p_workshop_id?: string
+          p_workstation_id?: string
         }
         Returns: Json
       }
@@ -2804,10 +2818,10 @@ export type Database = {
           target_request_hash: string
         }
         Returns: {
-          claim_token: string | null
+          claim_token: string
           outcome: string
-          response_body: Json | null
-          response_status: number | null
+          response_body: Json
+          response_status: number
         }[]
       }
       complete_api_idempotency: {
@@ -2821,25 +2835,42 @@ export type Database = {
         }
         Returns: {
           outcome: string
-          response_body: Json | null
-          response_status: number | null
+          response_body: Json
+          response_status: number
         }[]
-      }
-      consume_recovery_proof: {
-        Args: { target_nonce_hash: string }
-        Returns: boolean
-      }
-      consume_recovery_flow: {
-        Args: { target_email_hash: string; target_nonce_hash: string }
-        Returns: boolean
       }
       confirm_order_task_drafts: {
         Args: {
           target_enterprise_id: string
           target_expected_status: string
           target_order_id: string
-          target_remark?: string | null
+          target_remark?: string
         }
+        Returns: Json
+      }
+      consume_api_rate_limit: {
+        Args: {
+          target_bucket: string
+          target_identifier_hash: string
+          target_limit: number
+          target_window_seconds: number
+        }
+        Returns: {
+          allowed: boolean
+          remaining: number
+          retry_after_seconds: number
+        }[]
+      }
+      consume_recovery_flow: {
+        Args: { target_email_hash: string; target_nonce_hash: string }
+        Returns: boolean
+      }
+      consume_recovery_proof: {
+        Args: { target_nonce_hash: string }
+        Returns: boolean
+      }
+      create_basic_order: {
+        Args: { target_enterprise_id: string; target_order: Json }
         Returns: Json
       }
       create_dealer_order_with_items: {
@@ -2850,25 +2881,14 @@ export type Database = {
         }
         Returns: Json
       }
-      create_basic_order: {
-        Args: {
-          target_enterprise_id: string
-          target_order: Json
-        }
-        Returns: Json
-      }
-      delete_order_component: {
-        Args: {
-          target_enterprise_id: string
-          target_id: string
-          target_type: string
-        }
+      create_enterprise_join_request: {
+        Args: { target_enterprise_id: string; target_message: string }
         Returns: Json
       }
       create_enterprise_role: {
         Args: {
           target_code: string
-          target_description: string | null
+          target_description: string
           target_enterprise_id: string
           target_name: string
         }
@@ -2877,12 +2897,32 @@ export type Database = {
       create_order_exchange: {
         Args: {
           target_from_enterprise_id: string
-          target_message?: string | null
+          target_message?: string
           target_order_id: string
-          target_proposed_changes?: Json | null
+          target_proposed_changes?: Json
           target_to_enterprise_id: string
         }
-        Returns: Database["public"]["Tables"]["order_exchanges"]["Row"][]
+        Returns: {
+          created_at: string
+          enterprise_id: string
+          from_enterprise_id: string
+          from_user_id: string
+          handled_at: string | null
+          handled_by: string | null
+          id: string
+          message: string | null
+          order_id: string
+          proposed_changes: Json | null
+          status: string
+          to_enterprise_id: string
+          updated_at: string
+        }[]
+        SetofOptions: {
+          from: "*"
+          to: "order_exchanges"
+          isOneToOne: false
+          isSetofReturn: true
+        }
       }
       create_order_item_with_pricing: {
         Args: {
@@ -2890,7 +2930,39 @@ export type Database = {
           target_item: Json
           target_order_id: string
         }
-        Returns: Database["public"]["Tables"]["order_items"]["Row"][]
+        Returns: {
+          color: string | null
+          construction_surface: string | null
+          created_at: string
+          enterprise_id: string
+          forming_craft: string | null
+          hardware: string | null
+          hardware_quantity: number | null
+          id: string
+          item_no: string | null
+          length_mm: number | null
+          module_id: string | null
+          order_id: string
+          painting_craft: string | null
+          product_name: string
+          quantity: number
+          remark: string | null
+          sort_order: number
+          specifications: string | null
+          subtotal: number
+          thickness_mm: number | null
+          unit: string
+          unit_price: number
+          updated_at: string
+          width_mm: number | null
+          woodworking_craft: string | null
+        }[]
+        SetofOptions: {
+          from: "*"
+          to: "order_items"
+          isOneToOne: false
+          isSetofReturn: true
+        }
       }
       create_order_product_with_pricing: {
         Args: {
@@ -2898,30 +2970,44 @@ export type Database = {
           target_order_id: string
           target_product: Json
         }
-        Returns: Database["public"]["Tables"]["order_products"]["Row"][]
+        Returns: {
+          area: number | null
+          color: string | null
+          cost_amount: number
+          created_at: string
+          depth: number | null
+          enterprise_id: string
+          height: number | null
+          id: string
+          internal_remark: string | null
+          material: string | null
+          order_id: string
+          product_model: string | null
+          product_name: string
+          product_no: string
+          product_type: string
+          profit_amount: number
+          quantity: number
+          quoted_amount: number
+          remark: string | null
+          sort_order: number
+          space_id: string
+          status: string
+          updated_at: string
+          width: number | null
+        }[]
+        SetofOptions: {
+          from: "*"
+          to: "order_products"
+          isOneToOne: false
+          isSetofReturn: true
+        }
       }
       create_order_space: {
         Args: {
           target_enterprise_id: string
           target_order_id: string
           target_space: Json
-        }
-        Returns: Json
-      }
-      create_enterprise_join_request: {
-        Args: { target_enterprise_id: string; target_message: string | null }
-        Returns: Json
-      }
-      create_production_work_order: {
-        Args: {
-          target_enterprise_id: string
-          target_expected_end_date: string | null
-          target_order_id: string | null
-          target_priority: string
-          target_product_name: string
-          target_quantity: number
-          target_remark?: string | null
-          target_workshop_id: string | null
         }
         Returns: Json
       }
@@ -2933,91 +3019,32 @@ export type Database = {
         }
         Returns: Json
       }
-      handle_enterprise_join_request: {
+      create_production_work_order: {
         Args: {
-          target_action: string
-          target_reason: string | null
-          target_request_id: string
+          target_enterprise_id: string
+          target_expected_end_date: string
+          target_order_id: string
+          target_priority: string
+          target_product_name: string
+          target_quantity: number
+          target_remark?: string
+          target_workshop_id: string
         }
         Returns: Json
       }
-      list_enterprise_join_requests: {
-        Args: { target_enterprise_id: string | null; target_status: string }
-        Returns: Json
-      }
-      register_recovery_proof: {
-        Args: { target_expires_at: string; target_nonce_hash: string }
-        Returns: undefined
-      }
-      register_recovery_flow: {
-        Args: {
-          target_email_hash: string
-          target_expires_at: string
-          target_nonce_hash: string
-        }
-        Returns: undefined
-      }
-      remove_enterprise_member: {
-        Args: { target_enterprise_id: string; target_user_id: string }
-        Returns: undefined
-      }
-      replace_employee_role_bindings: {
+      create_task_notification: {
         Args: {
           target_enterprise_id: string
-          target_role_ids: string[]
-          target_user_id: string
-        }
-        Returns: undefined
-      }
-      save_employee_with_relations: {
-        Args: {
-          target_employee_id: string | null
-          target_enterprise_id: string
-          target_fields: Json
-          target_position_ids: string[]
-          target_primary_position_id: string | null
-          target_role_ids: string[]
-          target_user_id: string | null
+          target_message?: string
+          target_recipient_id: string
+          target_task_id: string
+          target_title: string
+          target_type: string
         }
         Returns: Json
       }
-      set_enterprise_role_permissions: {
-        Args: {
-          target_enterprise_id: string
-          target_permission_codes: string[]
-          target_role_id: string
-        }
-        Returns: string[]
-      }
-      delete_employee_with_access: {
-        Args: {
-          target_employee_id: string
-          target_enterprise_id: string
-          target_hard_delete: boolean
-        }
-        Returns: Json
-      }
-      update_enterprise_member: {
-        Args: {
-          target_display_name: string | null
-          target_enterprise_id: string
-          target_role_id: string | null
-          target_status: string | null
-          target_user_id: string
-        }
-        Returns: Json
-      }
-      update_enterprise_role: {
-        Args: {
-          target_code: string | null
-          target_description: string | null
-          target_enterprise_id: string
-          target_name: string | null
-          target_role_id: string
-          update_code: boolean
-          update_description: boolean
-          update_name: boolean
-        }
+      create_task_with_notification: {
+        Args: { target_enterprise_id: string; task_fields: Json }
         Returns: Json
       }
       current_enterprise_grants: {
@@ -3029,33 +3056,42 @@ export type Database = {
           workshop_ids: string[]
         }[]
       }
+      delete_employee_with_access: {
+        Args: {
+          target_employee_id: string
+          target_enterprise_id: string
+          target_hard_delete: boolean
+        }
+        Returns: Json
+      }
+      delete_order_component: {
+        Args: {
+          target_enterprise_id: string
+          target_id: string
+          target_type: string
+        }
+        Returns: Json
+      }
       edit_production_task: {
         Args: {
           p_enterprise_id: string
-          p_expected_status?: string | null
+          p_expected_status?: string
           p_fields: Json
           p_task_id: string
         }
         Returns: Json
       }
-      finance_manage_wage_record: {
-        Args: {
-          target_enterprise_id: string
-          target_expected_status: string
-          target_quantity?: number | null
-          target_record_id: string
-          target_status: string
-          target_unit_price?: number | null
-          target_wage_amount?: number | null
-        }
+      finance_list_order_item_amounts: {
+        Args: { target_enterprise_id: string; target_order_ids: string[] }
         Returns: {
           id: string
-          status: string
-          updated_at: string
+          order_id: string
+          subtotal: number
+          unit_price: number
         }[]
       }
       finance_list_order_summaries: {
-        Args: { target_enterprise_id: string; target_status?: string | null }
+        Args: { target_enterprise_id: string; target_status?: string }
         Returns: {
           cost_amount: number
           created_at: string
@@ -3074,26 +3110,13 @@ export type Database = {
           updated_at: string
         }[]
       }
-      finance_list_order_item_amounts: {
-        Args: { target_enterprise_id: string; target_order_ids: string[] }
-        Returns: {
-          id: string
-          order_id: string
-          subtotal: number
-          unit_price: number
-        }[]
-      }
-      finance_read_order_details: {
-        Args: { target_enterprise_id: string; target_order_id: string }
-        Returns: Json
-      }
       finance_list_settlements: {
         Args: { target_enterprise_id: string }
         Returns: {
-          approved_at: string | null
+          approved_at: string
           created_at: string
           id: string
-          paid_at: string | null
+          paid_at: string
           status: string
           wage_amount: number
           worker: Json
@@ -3103,8 +3126,8 @@ export type Database = {
       finance_list_wages: {
         Args: {
           target_enterprise_id: string
-          target_status?: string | null
-          target_worker_id?: string | null
+          target_status?: string
+          target_worker_id?: string
         }
         Returns: {
           created_at: string
@@ -3117,6 +3140,22 @@ export type Database = {
           worker_id: string
         }[]
       }
+      finance_manage_wage_record: {
+        Args: {
+          target_enterprise_id: string
+          target_expected_status: string
+          target_quantity?: number
+          target_record_id: string
+          target_status: string
+          target_unit_price?: number
+          target_wage_amount?: number
+        }
+        Returns: {
+          id: string
+          status: string
+          updated_at: string
+        }[]
+      }
       finance_pay_wage_record: {
         Args: { target_enterprise_id: string; target_record_id: string }
         Returns: {
@@ -3124,6 +3163,10 @@ export type Database = {
           status: string
           updated_at: string
         }[]
+      }
+      finance_read_order_details: {
+        Args: { target_enterprise_id: string; target_order_id: string }
+        Returns: Json
       }
       finance_settle_wage_records: {
         Args: { target_enterprise_id: string; target_record_ids: string[] }
@@ -3133,45 +3176,80 @@ export type Database = {
           updated_at: string
         }[]
       }
-      finance_update_order_pricing: {
-        Args: {
-          target_cost_amount?: number | null
-          target_deposit_amount?: number | null
-          target_enterprise_id: string
-          target_order_id: string
-          target_profit_amount?: number | null
-          target_total_amount?: number | null
-        }
-        Returns: { id: string }[]
-      }
       finance_update_order_item_pricing: {
         Args: {
           target_enterprise_id: string
           target_order_item_id: string
-          target_subtotal?: number | null
-          target_unit_price?: number | null
+          target_subtotal?: number
+          target_unit_price?: number
         }
-        Returns: { id: string }[]
+        Returns: {
+          id: string
+        }[]
+      }
+      finance_update_order_pricing: {
+        Args: {
+          target_cost_amount?: number
+          target_deposit_amount?: number
+          target_enterprise_id: string
+          target_order_id: string
+          target_profit_amount?: number
+          target_total_amount?: number
+        }
+        Returns: {
+          id: string
+        }[]
       }
       finance_update_order_product: {
         Args: {
-          target_cost_amount?: number | null
+          target_cost_amount?: number
           target_enterprise_id: string
-          target_internal_remark?: string | null
+          target_internal_remark?: string
           target_product_id: string
-          target_profit_amount?: number | null
-          target_quoted_amount?: number | null
+          target_profit_amount?: number
+          target_quoted_amount?: number
           update_internal_remark?: boolean
         }
-        Returns: { id: string }[]
+        Returns: {
+          id: string
+        }[]
       }
-      wages_read_order_task_amounts: {
-        Args: { target_enterprise_id: string; target_order_id: string }
+      handle_enterprise_join_request: {
+        Args: {
+          target_action: string
+          target_reason: string
+          target_request_id: string
+        }
         Returns: Json
       }
-      wages_read_employee_base_salaries: {
+      list_enterprise_join_requests: {
+        Args: { target_enterprise_id: string; target_status: string }
+        Returns: Json
+      }
+      mark_all_notifications_read: {
         Args: { target_enterprise_id: string }
-        Returns: Json
+        Returns: number
+      }
+      mark_notification_read: {
+        Args: { target_enterprise_id: string; target_notification_id: string }
+        Returns: {
+          created_at: string
+          enterprise_id: string
+          id: string
+          message: string | null
+          read: boolean
+          recipient_id: string | null
+          task_id: string | null
+          title: string
+          type: string
+          updated_at: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "notifications"
+          isOneToOne: true
+          isSetofReturn: false
+        }
       }
       onboard_enterprise: {
         Args: {
@@ -3181,12 +3259,36 @@ export type Database = {
         }
         Returns: string
       }
+      register_recovery_flow: {
+        Args: {
+          target_email_hash: string
+          target_expires_at: string
+          target_nonce_hash: string
+        }
+        Returns: undefined
+      }
+      register_recovery_proof: {
+        Args: { target_expires_at: string; target_nonce_hash: string }
+        Returns: undefined
+      }
+      remove_enterprise_member: {
+        Args: { target_enterprise_id: string; target_user_id: string }
+        Returns: undefined
+      }
+      replace_employee_role_bindings: {
+        Args: {
+          target_enterprise_id: string
+          target_role_ids: string[]
+          target_user_id: string
+        }
+        Returns: undefined
+      }
       report_work_order_progress: {
         Args: {
           target_action: string
           target_completed_delta: number
           target_enterprise_id: string
-          target_remark?: string | null
+          target_remark?: string
           target_work_order_id: string
         }
         Returns: Json
@@ -3203,19 +3305,86 @@ export type Database = {
         Args: {
           p_action: string
           p_enterprise_id: string
-          p_expected_status?: string | null
-          p_remark?: string | null
+          p_expected_status?: string
+          p_remark?: string
           p_task_id: string
         }
         Returns: Json
       }
-      transition_order_status: {
+      save_employee_with_relations: {
+        Args: {
+          target_employee_id: string
+          target_enterprise_id: string
+          target_fields: Json
+          target_position_ids: string[]
+          target_primary_position_id: string
+          target_role_ids: string[]
+          target_user_id: string
+        }
+        Returns: Json
+      }
+      save_order_tree: {
+        Args: {
+          target_enterprise_id: string
+          target_existing_order_id: string
+          target_order: Json
+        }
+        Returns: Json
+      }
+      set_enterprise_role_permissions: {
+        Args: {
+          target_enterprise_id: string
+          target_permission_codes: string[]
+          target_role_id: string
+        }
+        Returns: string[]
+      }
+      toggle_task: {
+        Args: {
+          expected_completed: boolean
+          target_enterprise_id: string
+          target_task_id: string
+        }
+        Returns: {
+          assignee_avatar: string | null
+          assignee_id: string | null
+          assignee_name: string | null
+          category_id: string | null
+          completed: boolean
+          created_at: string
+          description: string | null
+          due_date: string | null
+          enterprise_id: string
+          id: string
+          priority: number
+          status: string
+          title: string
+          updated_at: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "tasks"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      transition_order_component_status: {
         Args: {
           target_enterprise_id: string
           target_expected_status: string
-          target_order_id: string
-          target_remark?: string | null
+          target_id: string
+          target_remark?: string
           target_status: string
+          target_type: string
+        }
+        Returns: Json
+      }
+      transition_order_exchange: {
+        Args: {
+          target_action: string
+          target_exchange_id: string
+          target_message?: string
+          target_proposed_changes?: Json
         }
         Returns: {
           id: string
@@ -3227,46 +3396,40 @@ export type Database = {
         Args: {
           target_action: string
           target_enterprise_id: string
-          target_message?: string | null
+          target_message?: string
           target_order_id: string
         }
         Returns: number
+      }
+      transition_order_status: {
+        Args: {
+          target_enterprise_id: string
+          target_expected_status: string
+          target_order_id: string
+          target_remark?: string
+          target_status: string
+        }
+        Returns: {
+          id: string
+          status: string
+          updated_at: string
+        }[]
       }
       transition_order_status_with_exchanges: {
         Args: {
           target_enterprise_id: string
           target_expected_status: string
           target_order_id: string
-          target_remark?: string | null
+          target_remark?: string
           target_status: string
         }
         Returns: Json
-      }
-      transition_order_component_status: {
-        Args: {
-          target_enterprise_id: string
-          target_expected_status: string
-          target_id: string
-          target_remark?: string | null
-          target_status: string
-          target_type: string
-        }
-        Returns: Json
-      }
-      transition_order_exchange: {
-        Args: {
-          target_action: string
-          target_exchange_id: string
-          target_message?: string | null
-          target_proposed_changes?: Json | null
-        }
-        Returns: { id: string; status: string; updated_at: string }[]
       }
       transition_own_production_task: {
         Args: {
           p_action: string
           p_enterprise_id: string
-          p_expected_status?: string | null
+          p_expected_status?: string
           p_task_id: string
         }
         Returns: Json
@@ -3279,13 +3442,28 @@ export type Database = {
         }
         Returns: Json
       }
-      update_order_internal_remark: {
+      update_enterprise_member: {
         Args: {
+          target_display_name: string
           target_enterprise_id: string
-          target_internal_remark: string | null
-          target_order_id: string
+          target_role_id: string
+          target_status: string
+          target_user_id: string
         }
-        Returns: { id: string }[]
+        Returns: Json
+      }
+      update_enterprise_role: {
+        Args: {
+          target_code: string
+          target_description: string
+          target_enterprise_id: string
+          target_name: string
+          target_role_id: string
+          update_code: boolean
+          update_description: boolean
+          update_name: boolean
+        }
+        Returns: Json
       }
       update_order_component_fields: {
         Args: {
@@ -3294,6 +3472,32 @@ export type Database = {
           target_id: string
           target_type: string
         }
+        Returns: Json
+      }
+      update_order_internal_remark: {
+        Args: {
+          target_enterprise_id: string
+          target_internal_remark: string
+          target_order_id: string
+        }
+        Returns: {
+          id: string
+        }[]
+      }
+      update_task_with_notification: {
+        Args: {
+          target_enterprise_id: string
+          target_task_id: string
+          task_fields: Json
+        }
+        Returns: Json
+      }
+      wages_read_employee_base_salaries: {
+        Args: { target_enterprise_id: string }
+        Returns: Json
+      }
+      wages_read_order_task_amounts: {
+        Args: { target_enterprise_id: string; target_order_id: string }
         Returns: Json
       }
     }

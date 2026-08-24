@@ -22,8 +22,8 @@ export async function GET(request: Request) {
     const supabase = await createClient();
     const { data, error } = await supabase.rpc('finance_list_wages', {
       target_enterprise_id: context.enterpriseId,
-      target_status: filters.status && filters.status !== 'all' ? filters.status : null,
-      target_worker_id: filters.worker_id ?? null,
+      ...(filters.status && filters.status !== 'all' ? { target_status: filters.status } : {}),
+      ...(filters.worker_id === undefined ? {} : { target_worker_id: filters.worker_id }),
     });
     if (error) throw error;
     const rows = data ?? [];

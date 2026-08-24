@@ -76,7 +76,7 @@ export async function POST(request: NextRequest) {
       target_from_enterprise_id: context.enterpriseId,
       target_order_id: input.order_id,
       target_to_enterprise_id: input.to_tenant_id,
-      target_message: input.message || null,
+      target_message: input.message || undefined,
       target_proposed_changes: input.proposed_changes ?? null,
     });
     if (error) {

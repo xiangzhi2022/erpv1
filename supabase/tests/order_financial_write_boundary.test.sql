@@ -19,9 +19,9 @@ select ok(
 
 select ok(
   has_column_privilege('authenticated', 'public.orders', 'customer_name', 'UPDATE')
-  and has_column_privilege('authenticated', 'public.order_products', 'product_name', 'UPDATE')
-  and has_column_privilege('authenticated', 'public.order_items', 'product_name', 'UPDATE'),
-  'authenticated callers retain non-sensitive order detail updates'
+  and not has_column_privilege('authenticated', 'public.order_products', 'product_name', 'UPDATE')
+  and not has_column_privilege('authenticated', 'public.order_items', 'product_name', 'UPDATE'),
+  'authenticated callers retain basic order updates while component writes remain RPC-only'
 );
 
 select ok(
@@ -380,6 +380,7 @@ select throws_ok(
   'order writers cannot skip the status transition graph'
 );
 
+reset role;
 select is(
   (
     select count(*)
@@ -391,6 +392,7 @@ select is(
   'rejected transitions do not create status logs'
 );
 
+set local role authenticated;
 select throws_ok(
   $$
     select *
@@ -409,7 +411,6 @@ select throws_ok(
 
 reset role;
 select set_config('request.jwt.claim.sub', '61000000-0000-4000-8000-000000000011', true);
-set local role authenticated;
 
 select results_eq(
   $$
@@ -422,6 +423,7 @@ select results_eq(
   'status RPC records its transition atomically'
 );
 
+set local role authenticated;
 select throws_ok(
   $$
     select *

@@ -123,8 +123,6 @@ describe('finance and wage API enterprise boundary', () => {
       target_order_id: '11111111-1111-4111-8111-111111111112',
       target_total_amount: 1250,
       target_cost_amount: 500,
-      target_profit_amount: null,
-      target_deposit_amount: null,
     });
   });
 
@@ -173,7 +171,6 @@ describe('finance and wage API enterprise boundary', () => {
     expect(mocks.rpc).toHaveBeenCalledWith('finance_list_wages', {
       target_enterprise_id: ENTERPRISE_ID,
       target_status: 'approved',
-      target_worker_id: null,
     });
   });
 
@@ -282,8 +279,6 @@ describe('finance and wage API enterprise boundary', () => {
       target_expected_status: 'paid',
       target_status: 'paid',
       target_wage_amount: 999,
-      target_quantity: null,
-      target_unit_price: null,
     });
   });
 

@@ -156,17 +156,21 @@ select throws_ok(
   $$select public.save_employee_with_relations('51000000-0000-4000-8000-000000000001','51000000-0000-4000-8000-000000000502','51000000-0000-4000-8000-000000000016','{}'::jsonb,array[]::uuid[],null,array['51000000-0000-4000-8000-000000000202']::uuid[])$$,
   'P0001','owner_protected','employee role synchronization cannot downgrade an owner as a non-owner'
 );
+reset role;
 insert into public.employee_roles(enterprise_id,employee_id,role_id) values
   ('51000000-0000-4000-8000-000000000001','51000000-0000-4000-8000-000000000501','51000000-0000-4000-8000-000000000204');
+set local role authenticated;
 select lives_ok(
   $$select public.update_enterprise_member('51000000-0000-4000-8000-000000000001','51000000-0000-4000-8000-000000000012',null,'active','51000000-0000-4000-8000-000000000202')$$,
   'membership role replacement also synchronizes the linked employee role'
 );
+reset role;
 select ok(
   (select count(*) = 1 from public.employee_roles where employee_id = '51000000-0000-4000-8000-000000000501')
   and exists (select 1 from public.employee_roles where employee_id = '51000000-0000-4000-8000-000000000501' and role_id = '51000000-0000-4000-8000-000000000202'),
   'linked employee roles cannot retain stale access metadata after a settings role change'
 );
+set local role authenticated;
 select throws_ok(
   $$select public.save_employee_with_relations('51000000-0000-4000-8000-000000000001',null,null,'{"employee_no":"E-UNLINKED-POWER","name":"Unlinked power"}'::jsonb,array[]::uuid[],null,array['51000000-0000-4000-8000-000000000204']::uuid[])$$,
   'P0001','role_not_assignable','employee role rows cannot bypass the actor permission subset when no login user is linked'
@@ -192,6 +196,7 @@ select throws_ok(
   $$select public.save_employee_with_relations('51000000-0000-4000-8000-000000000001','51000000-0000-4000-8000-000000000501','51000000-0000-4000-8000-000000000014','{"name":"Must Roll Back"}'::jsonb,array[]::uuid[],'51000000-0000-4000-8000-000000000401',array['51000000-0000-4000-8000-000000000202']::uuid[])$$,
   '22023', 'primary_position_not_assigned', 'invalid relation input aborts the entire employee transaction'
 );
+reset role;
 select results_eq(
   $$select name from public.employees where id = '51000000-0000-4000-8000-000000000501'$$,
   $$values ('Original Employee'::text)$$,
@@ -199,10 +204,12 @@ select results_eq(
 );
 insert into public.role_bindings(id,tenant_id,role_id,membership_id,scope_kind) values
   ('51000000-0000-4000-8000-000000000703','51000000-0000-4000-8000-000000000001','51000000-0000-4000-8000-000000000204','51000000-0000-4000-8000-000000000103','self');
+set local role authenticated;
 select lives_ok(
   $$select public.save_employee_with_relations('51000000-0000-4000-8000-000000000001','51000000-0000-4000-8000-000000000501','51000000-0000-4000-8000-000000000014','{}'::jsonb,array['51000000-0000-4000-8000-000000000401']::uuid[],'51000000-0000-4000-8000-000000000401',array['51000000-0000-4000-8000-000000000202']::uuid[])$$,
   'employee user and all relations change atomically'
 );
+reset role;
 select is(
   (select count(*) from public.role_bindings where tenant_id = '51000000-0000-4000-8000-000000000001' and membership_id = '51000000-0000-4000-8000-000000000102'),
   0::bigint,
@@ -217,16 +224,17 @@ select ok(
 );
 insert into public.role_bindings(tenant_id,role_id,membership_id,scope_kind) values
   ('51000000-0000-4000-8000-000000000001','51000000-0000-4000-8000-000000000202','51000000-0000-4000-8000-000000000103','self');
+set local role authenticated;
 select lives_ok(
   $$select public.delete_employee_with_access('51000000-0000-4000-8000-000000000001','51000000-0000-4000-8000-000000000501',false)$$,
   'soft-deactivating an employee uses the atomic access revocation path'
 );
+reset role;
 select ok(
   (select status = 'inactive' from public.employees where id = '51000000-0000-4000-8000-000000000501')
   and not exists (select 1 from public.role_bindings where membership_id = '51000000-0000-4000-8000-000000000103'),
   'deactivation removes enterprise and scoped bindings before returning'
 );
-reset role;
 select set_config('request.jwt.claim.sub', '51000000-0000-4000-8000-000000000016', true);
 set local role authenticated;
 select throws_ok(
@@ -294,6 +302,7 @@ select lives_ok(
   $$select public.handle_enterprise_join_request('51000000-0000-4000-8000-000000000302','approve',null)$$,
   'reapproving a suspended member succeeds through the atomic worker path'
 );
+reset role;
 select ok(
   exists (select 1 from public.enterprise_memberships where id = '51000000-0000-4000-8000-000000000106' and status = 'active')
   and (select count(*) = 1 from public.role_bindings where membership_id = '51000000-0000-4000-8000-000000000106' and role_id = '51000000-0000-4000-8000-000000000202' and scope_kind = 'enterprise')
@@ -303,7 +312,6 @@ select ok(
   'reapproval removes stale site/workshop bindings and replaces employee roles with worker'
 );
 
-reset role;
 select ok(
   not exists (select 1 from public.enterprise_memberships where tenant_id = '51000000-0000-4000-8000-000000000001' and user_id = '51000000-0000-4000-8000-000000000013')
   and not exists (select 1 from public.employees where enterprise_id = '51000000-0000-4000-8000-000000000001' and user_id = '51000000-0000-4000-8000-000000000013')
@@ -360,6 +368,9 @@ select is(public.consume_recovery_proof(repeat('a', 64)), true, 'the owning acto
 select is(public.consume_recovery_proof(repeat('a', 64)), false, 'the nonce cannot be replayed');
 
 reset role;
+-- The recovery proof table is owned by the dedicated NOLOGIN function role.
+-- Inherit that role only inside this transaction to seed an expired fixture.
+alter group v2_function_owner add user postgres;
 insert into app_private.auth_recovery_proofs(user_id, nonce_hash, expires_at)
 values ('51000000-0000-4000-8000-000000000012', repeat('b', 64), now() - interval '1 second');
 select set_config('request.jwt.claim.sub', '51000000-0000-4000-8000-000000000012', true);

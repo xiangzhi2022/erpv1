@@ -111,10 +111,12 @@ select throws_ok(
 select results_eq(
   $$
     select key
-    from public.finance_update_order_pricing(
-      '76000000-0000-4000-8000-000000000001',
-      '76000000-0000-4000-8000-000000000301',
-      12500, null, null, null
+    from (
+      select * from public.finance_update_order_pricing(
+        '76000000-0000-4000-8000-000000000001',
+        '76000000-0000-4000-8000-000000000301',
+        12500, null, null, null
+      )
     ) as acknowledgement
     cross join lateral jsonb_object_keys(to_jsonb(acknowledgement)) as key
   $$,
@@ -125,10 +127,12 @@ select results_eq(
 select results_eq(
   $$
     select key
-    from public.finance_update_order_product(
-      '76000000-0000-4000-8000-000000000001',
-      '76000000-0000-4000-8000-000000000501',
-      12500, null, null, null, false
+    from (
+      select * from public.finance_update_order_product(
+        '76000000-0000-4000-8000-000000000001',
+        '76000000-0000-4000-8000-000000000501',
+        12500, null, null, null, false
+      )
     ) as acknowledgement
     cross join lateral jsonb_object_keys(to_jsonb(acknowledgement)) as key
   $$,
@@ -139,10 +143,12 @@ select results_eq(
 select results_eq(
   $$
     select key
-    from public.finance_update_order_item_pricing(
-      '76000000-0000-4000-8000-000000000001',
-      '76000000-0000-4000-8000-000000000601',
-      12500, null
+    from (
+      select * from public.finance_update_order_item_pricing(
+        '76000000-0000-4000-8000-000000000001',
+        '76000000-0000-4000-8000-000000000601',
+        12500, null
+      )
     ) as acknowledgement
     cross join lateral jsonb_object_keys(to_jsonb(acknowledgement)) as key
   $$,
@@ -153,10 +159,12 @@ select results_eq(
 select results_eq(
   $$
     select key
-    from public.update_order_internal_remark(
-      '76000000-0000-4000-8000-000000000001',
-      '76000000-0000-4000-8000-000000000301',
-      'updated mutation-only remark'
+    from (
+      select * from public.update_order_internal_remark(
+        '76000000-0000-4000-8000-000000000001',
+        '76000000-0000-4000-8000-000000000301',
+        'updated mutation-only remark'
+      )
     ) as acknowledgement
     cross join lateral jsonb_object_keys(to_jsonb(acknowledgement)) as key
   $$,
